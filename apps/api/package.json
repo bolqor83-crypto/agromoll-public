@@ -12,7 +12,8 @@
     "test": "jest",
     "test:e2e": "jest --config test/jest-e2e.json",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "prisma db seed"
   },
   "dependencies": {
     "@agromoll/types": "workspace:*",
@@ -66,5 +67,8 @@
     "roots": [
       "<rootDir>/src"
     ]
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }
