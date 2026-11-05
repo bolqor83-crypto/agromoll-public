@@ -1,8 +1,8 @@
 {
   "name": "@agromoll/api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "API АгроМолл (NestJS). Этап «фундамент»: healthcheck, заглушка auth, Prisma.",
+  "description": "API АгроМолл (NestJS). v0.2.0: модель бронирования + доменный сервис броней.",
   "scripts": {
     "build": "prisma generate && nest build",
     "dev": "nest start --watch",
@@ -10,15 +10,19 @@
     "lint": "eslint src test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
+    "test:e2e": "jest --config test/jest-e2e.json",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "prisma db seed"
   },
   "dependencies": {
     "@agromoll/types": "workspace:*",
+    "@agromoll/validation": "workspace:^",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^5.0.0",
     "@prisma/client": "^6.2.1",
     "nestjs-pino": "^4.2.0",
     "pino": "^9.6.0",
@@ -51,7 +55,7 @@
       "ts"
     ],
     "rootDir": ".",
-    "testRegex": ".*\\.(e2e-)?(spec|test)\\.ts$",
+    "testRegex": ".*\\.(spec|test)\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
@@ -61,8 +65,10 @@
     "coverageDirectory": "./coverage",
     "testEnvironment": "node",
     "roots": [
-      "<rootDir>/src",
-      "<rootDir>/test"
+      "<rootDir>/src"
     ]
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }

@@ -1,6 +1,10 @@
-// АгроМолл — базовая схема.
-// Этап «фундамент»: только User с ролью. Бизнес-модели (брони, заказы, долги,
-// геозоны, смены) появятся на следующих этапах — см. docs/adr/ADR-001.
+// АгроМолл — схема v0.2.0 «Бронирование».
+//
+// Домен: продавец выставляет листинг (Listing), покупатель бронирует
+// количество (Booking), продавец может подтвердить или предложить
+// корректировку. Каждое изменение брони фиксируется в append-only журнале
+// BookingEvent — из него в будущем считается репутация.
+// Обоснование решений — docs/adr/ADR-004.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,11 +23,127 @@ enum UserRole {
   driver
 }
 
+/// Категория товара. Совпадает с LISTING_CATEGORIES из @agromoll/types.
+enum ListingCategory {
+  vegetables
+  fruits
+  grocery
+  snacks
+  other
+}
+
+/// Единица измерения товара. Совпадает с LISTING_UNITS из @agromoll/types.
+enum ListingUnit {
+  kg
+  box
+  piece
+}
+
+/// Жизненный цикл листинга. Совпадает с LISTING_STATUSES из @agromoll/types.
+enum ListingStatus {
+  active
+  paused
+  sold_out
+  archived
+}
+
+/// Статус брони. Совпадает с BOOKING_STATUSES из @agromoll/types.
+/// Допустимые переходы см. в bookings.service.ts (машина состояний).
+enum BookingStatus {
+  requested
+  counter_offered
+  confirmed
+  cancelled
+  expired
+}
+
+/// Действие из журнала брони. Совпадает с BOOKING_ACTIONS из @agromoll/types.
+enum BookingAction {
+  created
+  counter_offered
+  accepted_counter
+  confirmed
+  cancelled
+  expired
+}
+
 model User {
-  id        String   @id @default(uuid())
-  role      UserRole @default(buyer)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(uuid())
+  role            UserRole @default(buyer)
+  displayName     String
+  phone           String?
+  reputationScore Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  listings      Listing[]
+  bookings      Booking[] // брони, созданные пользователем как покупатель
+  bookingEvents BookingEvent[] // действия пользователя в журнале броней
 
   @@map("users")
+}
+
+model Listing {
+  id                String          @id @default(uuid())
+  sellerId          String
+  seller            User            @relation(fields: [sellerId], references: [id])
+  title             String
+  category          ListingCategory
+  unit              ListingUnit
+  pricePerUnit      Decimal         @db.Decimal(10, 2)
+  quantityAvailable Int
+  quantityReserved  Int             @default(0)
+  lineNumber        Int?
+  isPerishable      Boolean         @default(false)
+  status            ListingStatus   @default(active)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  bookings Booking[]
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([category])
+  @@map("listings")
+}
+
+model Booking {
+  id                String        @id @default(uuid())
+  listingId         String
+  listing           Listing       @relation(fields: [listingId], references: [id])
+  buyerId           String
+  buyer             User          @relation(fields: [buyerId], references: [id])
+  requestedQuantity Int
+  confirmedQuantity Int?
+  status            BookingStatus @default(requested)
+  /// TTL запроса: по истечении бронь гасится кроном, резерв возвращается листингу.
+  expiresAt         DateTime
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  events BookingEvent[]
+
+  @@index([buyerId])
+  @@index([listingId])
+  @@index([status])
+  @@map("bookings")
+}
+
+/// Append-only журнал изменений брони. Строки только добавляются,
+/// никакие поля не обновляются и не удаляются — из журнала считается репутация.
+model BookingEvent {
+  id        String        @id @default(uuid())
+  bookingId String
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  /// Кто совершил действие. NULL — системные действия (истечение TTL по крону).
+  actorId   String?
+  actor     User?         @relation(fields: [actorId], references: [id])
+  action    BookingAction
+  /// Дополнительно: содержимое корректировки, причина отмены и т.п.
+  payload   Json?
+  createdAt DateTime      @default(now())
+
+  @@index([bookingId])
+  @@index([actorId])
+  @@map("booking_events")
 }
