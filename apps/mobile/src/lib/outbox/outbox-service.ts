@@ -93,7 +93,13 @@ export class OutboxService {
     }
     this.processing = true;
     try {
-      const summary: ProcessSummary = { completed: 0, retrying: 0, failed: 0, conflicted: 0, skipped: 0 };
+      const summary: ProcessSummary = {
+        completed: 0,
+        retrying: 0,
+        failed: 0,
+        conflicted: 0,
+        skipped: 0,
+      };
       for (;;) {
         const batch = await this.storage.takeDue(BATCH_SIZE);
         if (batch.length === 0) {
@@ -126,7 +132,13 @@ export class OutboxService {
 
     switch (result.kind) {
       case 'success': {
-        const updated: OutboxRecord = { ...record, state: 'completed', result: result.data, lastError: null, nextAttemptAt: null };
+        const updated: OutboxRecord = {
+          ...record,
+          state: 'completed',
+          result: result.data,
+          lastError: null,
+          nextAttemptAt: null,
+        };
         await this.storage.update(record.clientUuid, {
           state: 'completed',
           result: result.data,
@@ -146,35 +158,42 @@ export class OutboxService {
             result.kind === 'idempotency-in-progress'
               ? 'Сервер долго держит операцию в обработке'
               : result.kind === 'network-error'
-                ? (result.message || 'Сеть недоступна')
-                : (result.message || 'Сервер недоступен');
+                ? result.message || 'Сеть недоступна'
+                : result.message || 'Сервер недоступен';
           await this.storage.update(record.clientUuid, {
             state: 'permanently_failed',
             retries,
             lastError: message,
             nextAttemptAt: null,
           });
-          this.emit({ type: 'permanently-failed', record: { ...record, state: 'permanently_failed', retries, lastError: message } });
+          this.emit({
+            type: 'permanently-failed',
+            record: { ...record, state: 'permanently_failed', retries, lastError: message },
+          });
           return 'failed';
         }
         const delay =
           result.kind === 'idempotency-in-progress'
             ? IN_PROGRESS_RETRY_MS
-            : (BACKOFF_SCHEDULE_MS[Math.min(retries - 1, BACKOFF_SCHEDULE_MS.length - 1)] ?? 16_000);
+            : (BACKOFF_SCHEDULE_MS[Math.min(retries - 1, BACKOFF_SCHEDULE_MS.length - 1)] ??
+              16_000);
         const nextAttemptAt = new Date(this.now().getTime() + delay).toISOString();
         const message =
           result.kind === 'idempotency-in-progress'
             ? 'Операция в обработке на сервере'
             : result.kind === 'network-error'
-              ? (result.message || 'Сеть недоступна')
-              : (result.message || 'Сервер недоступен');
+              ? result.message || 'Сеть недоступна'
+              : result.message || 'Сервер недоступен';
         await this.storage.update(record.clientUuid, {
           state: 'retrying',
           retries,
           lastError: message,
           nextAttemptAt,
         });
-        this.emit({ type: 'retrying', record: { ...record, state: 'retrying', retries, lastError: message, nextAttemptAt } });
+        this.emit({
+          type: 'retrying',
+          record: { ...record, state: 'retrying', retries, lastError: message, nextAttemptAt },
+        });
         return 'retrying';
       }
 
@@ -182,14 +201,18 @@ export class OutboxService {
         // Бизнес-конфликт (409 состояния брони и т.п.) — решает человек.
         // Прочие 4xx — безнадёжны.
         const isConflict = result.status === 409;
-        const message = extractMessage(result.data) ?? `Сервер отклонил операцию (${result.status})`;
+        const message =
+          extractMessage(result.data) ?? `Сервер отклонил операцию (${result.status})`;
         if (isConflict) {
           await this.storage.update(record.clientUuid, {
             state: 'conflicted',
             lastError: message,
             nextAttemptAt: null,
           });
-          this.emit({ type: 'conflicted', record: { ...record, state: 'conflicted', lastError: message } });
+          this.emit({
+            type: 'conflicted',
+            record: { ...record, state: 'conflicted', lastError: message },
+          });
           return 'conflicted';
         }
         await this.storage.update(record.clientUuid, {
@@ -197,7 +220,10 @@ export class OutboxService {
           lastError: message,
           nextAttemptAt: null,
         });
-        this.emit({ type: 'permanently-failed', record: { ...record, state: 'permanently_failed', lastError: message } });
+        this.emit({
+          type: 'permanently-failed',
+          record: { ...record, state: 'permanently_failed', lastError: message },
+        });
         return 'failed';
       }
 

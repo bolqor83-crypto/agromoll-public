@@ -41,7 +41,12 @@ export async function createBookingMutation(input: {
 
 /** Отменить бронь (любая сторона). */
 export async function cancelBookingMutation(bookingId: string, reason?: string): Promise<string> {
-  return enqueueWithOverride('cancel_booking', { bookingId, ...(reason ? { reason } : {}) }, bookingId, 'cancelled');
+  return enqueueWithOverride(
+    'cancel_booking',
+    { bookingId, ...(reason ? { reason } : {}) },
+    bookingId,
+    'cancelled',
+  );
 }
 
 /** Подтвердить бронь (seller). */
@@ -59,11 +64,17 @@ export async function counterOfferMutation(
   bookingId: string,
   body: { offeredQuantity?: number; pickupTime?: string; note?: string },
 ): Promise<string> {
-  return enqueueWithOverride('counter_offer_booking', { bookingId, ...body }, bookingId, 'counter_offered');
+  return enqueueWithOverride(
+    'counter_offer_booking',
+    { bookingId, ...body },
+    bookingId,
+    'counter_offered',
+  );
 }
 
 async function enqueueWithOverride(
-  operationType: 'cancel_booking' | 'confirm_booking' | 'accept_counter_booking' | 'counter_offer_booking',
+  operationType:
+    'cancel_booking' | 'confirm_booking' | 'accept_counter_booking' | 'counter_offer_booking',
   payload: Record<string, unknown>,
   bookingId: string,
   optimisticStatus: BookingStatus,

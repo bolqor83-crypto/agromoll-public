@@ -4,7 +4,7 @@
  */
 import { AxiosError } from 'axios';
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
-import { ApiError, api, http } from './api';
+import { ApiError, api, getLastSignOutReason, http } from './api';
 import { tokenStore } from './token-store';
 
 // secure store с настоящим хранением в Map — интерцептор читает токены
@@ -31,7 +31,11 @@ const REFRESH = 'refresh-token-1';
 let adapterMock: jest.Mock;
 
 /** Ответ axios: 2xx — resolve, иначе — reject с AxiosError (как делает реальный адаптер). */
-function respond<T>(status: number, data: T, config: InternalAxiosRequestConfig): Promise<AxiosResponse<T>> {
+function respond<T>(
+  status: number,
+  data: T,
+  config: InternalAxiosRequestConfig,
+): Promise<AxiosResponse<T>> {
   const response: AxiosResponse<T> = {
     status,
     statusText: String(status),
@@ -43,28 +47,34 @@ function respond<T>(status: number, data: T, config: InternalAxiosRequestConfig)
     return Promise.resolve(response);
   }
   return Promise.reject(
-    new AxiosError(`Request failed with status code ${status}`, 'ERR_BAD_REQUEST', config, null, response),
+    new AxiosError(
+      `Request failed with status code ${status}`,
+      'ERR_BAD_REQUEST',
+      config,
+      null,
+      response,
+    ),
   );
 }
 
 /** Полный валидный ListingDto — мок ответа, проходящий zod-валидацию. */
 const VALID_LISTING = {
-    id: 'l-1',
-    sellerId: 'u-1',
-    sellerName: 'ФХ «Донская долина»',
-    title: 'Помидоры розовые',
-    category: 'vegetables',
-    unit: 'kg',
-    pricePerUnit: '85.50',
-    quantityAvailable: 100,
-    quantityReserved: 0,
-    quantityAvailableForBooking: 100,
-    lineNumber: 12,
-    isPerishable: true,
-    status: 'active',
-    createdAt: '2026-11-05T06:00:00.000Z',
-    updatedAt: '2026-11-05T06:00:00.000Z',
-  };
+  id: 'l-1',
+  sellerId: 'u-1',
+  sellerName: 'ФХ «Донская долина»',
+  title: 'Помидоры розовые',
+  category: 'vegetables',
+  unit: 'kg',
+  pricePerUnit: '85.50',
+  quantityAvailable: 100,
+  quantityReserved: 0,
+  quantityAvailableForBooking: 100,
+  lineNumber: 12,
+  isPerishable: true,
+  status: 'active',
+  createdAt: '2026-11-05T06:00:00.000Z',
+  updatedAt: '2026-11-05T06:00:00.000Z',
+};
 
 describe('api-клиент (axios + JWT)', () => {
   beforeAll(() => {
@@ -148,8 +158,9 @@ describe('api-клиент (axios + JWT)', () => {
     expect((error as ApiError).code).toBe('NETWORK');
   });
 
-  it('401 → refresh → повтор запроса с новым токеном', async () => {
-    // первый вызов — 401; /auth/refresh — новый токен; повтор — 200
+  it('401 → refresh (ротация) → повтор запроса с новой парой токенов', async () => {
+    // первый вызов — 401; /auth/refresh — новая ПАРА; повтор — 200
+    const REFRESH_2 = 'refresh-token-2';
     adapterMock.mockImplementation(async (config: InternalAxiosRequestConfig) => {
       if (config.url === '/bookings') {
         const attempt = adapterMock.mock.calls.filter(
@@ -161,7 +172,7 @@ describe('api-клиент (axios + JWT)', () => {
         return respond(200, [], config);
       }
       if (config.url === '/auth/refresh') {
-        return respond(200, { accessToken: ACCESS_2 }, config);
+        return respond(200, { accessToken: ACCESS_2, refreshToken: REFRESH_2 }, config);
       }
       throw new Error(`unexpected url: ${config.url}`);
     });
@@ -169,8 +180,9 @@ describe('api-клиент (axios + JWT)', () => {
     const bookings = await api.bookings();
 
     expect(bookings).toEqual([]);
-    // refresh-вызов через отдельный axios-инстанс (не http) — проверяем сохранение токена
+    // v0.3.1: ротация — сохраняем ОБА токена
     await expect(tokenStore.getAccessToken()).resolves.toBe(ACCESS_2);
+    await expect(tokenStore.getRefreshToken()).resolves.toBe(REFRESH_2);
     // повторный /bookings-запрос должен нести новый токен
     const retryConfig = adapterMock.mock.calls
       .map((c) => c[0] as InternalAxiosRequestConfig)
@@ -194,6 +206,57 @@ describe('api-клиент (axios + JWT)', () => {
     // токены стёрты: сессия сгорела (auth store выйдет по событию sign-out)
     await expect(tokenStore.getAccessToken()).resolves.toBeNull();
     await expect(tokenStore.getRefreshToken()).resolves.toBeNull();
+    expect(getLastSignOutReason()).toBe('expired');
+  });
+
+  it('v0.3.1: 401 TOKEN_REUSE_DETECTED → выход с причиной reuse (мягкий сценарий кражи)', async () => {
+    adapterMock.mockImplementation(async (config: InternalAxiosRequestConfig) => {
+      if (config.url === '/bookings') {
+        return respond(401, { message: 'токен истёк' }, config);
+      }
+      if (config.url === '/auth/refresh') {
+        // сервер обнаружил повторное использование: семья отозвана
+        return respond(
+          401,
+          {
+            statusCode: 401,
+            message: 'Сессия завершена. Войдите снова',
+            code: 'TOKEN_REUSE_DETECTED',
+          },
+          config,
+        );
+      }
+      throw new Error(`unexpected url: ${config.url}`);
+    });
+
+    await expect(api.bookings()).rejects.toBeInstanceOf(ApiError);
+
+    await expect(tokenStore.getAccessToken()).resolves.toBeNull();
+    await expect(tokenStore.getRefreshToken()).resolves.toBeNull();
+    // причина — reuse: auth-store покажет «Сессия завершена. Войдите снова»
+    expect(getLastSignOutReason()).toBe('reuse');
+  });
+
+  it('v0.3.1: logout уходит на сервер с парой токенов и не бросает ошибок', async () => {
+    adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
+      respond(204, '', config),
+    );
+
+    await expect(api.logout(REFRESH, ACCESS)).resolves.toBeUndefined();
+
+    const config = adapterMock.mock.calls[0][0] as InternalAxiosRequestConfig;
+    expect(config.url).toBe('/auth/logout');
+    expect(config.method).toBe('post');
+    expect(JSON.parse(config.data as string)).toEqual({
+      refreshToken: REFRESH,
+      accessToken: ACCESS,
+    });
+  });
+
+  it('v0.3.1: сбой сети при logout не блокирует локальный выход', async () => {
+    adapterMock.mockRejectedValueOnce(new AxiosError('Network Error', 'ERR_NETWORK'));
+
+    await expect(api.logout(REFRESH)).resolves.toBeUndefined();
   });
 
   it('невалидный ответ API → ApiError INVALID_RESPONSE (zod-валидация)', async () => {

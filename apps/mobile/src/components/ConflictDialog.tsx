@@ -38,7 +38,7 @@ export function ConflictDialog() {
       <View
         style={{
           flex: 1,
-          backgroundColor: 'rgba(15, 23, 20, 0.55)',
+          backgroundColor: colors.scrim,
           alignItems: 'center',
           justifyContent: 'center',
           padding: spacing.lg,

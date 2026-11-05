@@ -7,12 +7,13 @@ import {
   Icon,
   PullToRefreshScrollView,
   Screen,
+  shadow,
   SkeletonCard,
   spacing,
+  tap,
   useTheme,
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
-import * as Haptics from 'expo-haptics';
 import { ScreenHeader } from '@/components';
 import { ListingCard } from '@/components/ListingCard';
 import { CreateListingModal } from '@/components/CreateListingModal';
@@ -117,7 +118,7 @@ export default function ShowcaseScreen() {
         accessibilityRole="button"
         accessibilityLabel="Выставить лот"
         onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+          tap();
           setModalOpen(true);
         }}
         style={{
@@ -130,11 +131,12 @@ export default function ShowcaseScreen() {
           backgroundColor: colors.primary,
           alignItems: 'center',
           justifyContent: 'center',
-          shadowColor: mode === 'dark' ? '#000000' : '#1F2A24',
+          // Тень — из токенов (shadow по теме), не литералом (B8, ADR-009)
+          shadowColor: shadow[mode].shadowColor,
           shadowOpacity: 0.25,
           shadowRadius: 10,
           shadowOffset: { width: 0, height: 4 },
-          elevation: 4,
+          elevation: shadow[mode].elevation + 2,
         }}
       >
         <Icon name="add-outline" size={28} color="onPrimary" />

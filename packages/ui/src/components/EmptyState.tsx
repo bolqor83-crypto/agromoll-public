@@ -4,13 +4,27 @@
  * Философия (ADR-002 / ADR-005): пустой экран — это не ошибка и не повод
  * для тревоги. Мягкая геометрическая иллюстрация из форм дизайн-системы
  * (никаких стоковых картинок), 1–2 строки текста и опциональное действие.
+ *
+ * v0.3.1: иллюстрация «появляется» — scale 0.9 → 1 + проявление,
+ * 400 мс spring (ADR-009). Пустое состояние — часть живого интерфейса,
+ * а не простыня текста.
  */
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useTheme } from '../theme';
 import { radius, spacing } from '../tokens';
 import { Button } from './Button';
 import { Text } from './Text';
+
+/** Пружина появления иллюстрации (400 мс, мягкая). */
+const ILLUSTRATION_SPRING = { damping: 15, mass: 0.8, stiffness: 200 };
 
 /** Иллюстрации — простые геометрические композиции в токенах темы. */
 export type EmptyStateIllustration = 'basket' | 'box' | 'radar' | 'calendar';
@@ -33,6 +47,20 @@ export function EmptyState({
 }: EmptyStateProps) {
   const { colors } = useTheme();
 
+  // Появление иллюстрации: масштаб 0.9 → 1 пружиной + fade 400 мс.
+  const scale = useSharedValue(0.9);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    scale.value = withSpring(1, ILLUSTRATION_SPRING);
+    opacity.value = withTiming(1, { duration: 400 });
+  }, [scale, opacity]);
+
+  const illustrationStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
+
   return (
     <View
       accessibilityLabel={title}
@@ -43,7 +71,9 @@ export function EmptyState({
         paddingHorizontal: spacing.xl,
       }}
     >
-      <View style={{ marginBottom: spacing.sm }}>{renderIllustration(illustration, colors)}</View>
+      <Animated.View style={[{ marginBottom: spacing.sm }, illustrationStyle]}>
+        {renderIllustration(illustration, colors)}
+      </Animated.View>
       <Text variant="title" align="center">
         {title}
       </Text>

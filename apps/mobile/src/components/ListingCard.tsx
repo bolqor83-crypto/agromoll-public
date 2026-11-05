@@ -1,9 +1,11 @@
+import { useRef } from 'react';
 import { View } from 'react-native';
 import type { ReactNode } from 'react';
-import { Badge, Card, Icon, spacing, Text, useTheme } from '@agromoll/ui';
+import { Badge, Card, Icon, spacing, tap, Text, useTheme } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { LISTING_CATEGORY_LABELS } from '@agromoll/types';
 import { formatAvailable, formatPrice } from '@/lib/format';
+import { recordTransitionOrigin } from '@/lib/transition';
 
 /** Иконка-заглушка по категории товара (фото появятся на следующем этапе). */
 const CATEGORY_ICONS: Record<
@@ -30,6 +32,8 @@ export interface ListingCardProps {
 /** Карточка товара в ленте и витрине: фото → название → цена → бейджи. */
 export function ListingCard({ listing, onPress, sellerView = false, footer }: ListingCardProps) {
   const { colors } = useTheme();
+  // Опорный элемент морфа: квадрат «фото» (v0.3.1, ADR-009).
+  const anchorRef = useRef<View>(null);
 
   const badges: ReactNode[] = [];
   if (listing.isPerishable) {
@@ -56,10 +60,25 @@ export function ListingCard({ listing, onPress, sellerView = false, footer }: Li
     );
   }
 
+  const handlePress = (): void => {
+    if (!onPress) {
+      return;
+    }
+    tap();
+    // Замерим «фото» — детальный экран вырастет из этого фрейма.
+    anchorRef.current?.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) {
+        recordTransitionOrigin(listing.id, { x, y, width, height });
+      }
+      onPress();
+    });
+  };
+
   return (
-    <Card onPress={onPress} style={{ gap: spacing.md }}>
+    <Card onPress={handlePress} style={{ gap: spacing.md }}>
       <View style={{ flexDirection: 'row', gap: spacing.md }}>
         <View
+          ref={anchorRef}
           style={{
             width: 56,
             height: 56,

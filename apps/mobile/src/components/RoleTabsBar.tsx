@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 import { TabBar, spacing } from '@agromoll/ui';
 import type { TabBarItem } from '@agromoll/ui';
 
@@ -11,7 +10,8 @@ import type { TabBarItem } from '@agromoll/ui';
  *
  * expo-router отдаёт свои пропсы в tabBar, а мы рисуем панель
  * с pill-индикатором (ADR-005). Подписи и иконки вкладок каждой роли
- * задаются в routeNameToLabel/routeNameToIcon.
+ * задаются в routeNameToLabel/routeNameToIcon. v0.3.1: тактильный отклик
+ * и анимация иконок живут внутри TabBar (ADR-009) — здесь только навигация.
  */
 export function RoleTabsBar({ state, navigation }: BottomTabBarProps): ReactNode {
   const insets = useSafeAreaInsets();
@@ -28,8 +28,6 @@ export function RoleTabsBar({ state, navigation }: BottomTabBarProps): ReactNode
       if (!route || route.key === state.routes[state.index]?.key) {
         return; // повторное нажатие активной вкладки — ничего не делаем
       }
-      // Тактильный отклик переключения вкладки (ADR-002).
-      void Haptics.selectionAsync().catch(() => undefined);
       navigation.navigate(route.name, route.params);
     },
     [state, navigation],

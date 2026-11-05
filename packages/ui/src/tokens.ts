@@ -41,6 +41,8 @@ export interface ThemeColors {
   border: string;
   /** Текст на primary-заливке (в тёмной теме primary светлее — текст тёмный). */
   onPrimary: string;
+  /** Затемнение под модалками-листами (v0.3.1, ADR-009). */
+  scrim: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export const palette: Record<ThemeMode, ThemeColors> = {
     textMuted: '#8A9189',
     border: '#E7E2D8',
     onPrimary: '#FFFFFF',
+    scrim: 'rgba(15, 20, 17, 0.45)',
   },
   dark: {
     background: '#161917', // тёплый графит, без синевы
@@ -77,6 +80,7 @@ export const palette: Record<ThemeMode, ThemeColors> = {
     textMuted: '#7E847C',
     border: '#333A34',
     onPrimary: '#0E1F16',
+    scrim: 'rgba(0, 0, 0, 0.6)',
   },
 };
 

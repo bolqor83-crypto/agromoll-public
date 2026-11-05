@@ -1,5 +1,5 @@
 /**
- * Клиент API АгроМолл (v0.3.0): axios + JWT-аутентификация.
+ * Клиент API АгроМолл (v0.3.0/v0.3.1): axios + JWT-аутентификация.
  *
  * Вместо X-User-Id (v0.2.0) — Authorization: Bearer. Interceptor:
  *  - каждый запрос получает access-токен из secure store;
@@ -8,8 +8,15 @@
  *  - если refresh не удался — токены стираются, экраны уходят на вход
  *    (событие 'auth:sign-out').
  *
- * Ответы API валидируются zod-схемами (подэтап C) — см. apiValidate.
- * Каждая мутация броней уходит через outbox (подэтап B), здесь — только
+ * v0.3.1 (ротация, ADR-008):
+ *  - /auth/refresh возвращает НОВУЮ пару токенов — сохраняем оба;
+ *  - 401 TOKEN_REUSE_DETECTED (старый refresh предъявлен повторно —
+ *    сервер отозвал семью) — принудительный выход с мягким сообщением
+ *    «Сессия завершена. Войдите снова» (без слова «кража»);
+ *  - POST /auth/logout перед локальной очисткой (best-effort).
+ *
+ * Ответы API валидируются zod-схемами (v0.3.0) — см. apiValidate.
+ * Каждая мутация броней уходит через outbox, здесь — только
  * чтения и auth-вызовы.
  */
 import axios from 'axios';
@@ -27,7 +34,6 @@ import { tokenStore } from './token-store';
 import { logger } from './logger';
 import {
   AuthResponseSchema,
-  BookingResponseSchema,
   BookingsResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
@@ -44,6 +50,21 @@ const REQUEST_TIMEOUT_MS = 8000;
 
 /** Событие «токены сгорели, разлогинь» — слушает auth-store. */
 export const AUTH_SIGN_OUT_EVENT = 'agromoll:auth-sign-out';
+
+/**
+ * Причина принудительного выхода (v0.3.1): 'reuse' — сервер обнаружил
+ * повторное использование refresh-токена (семья отозвана), 'expired' —
+ * refresh просто не сработал. Читается auth-store'ом при обработке
+ * события (в Event нет detail в RN — держим рядом в модуле).
+ */
+export type SignOutReason = 'expired' | 'reuse';
+
+let lastSignOutReason: SignOutReason = 'expired';
+
+/** Причина последнего принудительного выхода (для сообщения на входе). */
+export function getLastSignOutReason(): SignOutReason {
+  return lastSignOutReason;
+}
 
 export type ApiErrorCode =
   | 'NETWORK'
@@ -159,6 +180,19 @@ let refreshInFlight: Promise<string | null> | null = null;
 /** Пометка запроса «не авто-refresh» (сам /auth/refresh). */
 const SKIP_REFRESH_FLAG = 'agromollSkipAuthRefresh';
 
+/** 401 от /auth/refresh с этим кодом = семья отозвана (ротация, ADR-008). */
+const TOKEN_REUSE_CODE = 'TOKEN_REUSE_DETECTED';
+
+/** Тело ошибки содержит код TOKEN_REUSE_DETECTED? */
+function isReuseDetectedError(error: unknown): boolean {
+  const apiError = toApiError(error);
+  return Boolean(
+    apiError.body &&
+    typeof apiError.body === 'object' &&
+    (apiError.body as { code?: unknown }).code === TOKEN_REUSE_CODE,
+  );
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = await tokenStore.getRefreshToken();
   if (!refreshToken) {
@@ -173,20 +207,29 @@ async function refreshAccessToken(): Promise<string | null> {
       // не даём интерцептору уйти в рекурсию на 401 от самого refresh
       [SKIP_REFRESH_FLAG]: true,
     } as AxiosRequestConfig & Record<string, unknown>);
-    await tokenStore.setTokens(response.data.accessToken);
+    // Ротация (v0.3.1): сервер вернул НОВУЮ пару — сохраняем оба токена.
+    await tokenStore.setTokens(response.data.accessToken, response.data.refreshToken);
     return response.data.accessToken;
   } catch (error) {
-    logger.warn('api', 'refresh не удался — нужен повторный вход', {
-      error: toApiError(error).message,
-    });
+    const reuseDetected = isReuseDetectedError(error);
+    logger.warn(
+      'api',
+      reuseDetected
+        ? 'обнаружен повторный refresh — сервер отозвал сессию'
+        : 'refresh не удался — нужен повторный вход',
+      {
+        error: toApiError(error).message,
+      },
+    );
     await tokenStore.clear();
-    // Сообщаем auth-store: сессия сгорела.
-    emitSignOut();
+    // Сообщаем auth-store: сессия сгорела (с причиной — для сообщения).
+    emitSignOut(reuseDetected ? 'reuse' : 'expired');
     return null;
   }
 }
 
-function emitSignOut(): void {
+function emitSignOut(reason: SignOutReason): void {
+  lastSignOutReason = reason;
   // globalThis работает и в RN, и в web, и в jest.
   (globalThis as { dispatchEvent?: (e: Event) => boolean }).dispatchEvent?.(
     new Event(AUTH_SIGN_OUT_EVENT),
@@ -197,8 +240,7 @@ http.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as
-      | (InternalAxiosRequestConfig & { _retried?: boolean; [k: string]: unknown })
-      | undefined;
+      (InternalAxiosRequestConfig & { _retried?: boolean; [k: string]: unknown }) | undefined;
 
     const skipRefresh = original?.[SKIP_REFRESH_FLAG] === true;
     if (error.response?.status === 401 && original && !original._retried && !skipRefresh) {
@@ -256,13 +298,33 @@ export const api = {
     }).then((data) => validateResponse(AuthResponseSchema, data, 'auth/verify'));
   },
 
-  /** Обновить access-токен (используется интерцептором и bootstrap-ом). */
+  /** Обновить пару токенов ротацией (интерцептор и bootstrap). */
   refresh(refreshToken: string): Promise<RefreshResponseDto> {
     return apiRequest<RefreshResponseDto>({
       method: 'POST',
       url: '/auth/refresh',
       data: { refreshToken },
     }).then((data) => validateResponse(RefreshResponseSchema, data, 'auth/refresh'));
+  },
+
+  /**
+   * Выход (v0.3.1): отозвать сессию на сервере ДО локальной очистки.
+   * Ошибку НЕ пробрасываем намеренно: локальный выход не должен
+   * блокироваться сетью — иначе пользователь «застрянет» в аккаунте.
+   * Сетевой сбой логируется (поддержка может отозвать семью вручную).
+   */
+  async logout(refreshToken: string, accessToken?: string): Promise<void> {
+    try {
+      await apiRequest<void>({
+        method: 'POST',
+        url: '/auth/logout',
+        data: { refreshToken, ...(accessToken ? { accessToken } : {}) },
+      });
+    } catch (error) {
+      logger.warn('api', 'logout на сервере не удался (продолжаем локальный выход)', {
+        error: toApiError(error).message,
+      });
+    }
   },
 
   /** Мой профиль. */

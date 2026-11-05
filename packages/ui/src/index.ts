@@ -1,5 +1,7 @@
 export * from './tokens';
 export * from './theme';
+export * from './haptics';
+export * from './color';
 export * from './components/Text';
 export * from './components/Button';
 export * from './components/Card';

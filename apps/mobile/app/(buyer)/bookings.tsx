@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   Badge,
   EmptyState,
@@ -7,6 +8,7 @@ import {
   Screen,
   SkeletonCard,
   spacing,
+  warning,
 } from '@agromoll/ui';
 import type { BookingDto, BookingStatus, ListingUnit } from '@agromoll/types';
 import { ScreenHeader } from '@/components';
@@ -15,6 +17,10 @@ import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS, DEMO_COUNTER_OFFERS } from '@/lib/demo-data';
 import { useOutboxStore } from '@/store/outbox';
+
+/** Задержка каскадного входа карточек броней (первая отрисовка, ADR-009). */
+const STAGGER_MS = 40;
+const STAGGER_CAP = 8;
 
 type BookingsState =
   | { phase: 'loading' }
@@ -42,6 +48,12 @@ export default function MyBookingsScreen() {
   const router = useRouter();
   const [state, setState] = useState<BookingsState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
+  // Каскадный вход — только первая отрисовка списка (ADR-009).
+  const [firstEntrance, setFirstEntrance] = useState(true);
+  // Предыдущие статусы: живая бронь стала «истекла» → мягкий warning-тактильный
+  // сигнал один раз (не на каждый рендер).
+  const prevStatuses = useRef<Map<string, BookingStatus>>(new Map());
+  const ttlWarned = useRef(false);
 
   const version = useOutboxStore((s) => s.version);
   const runSync = useOutboxStore((s) => s.runSync);
@@ -104,16 +116,39 @@ export default function MyBookingsScreen() {
     }));
   }, [state, pendingCreates]);
 
-  const allBookings = useMemo(
-    () => [...optimisticPending, ...merged],
-    [optimisticPending, merged],
-  );
+  const allBookings = useMemo(() => [...optimisticPending, ...merged], [optimisticPending, merged]);
 
-  const activeCount =
-    allBookings.filter(
-      (b) =>
-        b.status === 'requested' || b.status === 'counter_offered' || b.status === 'confirmed',
-    ).length;
+  // Первая отрисовка карточек: после завершения каскада флаг гаснет.
+  useEffect(() => {
+    if (allBookings.length > 0) {
+      const timer = setTimeout(() => setFirstEntrance(false), 700);
+      return () => clearTimeout(timer);
+    }
+  }, [allBookings]);
+
+  // Истечение TTL: живая бронь стала expired — мягкий сигнал один раз.
+  useEffect(() => {
+    if (state.phase !== 'ready') {
+      return;
+    }
+    let expiredNow = false;
+    for (const booking of merged) {
+      const prev = prevStatuses.current.get(booking.id);
+      const wasAlive = prev === 'requested' || prev === 'counter_offered' || prev === 'confirmed';
+      if (wasAlive && booking.status === 'expired') {
+        expiredNow = true;
+      }
+      prevStatuses.current.set(booking.id, booking.status);
+    }
+    if (expiredNow && !ttlWarned.current) {
+      ttlWarned.current = true;
+      warning();
+    }
+  }, [merged, state.phase]);
+
+  const activeCount = allBookings.filter(
+    (b) => b.status === 'requested' || b.status === 'counter_offered' || b.status === 'confirmed',
+  ).length;
 
   return (
     <Screen scroll={false}>
@@ -140,9 +175,9 @@ export default function MyBookingsScreen() {
       ) : allBookings.length === 0 ? (
         <EmptyState
           illustration="calendar"
-          title="Заявок пока нет"
-          description="Найдите товар в ленте и забронируйте — продавец подтвердит за полчаса."
-          action={{ label: 'К ленте', onPress: () => router.push('/(buyer)/feed') }}
+          title="Здесь появятся ваши заказы"
+          description="Начните с ленты."
+          action={{ label: 'В ленту', onPress: () => router.push('/(buyer)/feed') }}
         />
       ) : (
         <PullToRefreshScrollView
@@ -155,15 +190,26 @@ export default function MyBookingsScreen() {
             paddingBottom: spacing.xxl,
           }}
         >
-          {allBookings.map((booking) => (
-            <BookingCard
-              key={booking.id}
-              booking={booking}
-              counterOffer={DEMO_COUNTER_OFFERS[booking.id]}
-              pendingLabel={pendingLabelFor(booking.id, overrides)}
-              demo={state.phase === 'ready' ? state.demo : false}
-            />
-          ))}
+          {allBookings.map((booking, index) => {
+            const stagger = firstEntrance ? Math.min(index, STAGGER_CAP) * STAGGER_MS : 0;
+            return (
+              <Animated.View
+                key={booking.id}
+                entering={
+                  stagger > 0
+                    ? FadeInDown.delay(stagger).duration(300).springify().damping(16)
+                    : undefined
+                }
+              >
+                <BookingCard
+                  booking={booking}
+                  counterOffer={DEMO_COUNTER_OFFERS[booking.id]}
+                  pendingLabel={pendingLabelFor(booking.id, overrides)}
+                  demo={state.phase === 'ready' ? state.demo : false}
+                />
+              </Animated.View>
+            );
+          })}
           {pendingCount > 0 ? (
             <Badge label={`В очереди: ${pendingCount} · отправим при сети`} variant="attention" />
           ) : null}

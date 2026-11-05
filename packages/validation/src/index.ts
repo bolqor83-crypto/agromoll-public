@@ -136,12 +136,23 @@ export const VerifyCodeSchema = z.object({
 
 export type VerifyCodeInput = z.infer<typeof VerifyCodeSchema>;
 
-/** Обновление access-токена: POST /auth/refresh. */
+/** Обновление пары токенов: POST /auth/refresh (ротация, v0.3.1). */
 export const RefreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Не передан refreshToken'),
 });
 
 export type RefreshTokenInput = z.infer<typeof RefreshTokenSchema>;
+
+/**
+ * Выход: POST /auth/logout (v0.3.1). accessToken опционален — если клиент
+ * передал, его jti попадает в блэклист на остаток жизни токена.
+ */
+export const LogoutSchema = z.object({
+  refreshToken: z.string().min(1, 'Не передан refreshToken'),
+  accessToken: z.string().min(1).optional(),
+});
+
+export type LogoutInput = z.infer<typeof LogoutSchema>;
 
 /** Смена роли: PATCH /users/me/role (любая роль на выбор). */
 export const UpdateRoleSchema = z
@@ -237,10 +248,11 @@ export const AuthResponseSchema = z
 
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
 
-/** Ответ POST /auth/refresh. */
+/** Ответ POST /auth/refresh: новая ПАРА токенов (ротация, v0.3.1). */
 export const RefreshResponseSchema = z
   .object({
     accessToken: z.string().min(1),
+    refreshToken: z.string().min(1),
   })
   .passthrough();
 

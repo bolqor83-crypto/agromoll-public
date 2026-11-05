@@ -97,9 +97,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const payload = (request.body ?? {}) as Prisma.InputJsonValue;
 
     // Резервируем ключ ДО выполнения обработчика.
-    return from(
-      this.reserve(operationType, clientUuid, user, payload),
-    ).pipe(
+    return from(this.reserve(operationType, clientUuid, user, payload)).pipe(
       mergeMap((outcome) => {
         if (outcome.kind === 'replay') {
           // Повтор: отвечаем сохранёнными статусом и телом.

@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Alert, View } from 'react-native';
 import { BOOKING_STATUS_LABELS } from '@agromoll/types';
 import type { BookingDto } from '@agromoll/types';
-import { Badge, Button, Card, spacing, Text } from '@agromoll/ui';
-import * as Haptics from 'expo-haptics';
+import { Badge, Button, Card, spacing, success, tap, Text, warning } from '@agromoll/ui';
 import { acceptCounterMutation, cancelBookingMutation } from '@/lib/outbox/mutations';
 import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
 
@@ -33,7 +32,7 @@ export function BookingCard({ booking, counterOffer, pendingLabel, demo }: Booki
 
   const run = async (action: 'accept' | 'cancel'): Promise<void> => {
     if (demo) {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+      tap();
       Alert.alert(
         'Демо-режим',
         'API недоступен — действие не выполнено. Поднимите pnpm dev, чтобы работать по-настоящему.',
@@ -47,12 +46,10 @@ export function BookingCard({ booking, counterOffer, pendingLabel, demo }: Booki
       } else {
         await cancelBookingMutation(booking.id);
       }
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => undefined,
-      );
+      success();
       // Список обновится сам: событие outbox → version++ → экран перечитает.
     } catch (error) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
+      warning();
       Alert.alert('Не получилось', String(error instanceof Error ? error.message : error));
     } finally {
       setBusy(null);

@@ -18,6 +18,7 @@
 import { create } from 'zustand';
 import { AppState } from 'react-native';
 import type { BookingStatus } from '@agromoll/types';
+import { success, warning } from '@agromoll/ui';
 import type { OutboxEvent, OutboxRecord } from '@/lib/outbox/types';
 import { getOutbox } from '@/lib/outbox/outbox-instance';
 import { logger } from '@/lib/logger';
@@ -88,6 +89,10 @@ export const useOutboxStore = create<OutboxState>((set, get) => ({
       const summary = await outbox.processQueue();
       if (summary.completed + summary.failed + summary.conflicted > 0) {
         set((s) => ({ version: s.version + 1 }));
+      }
+      // Очередь опустела после работы — мягкий сигнал успеха (ADR-009).
+      if (summary.completed > 0 && summary.conflicted === 0) {
+        success();
       }
       await get().refreshQueue();
     } catch (error) {
@@ -180,8 +185,13 @@ export const useOutboxStore = create<OutboxState>((set, get) => ({
       }
       case 'conflicted': {
         set({
-          conflictedOperation: { ...event.record, message: event.record.lastError ?? 'Конфликт с сервером' },
+          conflictedOperation: {
+            ...event.record,
+            message: event.record.lastError ?? 'Конфликт с сервером',
+          },
         });
+        // Конфликт решает человек — мягкий сигнал внимания (ADR-009).
+        warning();
         void get().refreshQueue();
         break;
       }

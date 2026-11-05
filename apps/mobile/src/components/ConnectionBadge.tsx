@@ -9,7 +9,13 @@
  */
 import { useEffect } from 'react';
 import { Pressable } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { radius, spacing, Text, useTheme } from '@agromoll/ui';
 import { useOutboxStore } from '@/store/outbox';
@@ -27,11 +33,16 @@ export function ConnectionBadge() {
   const dotColor = isOffline ? colors.warning : colors.primary;
   const label = isSyncing ? 'Синхронизация…' : isOffline ? 'Офлайн — сохраним' : 'Онлайн';
 
-  // Пульс точки в режиме синхронизации.
+  // Пульс точки в режиме синхронизации: 1 → 0.6 → 1, полный цикл 2 с
+  // (ADR-009). «Онлайн» и «Офлайн» — статичные точки.
   const opacity = useSharedValue(1);
   useEffect(() => {
     if (isSyncing) {
-      opacity.value = withRepeat(withTiming(0.35, { duration: 550 }), -1, true);
+      opacity.value = withRepeat(
+        withTiming(0.6, { duration: 1000, easing: Easing.inOut(Easing.quad) }),
+        -1,
+        true,
+      );
     } else {
       opacity.value = withTiming(1, { duration: 200 });
     }

@@ -30,7 +30,8 @@ class ScriptedTransport implements OutboxTransport {
 
   async send(record: OutboxRecord): Promise<TransportResult> {
     this.calls.push(record);
-    const reply = this.script.length > 0 ? (this.script.shift() as TransportResult | Error) : this.next;
+    const reply =
+      this.script.length > 0 ? (this.script.shift() as TransportResult | Error) : this.next;
     if (reply instanceof Error) {
       throw reply;
     }
@@ -39,7 +40,11 @@ class ScriptedTransport implements OutboxTransport {
 }
 
 const NETWORK_ERROR: TransportResult = { kind: 'network-error', message: 'Сеть недоступна' };
-const SERVER_ERROR: TransportResult = { kind: 'server-error', status: 503, message: 'Сервер недоступен' };
+const SERVER_ERROR: TransportResult = {
+  kind: 'server-error',
+  status: 503,
+  message: 'Сервер недоступен',
+};
 const IN_PROGRESS: TransportResult = { kind: 'idempotency-in-progress' };
 const BUSINESS_CONFLICT: TransportResult = {
   kind: 'client-error',
@@ -65,7 +70,10 @@ describe('OutboxService', () => {
     const events: OutboxEvent[] = [];
     service.on((e) => events.push(e));
 
-    const record = await service.enqueue('create_booking', { listingId: 'l-1', requestedQuantity: 10 });
+    const record = await service.enqueue('create_booking', {
+      listingId: 'l-1',
+      requestedQuantity: 10,
+    });
 
     expect(record.state).toBe('pending');
     expect(record.clientUuid).toMatch(
@@ -236,7 +244,10 @@ describe('OutboxService', () => {
   it('retryManually сбрасывает счётчик и ставит в очередь', async () => {
     const { service, transport } = makeService();
     transport.next = BAD_REQUEST;
-    const record = await service.enqueue('create_booking', { listingId: 'l-1', requestedQuantity: 10 });
+    const record = await service.enqueue('create_booking', {
+      listingId: 'l-1',
+      requestedQuantity: 10,
+    });
     await service.processQueue();
 
     await service.retryManually(record.clientUuid);
@@ -294,7 +305,11 @@ describe('офлайн-сценарий: обрыв сети → восстан�
     expect(transport.calls).toHaveLength(1);
 
     // 3. «время прошло», сеть восстановилась
-    transport.next = { kind: 'success', status: 201, data: { id: 'b-server-1', status: 'requested' } };
+    transport.next = {
+      kind: 'success',
+      status: 201,
+      data: { id: 'b-server-1', status: 'requested' },
+    };
     await storage.update(record.clientUuid, { nextAttemptAt: null });
 
     // 4. синхронизация — операция ушла и подтверждена

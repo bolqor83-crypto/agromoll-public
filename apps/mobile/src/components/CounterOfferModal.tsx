@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, View } from 'react-native';
+import { Alert, View } from 'react-native';
 import type { BookingDto } from '@agromoll/types';
-import { Button, Card, Input, spacing, Text, useTheme } from '@agromoll/ui';
-import * as Haptics from 'expo-haptics';
+import { Button, Card, Input, spacing, success, tap, Text, useTheme, warning } from '@agromoll/ui';
 import { counterOfferMutation } from '@/lib/outbox/mutations';
+import { SheetModal } from './SheetModal';
 
 export interface CounterOfferModalProps {
   visible: boolean;
@@ -37,7 +37,7 @@ export function CounterOfferModal({
 
   const send = async (): Promise<void> => {
     if (demo) {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+      tap();
       Alert.alert('Демо-режим', 'API недоступен — корректировка не отправлена.');
       onClose();
       return;
@@ -49,13 +49,11 @@ export function CounterOfferModal({
         pickupTime: pickupTime.trim() || undefined,
         note: note.trim() || undefined,
       });
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => undefined,
-      );
+      success();
       // Список обновится сам по событию outbox (version++).
       onDone();
     } catch (error) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
+      warning();
       Alert.alert('Не получилось', String(error instanceof Error ? error.message : error));
     } finally {
       setSending(false);
@@ -63,84 +61,68 @@ export function CounterOfferModal({
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      accessibilityViewIsModal
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,20,17,0.45)' }}
-      >
-        <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Card elevated style={{ gap: spacing.lg }}>
-            <View style={{ gap: spacing.xs }}>
-              <Text variant="title">Предложить корректировку</Text>
-              <Text variant="caption" color="secondary">
-                {`${booking.buyerName ?? 'Покупатель'} просит ${booking.requestedQuantity}. Предложите другое количество или условия выкупа — покупатель решит.`}
-              </Text>
-            </View>
+    <SheetModal visible={visible} onClose={onClose}>
+      <Card elevated style={{ gap: spacing.lg }}>
+        <View style={{ gap: spacing.xs }}>
+          <Text variant="title">Предложить корректировку</Text>
+          <Text variant="caption" color="secondary">
+            {`${booking.buyerName ?? 'Покупатель'} просит ${booking.requestedQuantity}. Предложите другое количество или условия выкупа — покупатель решит.`}
+          </Text>
+        </View>
 
-            <View style={{ gap: spacing.xs }}>
-              <Text variant="caption" color="secondary">
-                Количество ({booking.listingUnit ?? 'ед.'})
-              </Text>
-              <Input
-                placeholder={String(booking.requestedQuantity)}
-                value={quantity}
-                onChangeText={setQuantity}
-                keyboardType="number-pad"
-              />
-            </View>
+        <View style={{ gap: spacing.xs }}>
+          <Text variant="caption" color="secondary">
+            Количество ({booking.listingUnit ?? 'ед.'})
+          </Text>
+          <Input
+            placeholder={String(booking.requestedQuantity)}
+            value={quantity}
+            onChangeText={setQuantity}
+            keyboardType="number-pad"
+          />
+        </View>
 
-            <View style={{ gap: spacing.xs }}>
-              <Text variant="caption" color="secondary">
-                Когда выдать
-              </Text>
-              <Input
-                placeholder="например, после 9:00"
-                value={pickupTime}
-                onChangeText={setPickupTime}
-              />
-            </View>
+        <View style={{ gap: spacing.xs }}>
+          <Text variant="caption" color="secondary">
+            Когда выдать
+          </Text>
+          <Input
+            placeholder="например, после 9:00"
+            value={pickupTime}
+            onChangeText={setPickupTime}
+          />
+        </View>
 
-            <View style={{ gap: spacing.xs }}>
-              <Text variant="caption" color="secondary">
-                Комментарий
-              </Text>
-              <Input placeholder="например, ящиками по 20 кг" value={note} onChangeText={setNote} />
-            </View>
+        <View style={{ gap: spacing.xs }}>
+          <Text variant="caption" color="secondary">
+            Комментарий
+          </Text>
+          <Input placeholder="например, ящиками по 20 кг" value={note} onChangeText={setNote} />
+        </View>
 
-            <View style={{ flexDirection: 'row', gap: spacing.md }}>
-              <View style={{ flex: 1 }}>
-                <Button title="Отмена" variant="ghost" onPress={onClose} disabled={sending} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button
-                  title="Отправить"
-                  onPress={() => void send()}
-                  loading={sending}
-                  disabled={!canSend || sending}
-                />
-              </View>
-            </View>
-            <View
-              style={{
-                height: 2,
-                borderRadius: 1,
-                backgroundColor: colors.border,
-                alignSelf: 'center',
-                width: 36,
-              }}
+        <View style={{ flexDirection: 'row', gap: spacing.md }}>
+          <View style={{ flex: 1 }}>
+            <Button title="Отмена" variant="ghost" onPress={onClose} disabled={sending} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button
+              title="Отправить"
+              onPress={() => void send()}
+              loading={sending}
+              disabled={!canSend || sending}
             />
-          </Card>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </Modal>
+          </View>
+        </View>
+        <View
+          style={{
+            height: 2,
+            borderRadius: 1,
+            backgroundColor: colors.border,
+            alignSelf: 'center',
+            width: 36,
+          }}
+        />
+      </Card>
+    </SheetModal>
   );
 }

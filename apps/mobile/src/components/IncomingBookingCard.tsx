@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Alert, View } from 'react-native';
 import { BOOKING_STATUS_LABELS } from '@agromoll/types';
 import type { BookingDto } from '@agromoll/types';
-import { Badge, Button, Card, spacing, Text } from '@agromoll/ui';
-import * as Haptics from 'expo-haptics';
+import { Badge, Button, Card, spacing, success, tap, Text, warning } from '@agromoll/ui';
 import { cancelBookingMutation, confirmBookingMutation } from '@/lib/outbox/mutations';
 import { CounterOfferModal } from './CounterOfferModal';
 import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
@@ -20,11 +19,7 @@ export interface IncomingBookingCardProps {
  * Входящая бронь продавца («Входящие»): кто, что, сколько,
  * «Подтвердить» / «Предложить корректировку» / «Отклонить».
  */
-export function IncomingBookingCard({
-  booking,
-  pendingLabel,
-  demo,
-}: IncomingBookingCardProps) {
+export function IncomingBookingCard({ booking, pendingLabel, demo }: IncomingBookingCardProps) {
   const [busy, setBusy] = useState<'confirm' | 'cancel' | null>(null);
   const [counterOpen, setCounterOpen] = useState(false);
 
@@ -32,7 +27,7 @@ export function IncomingBookingCard({
 
   const run = async (action: 'confirm' | 'cancel'): Promise<void> => {
     if (demo) {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+      tap();
       Alert.alert(
         'Демо-режим',
         'API недоступен — действие не выполнено. Поднимите pnpm dev, чтобы работать по-настоящему.',
@@ -46,12 +41,10 @@ export function IncomingBookingCard({
       } else {
         await cancelBookingMutation(booking.id);
       }
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => undefined,
-      );
+      success();
       // Список обновится сам: событие outbox → version++ → экран перечитает.
     } catch (error) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
+      warning();
       Alert.alert('Не получилось', String(error instanceof Error ? error.message : error));
     } finally {
       setBusy(null);
@@ -110,9 +103,7 @@ export function IncomingBookingCard({
                   title="Скорректировать"
                   variant="secondary"
                   onPress={() => {
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-                      () => undefined,
-                    );
+                    tap();
                     setCounterOpen(true);
                   }}
                   disabled={busy !== null}

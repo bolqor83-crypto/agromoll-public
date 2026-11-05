@@ -12,14 +12,16 @@ import {
   Button,
   Icon,
   Input,
+  radius,
   Screen,
+  selection,
   SkeletonCard,
   spacing,
+  success,
+  tap,
   Text,
-  radius,
   useTheme,
 } from '@agromoll/ui';
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/auth';
 import { api, toApiError } from '@/lib/api';
@@ -59,6 +61,9 @@ export default function AuthScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const signIn = useAuthStore((s) => s.signIn);
+  // v0.3.1: мягкое сообщение, если сессию завершил сервер (ротация
+  // обнаружила повторное использование refresh-токена).
+  const signOutNotice = useAuthStore((s) => s.signOutNotice);
 
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [phoneInput, setPhoneInput] = useState('+7 (');
@@ -89,7 +94,7 @@ export default function AuthScreen() {
     setError(null);
     try {
       await api.requestCode(normalizedPhone);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+      tap();
       setStep('code');
       setCode('');
       setResendLeft(RESEND_SECONDS);
@@ -122,7 +127,7 @@ export default function AuthScreen() {
     try {
       const auth = await api.verify(normalizedPhone, value);
       await signIn(auth);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+      success();
       router.replace('/');
     } catch (err) {
       const apiError = toApiError(err);
@@ -139,7 +144,7 @@ export default function AuthScreen() {
     const digits = text.replace(/\D/g, '').slice(0, CODE_LENGTH);
     setCode(digits);
     if (digits.length > code.length) {
-      void Haptics.selectionAsync().catch(() => undefined);
+      selection();
     }
     if (digits.length === CODE_LENGTH) {
       hiddenCodeInput.current?.blur();
@@ -170,6 +175,28 @@ export default function AuthScreen() {
             : `Код отправлен на ${formatPhoneMask(phoneDigitsFromInput(phoneInput))}. Введите 6 цифр из SMS.`}
         </Text>
       </View>
+
+      {signOutNotice ? (
+        <View
+          accessibilityRole="alert"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            marginBottom: spacing.lg,
+            padding: spacing.md,
+            borderRadius: radius.md,
+            // Мягкий янтарный тон (не красный): ничего страшного не
+            // случилось — просто войдите снова.
+            backgroundColor: colors.warning + '1F',
+          }}
+        >
+          <Icon name="time-outline" size={20} color="warning" />
+          <Text variant="body" color="secondary" style={{ flex: 1 }}>
+            {signOutNotice}
+          </Text>
+        </View>
+      ) : null}
 
       {step === 'phone' ? (
         <View style={{ gap: spacing.lg }}>

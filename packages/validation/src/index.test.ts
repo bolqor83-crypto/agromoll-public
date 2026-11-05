@@ -115,113 +115,119 @@ describe('@agromoll/validation', () => {
     expect(BookingStatusSchema.safeParse('pending').success).toBe(false);
   });
 
-describe('схемы ответов API (v0.3.0)', () => {
-  const listing = {
-    id: 'l-1',
-    sellerId: 'u-1',
-    sellerName: 'ФХ «Донская долина»',
-    title: 'Помидоры розовые',
-    category: 'vegetables',
-    unit: 'kg',
-    pricePerUnit: '85.50',
-    quantityAvailable: 120,
-    quantityReserved: 30,
-    quantityAvailableForBooking: 90,
-    lineNumber: 12,
-    isPerishable: true,
-    status: 'active',
-    createdAt: '2026-11-05T06:00:00.000Z',
-    updatedAt: '2026-11-05T12:00:00.000Z',
-  };
+  describe('схемы ответов API (v0.3.0)', () => {
+    const listing = {
+      id: 'l-1',
+      sellerId: 'u-1',
+      sellerName: 'ФХ «Донская долина»',
+      title: 'Помидоры розовые',
+      category: 'vegetables',
+      unit: 'kg',
+      pricePerUnit: '85.50',
+      quantityAvailable: 120,
+      quantityReserved: 30,
+      quantityAvailableForBooking: 90,
+      lineNumber: 12,
+      isPerishable: true,
+      status: 'active',
+      createdAt: '2026-11-05T06:00:00.000Z',
+      updatedAt: '2026-11-05T12:00:00.000Z',
+    };
 
-  it('ListingResponseSchema принимает валидный лот', () => {
-    expect(ListingResponseSchema.safeParse(listing).success).toBe(true);
-    expect(ListingsResponseSchema.safeParse([listing]).success).toBe(true);
+    it('ListingResponseSchema принимает валидный лот', () => {
+      expect(ListingResponseSchema.safeParse(listing).success).toBe(true);
+      expect(ListingsResponseSchema.safeParse([listing]).success).toBe(true);
+    });
+
+    it('ListingResponseSchema: лишние поля не ломают (passthrough)', () => {
+      expect(ListingResponseSchema.safeParse({ ...listing, newServerField: 42 }).success).toBe(
+        true,
+      );
+    });
+
+    it('ListingResponseSchema отвергает число вместо строки цены', () => {
+      expect(ListingResponseSchema.safeParse({ ...listing, pricePerUnit: 85.5 }).success).toBe(
+        false,
+      );
+    });
+
+    it('ListingResponseSchema отвергает мусорный статус', () => {
+      expect(ListingResponseSchema.safeParse({ ...listing, status: 'hot' }).success).toBe(false);
+    });
+
+    const booking = {
+      id: 'b-1',
+      listingId: 'l-1',
+      listingTitle: 'Помидоры розовые',
+      listingUnit: 'kg',
+      buyerId: 'u-2',
+      buyerName: 'Ларёк «У Ашота»',
+      requestedQuantity: 20,
+      confirmedQuantity: null,
+      status: 'requested',
+      expiresAt: '2026-11-05T13:00:00.000Z',
+      createdAt: '2026-11-05T12:30:00.000Z',
+      updatedAt: '2026-11-05T12:30:00.000Z',
+    };
+
+    it('BookingResponseSchema принимает валидную бронь (confirmedQuantity nullable)', () => {
+      expect(BookingResponseSchema.safeParse(booking).success).toBe(true);
+      expect(
+        BookingResponseSchema.safeParse({ ...booking, confirmedQuantity: 15, status: 'confirmed' })
+          .success,
+      ).toBe(true);
+      expect(BookingsResponseSchema.safeParse([booking, booking]).success).toBe(true);
+    });
+
+    it('BookingResponseSchema отвергает число вместо nullable', () => {
+      expect(BookingResponseSchema.safeParse({ ...booking, confirmedQuantity: '15' }).success).toBe(
+        false,
+      );
+    });
+
+    const user = {
+      id: 'u-1',
+      role: 'buyer',
+      displayName: 'Ларёк «У Ашота»',
+      phone: '+79611234567',
+      phoneVerified: true,
+      createdAt: '2026-11-05T06:00:00.000Z',
+    };
+
+    it('UserResponseSchema и AuthResponseSchema', () => {
+      expect(UserResponseSchema.safeParse(user).success).toBe(true);
+      expect(UserResponseSchema.safeParse({ ...user, phone: null }).success).toBe(true);
+      expect(
+        AuthResponseSchema.safeParse({
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          user,
+        }).success,
+      ).toBe(true);
+      expect(AuthResponseSchema.safeParse({ accessToken: 'access', user }).success).toBe(false); // без refreshToken
+    });
+
+    it('RefreshResponseSchema и RequestCodeResponseSchema', () => {
+      // v0.3.1: refresh возвращает ПАРУ токенов (ротация)
+      expect(RefreshResponseSchema.safeParse({ accessToken: 'a', refreshToken: 'r' }).success).toBe(
+        true,
+      );
+      expect(RefreshResponseSchema.safeParse({ accessToken: 'a' }).success).toBe(false);
+      expect(RefreshResponseSchema.safeParse({}).success).toBe(false);
+      expect(RequestCodeResponseSchema.safeParse({ expiresInSec: 300 }).success).toBe(true);
+    });
+
+    it('ErrorResponseSchema: message строкой и массивом', () => {
+      expect(ErrorResponseSchema.safeParse({ statusCode: 409, message: 'конфликт' }).success).toBe(
+        true,
+      );
+      expect(
+        ErrorResponseSchema.safeParse({
+          statusCode: 400,
+          message: ['поле 1', 'поле 2'],
+          code: 'IDEMPOTENCY_IN_PROGRESS',
+        }).success,
+      ).toBe(true);
+    });
   });
-
-  it('ListingResponseSchema: лишние поля не ломают (passthrough)', () => {
-    expect(ListingResponseSchema.safeParse({ ...listing, newServerField: 42 }).success).toBe(true);
-  });
-
-  it('ListingResponseSchema отвергает число вместо строки цены', () => {
-    expect(ListingResponseSchema.safeParse({ ...listing, pricePerUnit: 85.5 }).success).toBe(false);
-  });
-
-  it('ListingResponseSchema отвергает мусорный статус', () => {
-    expect(ListingResponseSchema.safeParse({ ...listing, status: 'hot' }).success).toBe(false);
-  });
-
-  const booking = {
-    id: 'b-1',
-    listingId: 'l-1',
-    listingTitle: 'Помидоры розовые',
-    listingUnit: 'kg',
-    buyerId: 'u-2',
-    buyerName: 'Ларёк «У Ашота»',
-    requestedQuantity: 20,
-    confirmedQuantity: null,
-    status: 'requested',
-    expiresAt: '2026-11-05T13:00:00.000Z',
-    createdAt: '2026-11-05T12:30:00.000Z',
-    updatedAt: '2026-11-05T12:30:00.000Z',
-  };
-
-  it('BookingResponseSchema принимает валидную бронь (confirmedQuantity nullable)', () => {
-    expect(BookingResponseSchema.safeParse(booking).success).toBe(true);
-    expect(
-      BookingResponseSchema.safeParse({ ...booking, confirmedQuantity: 15, status: 'confirmed' })
-        .success,
-    ).toBe(true);
-    expect(BookingsResponseSchema.safeParse([booking, booking]).success).toBe(true);
-  });
-
-  it('BookingResponseSchema отвергает число вместо nullable', () => {
-    expect(BookingResponseSchema.safeParse({ ...booking, confirmedQuantity: '15' }).success).toBe(
-      false,
-    );
-  });
-
-  const user = {
-    id: 'u-1',
-    role: 'buyer',
-    displayName: 'Ларёк «У Ашота»',
-    phone: '+79611234567',
-    phoneVerified: true,
-    createdAt: '2026-11-05T06:00:00.000Z',
-  };
-
-  it('UserResponseSchema и AuthResponseSchema', () => {
-    expect(UserResponseSchema.safeParse(user).success).toBe(true);
-    expect(UserResponseSchema.safeParse({ ...user, phone: null }).success).toBe(true);
-    expect(
-      AuthResponseSchema.safeParse({
-        accessToken: 'access',
-        refreshToken: 'refresh',
-        user,
-      }).success,
-    ).toBe(true);
-    expect(
-      AuthResponseSchema.safeParse({ accessToken: 'access', user }).success,
-    ).toBe(false); // без refreshToken
-  });
-
-  it('RefreshResponseSchema и RequestCodeResponseSchema', () => {
-    expect(RefreshResponseSchema.safeParse({ accessToken: 'a' }).success).toBe(true);
-    expect(RefreshResponseSchema.safeParse({}).success).toBe(false);
-    expect(RequestCodeResponseSchema.safeParse({ expiresInSec: 300 }).success).toBe(true);
-  });
-
-  it('ErrorResponseSchema: message строкой и массивом', () => {
-    expect(ErrorResponseSchema.safeParse({ statusCode: 409, message: 'конфликт' }).success).toBe(
-      true,
-    );
-    expect(
-      ErrorResponseSchema.safeParse({
-        statusCode: 400,
-        message: ['поле 1', 'поле 2'],
-        code: 'IDEMPOTENCY_IN_PROGRESS',
-      }).success,
-    ).toBe(true);
-  });
-});
 });
