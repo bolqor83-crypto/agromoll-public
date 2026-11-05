@@ -217,4 +217,3 @@ export function maskPhone(phone: string): string {
   }
   return `+7***${digits.slice(-4)}`;
 }
-

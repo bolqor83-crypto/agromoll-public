@@ -137,7 +137,10 @@ return 1
 export class RedisSessionStore implements SessionStore {
   private readonly redis: Redis;
 
-  constructor(url: string, private readonly ttlSeconds: number) {
+  constructor(
+    url: string,
+    private readonly ttlSeconds: number,
+  ) {
     this.redis = new Redis(url, { lazyConnect: false, maxRetriesPerRequest: 3 });
   }
 
@@ -177,13 +180,7 @@ export class RedisSessionStore implements SessionStore {
   }
 
   async revokeFamily(familyId: string): Promise<void> {
-    await this.redis.eval(
-      REVOKE_FAMILY_SCRIPT,
-      2,
-      FAMILY_KEY + familyId,
-      JTI_KEY,
-      this.ttlSeconds,
-    );
+    await this.redis.eval(REVOKE_FAMILY_SCRIPT, 2, FAMILY_KEY + familyId, JTI_KEY, this.ttlSeconds);
   }
 
   async revokeFamilies(familyIds: string[]): Promise<void> {
@@ -226,7 +223,10 @@ interface TtlEntry<T> {
 
 /** In-memory fallback: те же семантики и TTL, что в Redis (ленивая чистка). */
 export class InMemorySessionStore implements SessionStore {
-  private readonly families = new Map<string, TtlEntry<{ userId: string; status: FamilyStatus; jtis: string[] }>>();
+  private readonly families = new Map<
+    string,
+    TtlEntry<{ userId: string; status: FamilyStatus; jtis: string[] }>
+  >();
   private readonly jtis = new Map<string, TtlEntry<{ familyId: string; status: JtiStatus }>>();
   private readonly accessBlacklist = new Map<string, number>();
 
@@ -237,7 +237,10 @@ export class InMemorySessionStore implements SessionStore {
       value: { userId: meta.userId, status: 'active', jtis: [meta.jti] },
       expiresAt: this.deadline(),
     });
-    this.jtis.set(meta.jti, { value: { familyId: meta.familyId, status: 'active' }, expiresAt: this.deadline() });
+    this.jtis.set(meta.jti, {
+      value: { familyId: meta.familyId, status: 'active' },
+      expiresAt: this.deadline(),
+    });
   }
 
   async consumeRefreshJti(jti: string): Promise<JtiStatus | null> {
@@ -335,7 +338,9 @@ export class InMemorySessionStore implements SessionStore {
 }
 
 /** Есть ли у хранилища соединение, которое нужно закрыть при остановке. */
-export function isClosableStore(store: SessionStore): store is SessionStore & { close(): Promise<void> } {
+export function isClosableStore(
+  store: SessionStore,
+): store is SessionStore & { close(): Promise<void> } {
   return typeof (store as { close?: unknown }).close === 'function';
 }
 
@@ -353,7 +358,9 @@ export const sessionStoreProvider = {
       return new RedisSessionStore(url, ttl);
     }
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('В production обязателен REDIS_URL: сессии без Redis не отзываются (ADR-008)');
+      throw new Error(
+        'В production обязателен REDIS_URL: сессии без Redis не отзываются (ADR-008)',
+      );
     }
     Logger.warn(
       'REDIS_URL не задан — сессии refresh-токенов хранятся в памяти процесса. ' +

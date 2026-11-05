@@ -12,14 +12,16 @@ import {
   Button,
   Icon,
   Input,
+  radius,
   Screen,
+  selection,
   SkeletonCard,
   spacing,
+  success,
+  tap,
   Text,
-  radius,
   useTheme,
 } from '@agromoll/ui';
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/auth';
 import { api, toApiError } from '@/lib/api';
@@ -92,7 +94,7 @@ export default function AuthScreen() {
     setError(null);
     try {
       await api.requestCode(normalizedPhone);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+      tap();
       setStep('code');
       setCode('');
       setResendLeft(RESEND_SECONDS);
@@ -125,7 +127,7 @@ export default function AuthScreen() {
     try {
       const auth = await api.verify(normalizedPhone, value);
       await signIn(auth);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+      success();
       router.replace('/');
     } catch (err) {
       const apiError = toApiError(err);
@@ -142,7 +144,7 @@ export default function AuthScreen() {
     const digits = text.replace(/\D/g, '').slice(0, CODE_LENGTH);
     setCode(digits);
     if (digits.length > code.length) {
-      void Haptics.selectionAsync().catch(() => undefined);
+      selection();
     }
     if (digits.length === CODE_LENGTH) {
       hiddenCodeInput.current?.blur();

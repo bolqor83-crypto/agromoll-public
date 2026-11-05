@@ -40,6 +40,14 @@ jest.mock('@/lib/api', () => ({
   getLastSignOutReason: jest.fn(() => 'expired'),
 }));
 
+// Стор (через outbox) тянет тактильную карту из @agromoll/ui, а с ней
+// весь пакет с нативными компонентами. Для теста стора достаточно
+// чистых заглушек — UI здесь не тестируется.
+jest.mock('@agromoll/ui', () => ({
+  success: jest.fn(),
+  warning: jest.fn(),
+}));
+
 // eslint-disable-next-line import/first -- моки должны объявиться до импорта стора
 import { api } from '@/lib/api';
 // eslint-disable-next-line import/first
@@ -226,7 +234,11 @@ describe('auth-store', () => {
     });
 
     it('signIn сбрасывает signOutNotice', async () => {
-      useAuthStore.setState({ status: 'unauthenticated', user: null, signOutNotice: 'Сессия завершена. Войдите снова' });
+      useAuthStore.setState({
+        status: 'unauthenticated',
+        user: null,
+        signOutNotice: 'Сессия завершена. Войдите снова',
+      });
       await useAuthStore.getState().signIn({
         accessToken: 'a-1',
         refreshToken: 'r-1',

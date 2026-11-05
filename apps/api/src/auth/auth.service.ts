@@ -98,8 +98,10 @@ export class AuthService {
     this.refreshSecret = refresh ?? DEV_REFRESH_SECRET;
     // Строки вида «15m»/«30d»: тип StringValue из jsonwebtoken, потому каст
     // (env всегда строка, валидность формата гарантируем тестом конфигурации).
-    this.accessTtl = (process.env.JWT_ACCESS_TTL ?? DEFAULT_ACCESS_TTL) as JwtSignOptions['expiresIn'];
-    this.refreshTtl = (process.env.JWT_REFRESH_TTL ?? DEFAULT_REFRESH_TTL) as JwtSignOptions['expiresIn'];
+    this.accessTtl = (process.env.JWT_ACCESS_TTL ??
+      DEFAULT_ACCESS_TTL) as JwtSignOptions['expiresIn'];
+    this.refreshTtl = (process.env.JWT_REFRESH_TTL ??
+      DEFAULT_REFRESH_TTL) as JwtSignOptions['expiresIn'];
   }
 
   /** Шаг 1: выдать код на телефон. */
@@ -163,9 +165,7 @@ export class AuthService {
       throw new ServiceUnavailableException('Сервис входа временно недоступен — попробуйте позже');
     }
 
-    this.logger.log(
-      `Вход выполнен: user=${user.id} phone=${maskPhone(phone)} family=${familyId}`,
-    );
+    this.logger.log(`Вход выполнен: user=${user.id} phone=${maskPhone(phone)} family=${familyId}`);
     return { ...tokens, user: toUserDto(user) };
   }
 
@@ -323,7 +323,9 @@ export class AuthService {
       this.logger.error(
         `Session store недоступен (degraded): смена роли отклонена (fail-closed): ${describeError(error)}`,
       );
-      throw new ServiceUnavailableException('Не удалось завершить другие сессии — попробуйте ещё раз');
+      throw new ServiceUnavailableException(
+        'Не удалось завершить другие сессии — попробуйте ещё раз',
+      );
     }
     await this.prisma.session.updateMany({
       where: { familyId: { in: familyIds } },
@@ -375,9 +377,7 @@ export class AuthService {
     await this.prisma.session
       .updateMany({ where: { familyId }, data: { revokedAt: new Date() } })
       .catch((error: unknown) => {
-        this.logger.warn(
-          `Аудит отзыва не записан: family=${familyId}: ${describeError(error)}`,
-        );
+        this.logger.warn(`Аудит отзыва не записан: family=${familyId}: ${describeError(error)}`);
       });
   }
 
@@ -436,14 +436,11 @@ export class AuthService {
   }
 
   private signAccess(user: User, familyId: string): string {
-    return this.jwt.sign(
-      { sub: user.id, role: user.role, familyId } satisfies JwtPayload,
-      {
-        secret: this.accessSecret,
-        expiresIn: this.accessTtl,
-        jwtid: randomUUID(),
-      },
-    );
+    return this.jwt.sign({ sub: user.id, role: user.role, familyId } satisfies JwtPayload, {
+      secret: this.accessSecret,
+      expiresIn: this.accessTtl,
+      jwtid: randomUUID(),
+    });
   }
 }
 

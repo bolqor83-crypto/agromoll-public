@@ -161,9 +161,8 @@ export function listenForcedSignOut(): () => void {
     handler,
   );
   return () => {
-    (globalThis as { removeEventListener?: (t: string, h: () => void) => void })?.removeEventListener?.(
-      AUTH_SIGN_OUT_EVENT,
-      handler,
-    );
+    (
+      globalThis as { removeEventListener?: (t: string, h: () => void) => void }
+    )?.removeEventListener?.(AUTH_SIGN_OUT_EVENT, handler);
   };
 }

@@ -24,7 +24,10 @@ import { useAuthStore } from '@/store/auth';
 import type { OutboxRecord, OutboxState } from '@/lib/outbox/types';
 
 /** Пилюля состояния операции: цвет и подпись. */
-const STATE_BADGES: Record<OutboxState, { label: string; variant: 'success' | 'attention' | 'neutral' }> = {
+const STATE_BADGES: Record<
+  OutboxState,
+  { label: string; variant: 'success' | 'attention' | 'neutral' }
+> = {
   pending: { label: 'В очереди', variant: 'neutral' },
   processing: { label: 'Отправляется', variant: 'neutral' },
   retrying: { label: 'Повтор позже', variant: 'attention' },
@@ -53,11 +56,20 @@ function OperationRow({ record }: { record: OutboxRecord }) {
   const badge = STATE_BADGES[record.state];
   const label = OPERATION_LABELS[record.operationType] ?? record.operationType;
   const canRetry =
-    record.state === 'permanently_failed' || record.state === 'retrying' || record.state === 'pending';
+    record.state === 'permanently_failed' ||
+    record.state === 'retrying' ||
+    record.state === 'pending';
 
   return (
     <View style={{ gap: spacing.xs, paddingBottom: spacing.md }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+        }}
+      >
         <Text variant="body" weight="600">
           {label}
         </Text>
@@ -116,10 +128,7 @@ export default function QueueScreen() {
 
   return (
     <Screen scroll={false}>
-      <ScreenHeader
-        title="Очередь"
-        subtitle="Операции, ждущие сети, и их состояние"
-      />
+      <ScreenHeader title="Очередь" subtitle="Операции, ждущие сети, и их состояние" />
       {queue.length === 0 ? (
         <EmptyState
           illustration="box"
@@ -137,7 +146,13 @@ export default function QueueScreen() {
         </PullToRefreshScrollView>
       )}
       <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
-        <Button title="Синхронизировать" variant="secondary" size="md" onPress={handleRefresh} loading={syncing} />
+        <Button
+          title="Синхронизировать"
+          variant="secondary"
+          size="md"
+          onPress={handleRefresh}
+          loading={syncing}
+        />
         <Button title="Выйти из аккаунта" variant="ghost" size="md" onPress={handleSignOut} />
       </View>
     </Screen>

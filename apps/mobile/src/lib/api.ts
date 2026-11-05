@@ -34,7 +34,6 @@ import { tokenStore } from './token-store';
 import { logger } from './logger';
 import {
   AuthResponseSchema,
-  BookingResponseSchema,
   BookingsResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
@@ -213,9 +212,15 @@ async function refreshAccessToken(): Promise<string | null> {
     return response.data.accessToken;
   } catch (error) {
     const reuseDetected = isReuseDetectedError(error);
-    logger.warn('api', reuseDetected ? 'обнаружен повторный refresh — сервер отозвал сессию' : 'refresh не удался — нужен повторный вход', {
-      error: toApiError(error).message,
-    });
+    logger.warn(
+      'api',
+      reuseDetected
+        ? 'обнаружен повторный refresh — сервер отозвал сессию'
+        : 'refresh не удался — нужен повторный вход',
+      {
+        error: toApiError(error).message,
+      },
+    );
     await tokenStore.clear();
     // Сообщаем auth-store: сессия сгорела (с причиной — для сообщения).
     emitSignOut(reuseDetected ? 'reuse' : 'expired');
@@ -235,8 +240,7 @@ http.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as
-      | (InternalAxiosRequestConfig & { _retried?: boolean; [k: string]: unknown })
-      | undefined;
+      (InternalAxiosRequestConfig & { _retried?: boolean; [k: string]: unknown }) | undefined;
 
     const skipRefresh = original?.[SKIP_REFRESH_FLAG] === true;
     if (error.response?.status === 401 && original && !original._retried && !skipRefresh) {

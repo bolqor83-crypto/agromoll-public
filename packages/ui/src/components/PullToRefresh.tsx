@@ -3,9 +3,11 @@
  * зелёный круг, плавно вращающийся при освежении.
  *
  * На native: собственная механика на Reanimated (протяжка крутит круг
- * пропорционально смещению, отпускание после порога запускает освежение
- * с тактильным откликом). На web (нет bounce-скролла) — стандартный
- * RefreshControl с цветом primary: жест недоступен, но обновление работает.
+ * пропорционально смещению). v0.3.1: «щелчок» подтверждения — тактильный
+ * отклик в момент, когда палец ПЕРЕСЁК порог срабатывания (как в
+ * нативных приложениях: жест «взведён» ещё до отпускания).
+ * На web (нет bounce-скролла) — стандартный RefreshControl с цветом
+ * primary: жест недоступен, но обновление работает.
  */
 import { useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
@@ -21,8 +23,8 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
 import { useTheme } from '../theme';
+import { tap } from '../haptics';
 
 /** Протяжка в px, после которой отпускание запускает освежение. */
 const REFRESH_THRESHOLD = 72;
@@ -49,6 +51,9 @@ export function PullToRefreshScrollView({
   const spin = useSharedValue(0);
   const isRefreshing = useSharedValue(false);
   const indicatorHeight = useSharedValue(0);
+  // «Взвод» тактильного щелчка: один haptic на одно пересечение порога,
+  // повторно — только если палец вернулся заметно ниже порога.
+  const hapticArmed = useSharedValue(true);
 
   useEffect(() => {
     isRefreshing.value = refreshing;
@@ -67,9 +72,12 @@ export function PullToRefreshScrollView({
   }, [refreshing, isRefreshing, indicatorHeight, spin]);
 
   const triggerRefresh = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     onRefresh();
   }, [onRefresh]);
+
+  const fireThresholdHaptic = useCallback(() => {
+    tap();
+  }, []);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -78,12 +86,22 @@ export function PullToRefreshScrollView({
         return;
       }
       // Отрицательное смещение — протяжка за пределы начала списка (iOS bounce).
-      pull.value = Math.max(0, -event.contentOffset.y);
+      const pulled = Math.max(0, -event.contentOffset.y);
+      // v0.3.1: пересечение порога — «щелчок» подтверждения жеста.
+      if (pulled >= REFRESH_THRESHOLD && hapticArmed.value) {
+        hapticArmed.value = false;
+        runOnJS(fireThresholdHaptic)();
+      } else if (pulled < REFRESH_THRESHOLD * 0.6) {
+        // Гистерезис: возвращение ниже 60% порога снова «взводит» щелчок.
+        hapticArmed.value = true;
+      }
+      pull.value = pulled;
     },
     onEndDrag: (event) => {
       if (!isRefreshing.value && -event.contentOffset.y > REFRESH_THRESHOLD) {
         runOnJS(triggerRefresh)();
       }
+      hapticArmed.value = true;
       pull.value = 0;
     },
   });

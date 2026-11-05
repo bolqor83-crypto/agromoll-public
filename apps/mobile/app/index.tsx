@@ -1,10 +1,9 @@
 import { useRouter } from 'expo-router';
 import { View } from 'react-native';
-import { Card, Icon, Screen, spacing, Text } from '@agromoll/ui';
+import { Card, Icon, Screen, selection, spacing, Text } from '@agromoll/ui';
 import type { IconName } from '@agromoll/ui';
 import { ROLE_LABELS } from '@agromoll/types';
 import type { UserRole } from '@agromoll/types';
-import * as Haptics from 'expo-haptics';
 import { ScreenHeader } from '@/components';
 import { useAuthStore } from '@/store/auth';
 import { logger } from '@/lib/logger';
@@ -48,7 +47,7 @@ export default function RolePickerScreen() {
   const changeRole = useAuthStore((s) => s.changeRole);
 
   const handleSelect = (option: RoleOption): void => {
-    void Haptics.selectionAsync().catch(() => undefined);
+    selection();
     changeRole(option.role)
       .then(() => {
         router.replace(option.route);

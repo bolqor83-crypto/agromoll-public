@@ -1,8 +1,7 @@
 import { Pressable, View } from 'react-native';
 import type { ReactNode } from 'react';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { Icon, radius, spacing, Text, useTheme } from '@agromoll/ui';
+import { Icon, radius, selection, spacing, Text, useTheme } from '@agromoll/ui';
 import { ThemeToggle } from './ThemeToggle';
 import { ConnectionBadge } from './ConnectionBadge';
 import { useAuthStore } from '@/store/auth';
@@ -21,7 +20,14 @@ export function ScreenHeader({ title, subtitle, badge }: ScreenHeaderProps) {
 
   return (
     <View style={{ gap: spacing.xs, marginBottom: spacing.lg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+        }}
+      >
         <Text variant="display" style={{ flexShrink: 1 }}>
           {title}
         </Text>
@@ -41,7 +47,7 @@ export function ScreenHeader({ title, subtitle, badge }: ScreenHeaderProps) {
           accessibilityRole="button"
           accessibilityLabel="Сменить роль"
           onPress={() => {
-            void Haptics.selectionAsync().catch(() => undefined);
+            selection();
             router.push('/');
           }}
           style={{

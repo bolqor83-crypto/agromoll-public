@@ -1,8 +1,10 @@
 /**
  * Button — главная кнопка дизайн-системы.
  *
- * iOS-like: pill-форма, мягкая заливка, тактильный spring-отклик (200–300 мс).
- * Минимальная высота — 48 px (размер md), основная — 56 px (lg).
+ * iOS-like: pill-форма, мягкая заливка, тактильный spring-отклик
+ * (scale 0.97 при нажатии, 200–300 мс). Минимальная высота — 48 px
+ * (размер md), основная — 56 px (lg). v0.3.1: каждый успешный нажим
+ * даёт лёгкий haptic-отклик из тактильной карты (tap, ADR-009).
  */
 import { useCallback } from 'react';
 import type { ReactNode } from 'react';
@@ -11,6 +13,7 @@ import type { StyleProp, ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useTheme } from '../theme';
 import { motion, radius, spacing, touchTarget } from '../tokens';
+import { tap } from '../haptics';
 import { Text } from './Text';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -53,6 +56,13 @@ export function Button({
     scale.value = withSpring(1, motion.pressSpring);
   }, [scale]);
 
+  const handlePress = useCallback(() => {
+    if (!disabled && !loading) {
+      tap();
+    }
+    onPress?.();
+  }, [disabled, loading, onPress]);
+
   const height = size === 'lg' ? 56 : touchTarget.min;
   const backgroundColor =
     variant === 'primary'
@@ -71,7 +81,7 @@ export function Button({
 
   return (
     <AnimatedPressable
-      onPress={onPress}
+      onPress={handlePress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled || loading}

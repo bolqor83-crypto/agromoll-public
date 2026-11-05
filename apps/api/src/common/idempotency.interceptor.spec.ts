@@ -86,16 +86,17 @@ describe('IdempotencyInterceptor', () => {
 
     const result = await new Promise((resolve) => {
       interceptor
-        .intercept(
-          makeContext({ 'x-idempotency-key': 'key-1' }, handler),
-          { handle: () => of({ id: 'b-1', status: 'requested' }) },
-        )
+        .intercept(makeContext({ 'x-idempotency-key': 'key-1' }, handler), {
+          handle: () => of({ id: 'b-1', status: 'requested' }),
+        })
         .subscribe(resolve);
     });
 
     expect(result).toEqual({ id: 'b-1', status: 'requested' });
     expect(prisma.outboxOperation.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ clientUuid: 'key-1', state: 'received' }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ clientUuid: 'key-1', state: 'received' }),
+      }),
     );
     expect(prisma.outboxOperation.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -125,15 +126,12 @@ describe('IdempotencyInterceptor', () => {
     let handlerCalled = false;
     const result = await new Promise((resolve) => {
       interceptor
-        .intercept(
-          makeContext({ 'x-idempotency-key': 'key-1' }, handler),
-          {
-            handle: () => {
-              handlerCalled = true;
-              return of({ id: 'should-not-happen' });
-            },
+        .intercept(makeContext({ 'x-idempotency-key': 'key-1' }, handler), {
+          handle: () => {
+            handlerCalled = true;
+            return of({ id: 'should-not-happen' });
           },
-        )
+        })
         .subscribe(resolve);
     });
 
@@ -160,10 +158,9 @@ describe('IdempotencyInterceptor', () => {
     await expect(
       new Promise((_, reject) => {
         interceptor
-          .intercept(
-            makeContext({ 'x-idempotency-key': 'key-1' }, handler),
-            { handle: () => of({}) },
-          )
+          .intercept(makeContext({ 'x-idempotency-key': 'key-1' }, handler), {
+            handle: () => of({}),
+          })
           .subscribe({ error: reject });
       }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -189,10 +186,9 @@ describe('IdempotencyInterceptor', () => {
     await expect(
       new Promise((_, reject) => {
         interceptor
-          .intercept(
-            makeContext({ 'x-idempotency-key': 'key-1' }, handler),
-            { handle: () => of({}) },
-          )
+          .intercept(makeContext({ 'x-idempotency-key': 'key-1' }, handler), {
+            handle: () => of({}),
+          })
           .subscribe({ error: reject });
       }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -216,10 +212,9 @@ describe('IdempotencyInterceptor', () => {
 
     const result = await new Promise((resolve) => {
       interceptor
-        .intercept(
-          makeContext({ 'x-idempotency-key': 'key-1' }, handler),
-          { handle: () => of({ id: 'b-2', retried: true }) },
-        )
+        .intercept(makeContext({ 'x-idempotency-key': 'key-1' }, handler), {
+          handle: () => of({ id: 'b-2', retried: true }),
+        })
         .subscribe(resolve);
     });
 
@@ -243,10 +238,9 @@ describe('IdempotencyInterceptor', () => {
     await expect(
       new Promise((_, reject) => {
         interceptor
-          .intercept(
-            makeContext({ 'x-idempotency-key': 'key-err' }, handler),
-            { handle: () => throwError(() => new Error('бронь больше остатка')) },
-          )
+          .intercept(makeContext({ 'x-idempotency-key': 'key-err' }, handler), {
+            handle: () => throwError(() => new Error('бронь больше остатка')),
+          })
           .subscribe({ error: reject });
       }),
     ).rejects.toThrow('бронь больше остатка');

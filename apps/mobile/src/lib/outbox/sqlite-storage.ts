@@ -81,7 +81,9 @@ class SqliteOutboxStorage implements OutboxStorage {
         record.lastError,
         record.nextAttemptAt,
         record.createdAt,
-        record.result === null || record.result === undefined ? null : JSON.stringify(record.result),
+        record.result === null || record.result === undefined
+          ? null
+          : JSON.stringify(record.result),
       ],
     );
   }

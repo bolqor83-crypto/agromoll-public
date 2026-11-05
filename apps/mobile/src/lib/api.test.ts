@@ -31,7 +31,11 @@ const REFRESH = 'refresh-token-1';
 let adapterMock: jest.Mock;
 
 /** Ответ axios: 2xx — resolve, иначе — reject с AxiosError (как делает реальный адаптер). */
-function respond<T>(status: number, data: T, config: InternalAxiosRequestConfig): Promise<AxiosResponse<T>> {
+function respond<T>(
+  status: number,
+  data: T,
+  config: InternalAxiosRequestConfig,
+): Promise<AxiosResponse<T>> {
   const response: AxiosResponse<T> = {
     status,
     statusText: String(status),
@@ -43,28 +47,34 @@ function respond<T>(status: number, data: T, config: InternalAxiosRequestConfig)
     return Promise.resolve(response);
   }
   return Promise.reject(
-    new AxiosError(`Request failed with status code ${status}`, 'ERR_BAD_REQUEST', config, null, response),
+    new AxiosError(
+      `Request failed with status code ${status}`,
+      'ERR_BAD_REQUEST',
+      config,
+      null,
+      response,
+    ),
   );
 }
 
 /** Полный валидный ListingDto — мок ответа, проходящий zod-валидацию. */
 const VALID_LISTING = {
-    id: 'l-1',
-    sellerId: 'u-1',
-    sellerName: 'ФХ «Донская долина»',
-    title: 'Помидоры розовые',
-    category: 'vegetables',
-    unit: 'kg',
-    pricePerUnit: '85.50',
-    quantityAvailable: 100,
-    quantityReserved: 0,
-    quantityAvailableForBooking: 100,
-    lineNumber: 12,
-    isPerishable: true,
-    status: 'active',
-    createdAt: '2026-11-05T06:00:00.000Z',
-    updatedAt: '2026-11-05T06:00:00.000Z',
-  };
+  id: 'l-1',
+  sellerId: 'u-1',
+  sellerName: 'ФХ «Донская долина»',
+  title: 'Помидоры розовые',
+  category: 'vegetables',
+  unit: 'kg',
+  pricePerUnit: '85.50',
+  quantityAvailable: 100,
+  quantityReserved: 0,
+  quantityAvailableForBooking: 100,
+  lineNumber: 12,
+  isPerishable: true,
+  status: 'active',
+  createdAt: '2026-11-05T06:00:00.000Z',
+  updatedAt: '2026-11-05T06:00:00.000Z',
+};
 
 describe('api-клиент (axios + JWT)', () => {
   beforeAll(() => {
@@ -208,7 +218,11 @@ describe('api-клиент (axios + JWT)', () => {
         // сервер обнаружил повторное использование: семья отозвана
         return respond(
           401,
-          { statusCode: 401, message: 'Сессия завершена. Войдите снова', code: 'TOKEN_REUSE_DETECTED' },
+          {
+            statusCode: 401,
+            message: 'Сессия завершена. Войдите снова',
+            code: 'TOKEN_REUSE_DETECTED',
+          },
           config,
         );
       }

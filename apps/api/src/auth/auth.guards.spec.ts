@@ -118,10 +118,7 @@ describe('JwtAuthGuard (Authorization: Bearer)', () => {
   });
 
   it('v0.3.1: проверяет блэклист по jti и кладёт auth-контекст в request', async () => {
-    const token = jwt.sign(
-      { sub: 'u-1', role: 'buyer', familyId: 'f-1' },
-      { jwtid: 'j-1' },
-    );
+    const token = jwt.sign({ sub: 'u-1', role: 'buyer', familyId: 'f-1' }, { jwtid: 'j-1' });
     auth.getAuthenticatedUser.mockResolvedValue({
       id: 'u-1',
       role: 'buyer',

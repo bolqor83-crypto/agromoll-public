@@ -5,10 +5,11 @@
 
 Мобильное приложение для оптово-розничного рынка «Агро Молл» (Ростов-на-Дону).
 **Текущий этап — v0.3.0 «Аутентификация и офлайн-ядро»**: вход по телефону
-+ JWT, локальная очередь мутаций (outbox) с идемпотентностью на сервере,
-zod-валидация ответов API на клиенте.
-Бронирование (v0.2.0) полностью сохранено. Долги, учёт часов, доставка
-и оплата — на следующих этапах.
+
+- JWT, локальная очередь мутаций (outbox) с идемпотентностью на сервере,
+  zod-валидация ответов API на клиенте.
+  Бронирование (v0.2.0) полностью сохранено. Долги, учёт часов, доставка
+  и оплата — на следующих этапах.
 
 ## Что нового в v0.3.0
 
@@ -24,7 +25,7 @@ zod-валидация ответов API на клиенте.
     `X-User-Id`; роль всегда перечитывается из БД — подделать нельзя,
     смена роли действует сразу;
   - `GET /users/me`, `PATCH /users/me/role` — роль хранится на сервере;
-  - мобильный клиент: экран входа (маска +7 (___) ___-__-__, 6 ячеек кода
+  - мобильный клиент: экран входа (маска +7 (_**) _**-**-**, 6 ячеек кода
     с авто-переходом, таймер повторной отправки 60 с, dev-подсказка),
     токены в `expo-secure-store`, авто-refresh при 401 (single-flight
     axios-интерцептор);
@@ -69,28 +70,28 @@ zod-валидация ответов API на клиенте.
 
 ### Скриншоты v0.3.0 (светлая + тёмная тема)
 
-| Вход, шаг 1 — телефон                                        | Вход, шаг 2 — код из SMS                                     |
-| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Вход, шаг 1 — телефон                                            | Вход, шаг 2 — код из SMS                                         |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------- |
 | ![Вход 1, светлая](docs/design/screenshots/light-auth-step1.png) | ![Вход 2, светлая](docs/design/screenshots/light-auth-step2.png) |
 | ![Вход 1, тёмная](docs/design/screenshots/dark-auth-step1.png)   | ![Вход 2, тёмная](docs/design/screenshots/dark-auth-step2.png)   |
 
-| Индикатор офлайна: 3 состояния                                | Экран «Очередь»                                              |
-| ------------------------------------------------------------- | ------------------------------------------------------------ |
+| Индикатор офлайна: 3 состояния                                     | Экран «Очередь»                                              |
+| ------------------------------------------------------------------ | ------------------------------------------------------------ |
 | ![Офлайн-индикатор](docs/design/screenshots/offline-indicator.png) | ![Очередь, светлая](docs/design/screenshots/light-queue.png) |
-|                                                               | ![Очередь, тёмная](docs/design/screenshots/dark-queue.png)   |
+|                                                                    | ![Очередь, тёмная](docs/design/screenshots/dark-queue.png)   |
 
 Скриншоты v0.2.0 (лента, брони, витрина, входящие) — в
 [истории README](https://github.com/bolqor83-crypto/agromoll/blob/v0.2.0/README.md).
 
 ## Стек
 
-| Слой     | Технологии                                                                                                                       |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Mobile   | React Native (Expo SDK 52), Expo Router 4, TypeScript, Zustand, Reanimated 3, axios, expo-sqlite, expo-secure-store, NetInfo     |
-| API      | NestJS 11, TypeScript, Prisma 6, @nestjs/jwt, @nestjs/throttler, ioredis, pino, @nestjs/schedule (cron TTL)                        |
-| БД       | PostgreSQL 16 + PostGIS 3.4, Redis 7 (SMS-коды: TTL 5 минут)                                                                       |
-| Монорепо | pnpm workspaces + Turborepo, ESLint 9, Prettier, GitHub Actions                                                                    |
-| Пакеты   | `packages/types` (общие типы), `packages/validation` (zod: запросы + ответы), `packages/ui` (дизайн-система)                        |
+| Слой     | Технологии                                                                                                                   |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Mobile   | React Native (Expo SDK 52), Expo Router 4, TypeScript, Zustand, Reanimated 3, axios, expo-sqlite, expo-secure-store, NetInfo |
+| API      | NestJS 11, TypeScript, Prisma 6, @nestjs/jwt, @nestjs/throttler, ioredis, pino, @nestjs/schedule (cron TTL)                  |
+| БД       | PostgreSQL 16 + PostGIS 3.4, Redis 7 (SMS-коды: TTL 5 минут)                                                                 |
+| Монорепо | pnpm workspaces + Turborepo, ESLint 9, Prettier, GitHub Actions                                                              |
+| Пакеты   | `packages/types` (общие типы), `packages/validation` (zod: запросы + ответы), `packages/ui` (дизайн-система)                 |
 
 ## Структура
 
@@ -280,15 +281,15 @@ CI (`.github/workflows/ci.yml`):
 
 ## Архитектурные решения
 
-| ADR                                              | Тема                                                            |
-| ------------------------------------------------ | ---------------------------------------------------------------- |
-| [ADR-001](docs/adr/ADR-001-tech-stack.md)        | Технологический стек (Expo, NestJS, Prisma, PostGIS, Redis)     |
-| [ADR-002](docs/adr/ADR-002-design-system.md)     | Дизайн-система: токены, палитра, тёмная тема, тактильность      |
-| [ADR-003](docs/adr/ADR-003-monorepo.md)          | Монорепозиторий: pnpm workspaces + Turborepo                    |
-| [ADR-004](docs/adr/ADR-004-booking-model.md)     | Модель бронирования: статусы, резерв, TTL 30 минут              |
-| [ADR-005](docs/adr/ADR-005-visual-components.md) | Визуальные компоненты v0.2.0: Skeleton, EmptyState, TabBar      |
-| [ADR-006](docs/adr/ADR-006-offline-core.md)      | Офлайн-ядро: outbox, идемпотентность, конфликты                 |
-| [ADR-007](docs/adr/ADR-007-auth.md)              | Аутентификация: телефон + JWT, rate limit, безопасность MVP     |
+| ADR                                              | Тема                                                        |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| [ADR-001](docs/adr/ADR-001-tech-stack.md)        | Технологический стек (Expo, NestJS, Prisma, PostGIS, Redis) |
+| [ADR-002](docs/adr/ADR-002-design-system.md)     | Дизайн-система: токены, палитра, тёмная тема, тактильность  |
+| [ADR-003](docs/adr/ADR-003-monorepo.md)          | Монорепозиторий: pnpm workspaces + Turborepo                |
+| [ADR-004](docs/adr/ADR-004-booking-model.md)     | Модель бронирования: статусы, резерв, TTL 30 минут          |
+| [ADR-005](docs/adr/ADR-005-visual-components.md) | Визуальные компоненты v0.2.0: Skeleton, EmptyState, TabBar  |
+| [ADR-006](docs/adr/ADR-006-offline-core.md)      | Офлайн-ядро: outbox, идемпотентность, конфликты             |
+| [ADR-007](docs/adr/ADR-007-auth.md)              | Аутентификация: телефон + JWT, rate limit, безопасность MVP |
 
 ## Ветвление и коммиты
 

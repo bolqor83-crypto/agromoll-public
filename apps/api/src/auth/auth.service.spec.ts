@@ -42,10 +42,14 @@ function makeUser(overrides: Partial<UserRecord> = {}): UserRecord {
 }
 
 /** Полный вход через сервис (код-заглушка dev) — чтобы получить живую пару. */
-async function login(service: AuthService, prismaMock: {
-  user: { upsert: jest.Mock; update: jest.Mock; findUnique: jest.Mock };
-  session: Record<string, jest.Mock>;
-}, phone = '+79611234567') {
+async function login(
+  service: AuthService,
+  prismaMock: {
+    user: { upsert: jest.Mock; update: jest.Mock; findUnique: jest.Mock };
+    session: Record<string, jest.Mock>;
+  },
+  phone = '+79611234567',
+) {
   prismaMock.user.upsert.mockResolvedValue(makeUser());
   await service.requestCode(phone);
   prismaMock.user.update.mockResolvedValue(makeUser({ phoneVerified: true }));
@@ -96,12 +100,7 @@ describe('AuthService', () => {
     sessions = new InMemorySessionStore();
     const jwt = new JwtService({ secret: ACCESS_SECRET }); // подпись access
     // refresh подписывается своим секретом через options.secret — базовый не важен
-    service = new AuthService(
-      prisma as unknown as PrismaService,
-      jwt,
-      codes,
-      sessions,
-    );
+    service = new AuthService(prisma as unknown as PrismaService, jwt, codes, sessions);
   });
 
   describe('requestCode', () => {
@@ -266,10 +265,7 @@ describe('AuthService', () => {
 
     it('пользователь удалён — 401', async () => {
       const jwt = new JwtService({ secret: REFRESH_SECRET });
-      const refreshToken = jwt.sign(
-        { sub: 'ghost', familyId: 'f-1' },
-        { jwtid: 'j-1' },
-      );
+      const refreshToken = jwt.sign({ sub: 'ghost', familyId: 'f-1' }, { jwtid: 'j-1' });
       prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(service.refresh(refreshToken)).rejects.toBeInstanceOf(UnauthorizedException);

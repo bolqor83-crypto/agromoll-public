@@ -69,8 +69,9 @@ export default function InboxScreen() {
     });
   }, [state, overrides]);
 
-  const pendingCount =
-    merged.filter((b) => b.status === 'requested' || b.status === 'counter_offered').length;
+  const pendingCount = merged.filter(
+    (b) => b.status === 'requested' || b.status === 'counter_offered',
+  ).length;
 
   return (
     <Screen scroll={false}>
