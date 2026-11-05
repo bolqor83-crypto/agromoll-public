@@ -87,9 +87,10 @@ model User {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  listings      Listing[]
-  bookings      Booking[] // брони, созданные пользователем как покупатель
-  bookingEvents BookingEvent[] // действия пользователя в журнале броней
+  listings         Listing[]
+  bookings         Booking[] // брони, созданные пользователем как покупатель
+  bookingEvents    BookingEvent[] // действия пользователя в журнале броней
+  outboxOperations OutboxOperation[] // идемпотентные операции (ADR-006)
 
   @@map("users")
 }
@@ -157,4 +158,49 @@ model BookingEvent {
   @@index([bookingId])
   @@index([actorId])
   @@map("booking_events")
+}
+
+/// Тип идемпотентной операции из мобильного outbox (ADR-006).
+/// create_debt и confirm_delivery — будущее ядро долгов/доставки,
+/// добавлены сразу, чтобы не менять enum дважды.
+enum OutboxOperationType {
+  create_booking
+  cancel_booking
+  confirm_booking
+  counter_offer_booking
+  accept_counter_booking
+  create_debt
+  confirm_delivery
+}
+
+/// Состояние операции на сервере (ADR-006).
+enum OutboxState {
+  received
+  processed
+  failed
+}
+
+/// Серверная сторона идемпотентности: одна строка на X-Idempotency-Key.
+///
+/// Гарантия «ровно один раз» между клиентом и сервером: при повторном
+/// запросе с тем же clientUuid сервер отвечает сохранённым результатом,
+/// не выполняя операцию повторно. Строки не удаляются — это журнал того,
+/// какие операции клиент уже провёл (пригодится и для поддержки).
+model OutboxOperation {
+  id            String              @id @default(uuid())
+  /// UUID от клиента (X-Idempotency-Key). Уникален глобально.
+  clientUuid    String              @unique
+  userId        String
+  user          User                @relation(fields: [userId], references: [id])
+  operationType OutboxOperationType
+  /// Тело запроса как пришло — для разбора инцидентов.
+  payload       Json
+  /// Ответ обработчика ({status, body}) — проигрывается при повторе.
+  result        Json?
+  state         OutboxState         @default(received)
+  createdAt     DateTime            @default(now())
+  processedAt   DateTime?
+
+  @@index([userId])
+  @@map("outbox_operations")
 }
