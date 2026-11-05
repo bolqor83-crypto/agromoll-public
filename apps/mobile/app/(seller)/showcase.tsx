@@ -15,6 +15,7 @@ import {
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { ScreenHeader } from '@/components';
+import { DebtSummaryWidget } from '@/components/DebtSummaryWidget';
 import { ListingCard } from '@/components/ListingCard';
 import { CreateListingModal } from '@/components/CreateListingModal';
 import { api, isInvalidResponseError } from '@/lib/api';
@@ -32,6 +33,7 @@ type ShowcaseState =
  */
 export default function ShowcaseScreen() {
   const userName = useAuthStore((s) => s.user?.displayName ?? 'Витрина');
+  const totalConfirmations = useAuthStore((s) => s.user?.totalConfirmations ?? 0);
   const insets = useSafeAreaInsets();
   const { colors, mode } = useTheme();
   const [state, setState] = useState<ShowcaseState>({ phase: 'loading' });
@@ -68,7 +70,7 @@ export default function ShowcaseScreen() {
     <Screen scroll={false}>
       <ScreenHeader
         title="Витрина"
-        subtitle={`${userName} · ваши лоты`}
+        subtitle={`${userName} · подтверждено сделок: ${totalConfirmations}`}
         badge={
           state.phase === 'ready' && state.demo ? (
             <Badge label="Демо-данные · API недоступен" variant="attention" />
@@ -77,6 +79,10 @@ export default function ShowcaseScreen() {
           )
         }
       />
+      {/* Виджет долгов (v0.4.0): «Вам должны / Вы должны», янтарный при просрочке. */}
+      <View style={{ paddingHorizontal: spacing.lg }}>
+        <DebtSummaryWidget />
+      </View>
       {state.phase === 'loading' ? (
         <View style={{ gap: spacing.md }}>
           <SkeletonCard />

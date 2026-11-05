@@ -49,6 +49,8 @@ function routeNameToLabel(name: string): string {
   const labels: Record<string, string> = {
     feed: 'Лента',
     bookings: 'Мои брони',
+    debts: 'Долги',
+    hours: 'Часы',
     showcase: 'Витрина',
     inbox: 'Входящие',
     radar: 'Радар',
@@ -61,6 +63,8 @@ function routeNameToIcon(name: string): TabBarItem['icon'] {
   const icons: Record<string, TabBarItem['icon']> = {
     feed: 'basket-outline',
     bookings: 'bookmark-outline',
+    debts: 'wallet-outline',
+    hours: 'time-outline',
     showcase: 'storefront-outline',
     inbox: 'mail-outline',
     radar: 'locate-outline',

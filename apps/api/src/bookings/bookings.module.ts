@@ -2,23 +2,34 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BookingsController } from './bookings.controller';
 import { BookingTtlCron } from './booking-ttl.cron';
-import { BOOKING_TTL_MINUTES, DEFAULT_BOOKING_TTL_MINUTES } from './bookings.constants';
+import { BookingAutoConfirmCron } from './booking-auto-confirm.cron';
+import {
+  BOOKING_TTL_MINUTES,
+  DEFAULT_BOOKING_TTL_MINUTES,
+  BOOKING_AUTO_CONFIRM_HOURS,
+  DEFAULT_BOOKING_AUTO_CONFIRM_HOURS,
+} from './bookings.constants';
 import { BookingsService } from './bookings.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { WorkHoursModule } from '../work-hours/work-hours.module';
 
 /**
- * Модуль броней v0.2.0: флоу «запрос → корректировка → подтверждение».
+ * Модуль броней v0.2.0 + v0.4.0-C (приёмка, ADR-012).
  *
- * - BookingsService — машина состояний + атомарный резерв количества;
- * - BookingTtlCron — гашение просроченных броней каждую минуту;
- * - TTL настраивается через BOOKING_TTL_MINUTES (по умолчанию 30).
- *
- * PrismaModule глобальный, поэтому здесь не импортируется.
+ * - BookingsService — машина состояний + атомарный резерв количества
+ *   + confirm-delivery (приёмка) + авто-подтверждение;
+ * - BookingTtlCron — гашение просроченных запросов каждую минуту;
+ * - BookingAutoConfirmCron — завершение «забытых» приёмок ежечасно;
+ * - TTL и окно авто-подтверждения — ENV (BOOKING_TTL_MINUTES,
+ *   BOOKING_AUTO_CONFIRM_HOURS).
  */
 @Module({
+  imports: [NotificationsModule, WorkHoursModule],
   controllers: [BookingsController],
   providers: [
     BookingsService,
     BookingTtlCron,
+    BookingAutoConfirmCron,
     {
       provide: BOOKING_TTL_MINUTES,
       inject: [ConfigService],
@@ -27,6 +38,19 @@ import { BookingsService } from './bookings.service';
         const value = raw === undefined || raw === null ? DEFAULT_BOOKING_TTL_MINUTES : Number(raw);
         if (!Number.isFinite(value) || value <= 0) {
           return DEFAULT_BOOKING_TTL_MINUTES;
+        }
+        return Math.floor(value);
+      },
+    },
+    {
+      provide: BOOKING_AUTO_CONFIRM_HOURS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService): number => {
+        const raw = config.get<number>('BOOKING_AUTO_CONFIRM_HOURS');
+        const value =
+          raw === undefined || raw === null ? DEFAULT_BOOKING_AUTO_CONFIRM_HOURS : Number(raw);
+        if (!Number.isFinite(value) || value <= 0) {
+          return DEFAULT_BOOKING_AUTO_CONFIRM_HOURS;
         }
         return Math.floor(value);
       },

@@ -13,3 +13,4 @@ export * from './components/Skeleton';
 export * from './components/EmptyState';
 export * from './components/TabBar';
 export * from './components/PullToRefresh';
+export * from './components/ProgressBar';

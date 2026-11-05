@@ -16,6 +16,9 @@ export const OUTBOX_OPERATION_TYPES = [
   'accept_counter_booking',
   'create_debt',
   'confirm_delivery',
+  'settle_debt',
+  'dispute_debt',
+  'resolve_debt',
 ] as const;
 
 export type OutboxOperationType = (typeof OUTBOX_OPERATION_TYPES)[number];

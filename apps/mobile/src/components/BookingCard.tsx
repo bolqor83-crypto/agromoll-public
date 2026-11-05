@@ -14,6 +14,8 @@ export interface BookingCardProps {
   pendingLabel?: string;
   /** Демо-режим: кнопки не ходят в API. */
   demo: boolean;
+  /** Открыть модалку приёмки (v0.4.0-C, только покупатель подтверждённой брони). */
+  onConfirmDelivery?: (booking: BookingDto) => void;
 }
 
 /**
@@ -24,11 +26,13 @@ export interface BookingCardProps {
  * UI сразу показывает оптимистичное состояние (список перерисовывает
  * стор по событиям очереди).
  */
-export function BookingCard({ booking, counterOffer, pendingLabel, demo }: BookingCardProps) {
+export function BookingCard({ booking, counterOffer, pendingLabel, demo, onConfirmDelivery }: BookingCardProps) {
   const [busy, setBusy] = useState<'accept' | 'cancel' | null>(null);
 
   const canCancel = booking.status === 'requested' || booking.status === 'counter_offered';
   const canAccept = booking.status === 'counter_offered';
+  // Приёмка — только покупатель подтверждённой брони (ADR-012).
+  const canConfirmDelivery = booking.status === 'confirmed';
 
   const run = async (action: 'accept' | 'cancel'): Promise<void> => {
     if (demo) {
@@ -120,6 +124,24 @@ export function BookingCard({ booking, counterOffer, pendingLabel, demo }: Booki
             </View>
           ) : null}
         </View>
+      ) : null}
+
+      {/* Приёмка (v0.4.0-C, ADR-012): confirmed → completed/disputed. */}
+      {canConfirmDelivery ? (
+        <Button
+          title="Подтвердить получение"
+          onPress={() => {
+            if (demo) {
+              tap();
+              Alert.alert(
+                'Демо-режим',
+                'API недоступен — действие не выполнено. Поднимите pnpm dev, чтобы работать по-настоящему.',
+              );
+              return;
+            }
+            onConfirmDelivery?.(booking);
+          }}
+        />
       ) : null}
     </Card>
   );

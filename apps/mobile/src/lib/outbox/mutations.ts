@@ -74,7 +74,11 @@ export async function counterOfferMutation(
 
 async function enqueueWithOverride(
   operationType:
-    'cancel_booking' | 'confirm_booking' | 'accept_counter_booking' | 'counter_offer_booking',
+    | 'cancel_booking'
+    | 'confirm_booking'
+    | 'accept_counter_booking'
+    | 'counter_offer_booking'
+    | 'confirm_delivery',
   payload: Record<string, unknown>,
   bookingId: string,
   optimisticStatus: BookingStatus,
@@ -84,4 +88,26 @@ async function enqueueWithOverride(
   useOutboxStore.getState().setOverride(bookingId, optimisticStatus, record.clientUuid);
   void outbox.processQueue().catch(() => undefined);
   return record.clientUuid;
+}
+
+/**
+ * Подтвердить приёмку (buyer, v0.4.0-C, ADR-012): подтверждённая бронь →
+ * completed (ok/minor_issue) или disputed (major_issue). Оптимистичный
+ * статус зависит от оценки качества — экран её знает до отправки.
+ */
+export async function confirmDeliveryMutation(
+  bookingId: string,
+  body: {
+    receivedQuantity: number;
+    qualityFlag: 'ok' | 'minor_issue' | 'major_issue';
+    qualityNotes?: string;
+  },
+): Promise<string> {
+  const optimisticStatus: BookingStatus = body.qualityFlag === 'major_issue' ? 'disputed' : 'completed';
+  return enqueueWithOverride(
+    'confirm_delivery',
+    { bookingId, ...body },
+    bookingId,
+    optimisticStatus,
+  );
 }

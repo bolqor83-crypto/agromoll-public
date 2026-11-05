@@ -12,11 +12,13 @@ import {
 import {
   BookingStatusSchema,
   CancelBookingSchema,
+  ConfirmDeliverySchema,
   CounterOfferSchema,
   CreateBookingSchema,
 } from '@agromoll/validation';
 import type {
   CancelBookingInput,
+  ConfirmDeliveryInput,
   CounterOfferInput,
   CreateBookingInput,
 } from '@agromoll/validation';
@@ -125,6 +127,28 @@ export class BookingsController {
       bookingId: id,
       actorId: user.id,
       reason: body.reason,
+    });
+    return toBookingDto(booking);
+  }
+
+  /**
+   * Подтвердить приёмку — только buyer брони (v0.4.0-C, ADR-012).
+   * ok/minor → completed; major → disputed + уведомление продавцу.
+   * Идемпотентно (confirm_delivery в enum OutboxOperationType с v0.3.0).
+   */
+  @Post(':id/confirm-delivery')
+  @Idempotent('confirm_delivery')
+  async confirmDelivery(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(ConfirmDeliverySchema)) body: ConfirmDeliveryInput,
+  ) {
+    const booking = await this.bookings.confirmDelivery({
+      bookingId: id,
+      actorId: user.id,
+      receivedQuantity: body.receivedQuantity,
+      qualityFlag: body.qualityFlag,
+      qualityNotes: body.qualityNotes,
     });
     return toBookingDto(booking);
   }

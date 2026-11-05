@@ -1,7 +1,7 @@
 /**
  * Форматирование цен, количеств и времени — единое для всех экранов.
  */
-import type { BookingStatus, ListingUnit } from '@agromoll/types';
+import type { BookingStatus, DebtStatus, ListingUnit } from '@agromoll/types';
 import { LISTING_UNIT_LABELS } from '@agromoll/types';
 
 /** «85,50 ₽/кг» — цена всегда с двумя знаками, копейки важны на опте. */
@@ -39,6 +39,36 @@ export function bookingBadgeVariant(status: BookingStatus): 'success' | 'attenti
       return 'attention';
     default:
       // requested / cancelled / expired — спокойный нейтральный
+      return 'neutral';
+  }
+}
+
+/**
+ * «12 500 ₽» / «12 500,50 ₽» — сумма долга из строки Decimal:
+ * пробел-разделитель тысяч, копейки — только если есть.
+ */
+export function formatMoney(amount: string): string {
+  const value = Number.parseFloat(amount);
+  const safe = Number.isFinite(value) ? value : 0;
+  const hasKopecks = Math.round(safe * 100) % 100 !== 0;
+  const fixed = hasKopecks
+    ? safe.toFixed(2).replace('.', ',')
+    : String(Math.round(safe));
+  return `${fixed.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0')} ₽`;
+}
+
+/**
+ * Вариант бейджа статуса долга (ADR-010): settled — зелёный,
+ * disputed — янтарный, active/cancelled — нейтральный.
+ * Просроченный active получает янтарный прямо в карточке (isOverdue).
+ */
+export function debtBadgeVariant(status: DebtStatus): 'success' | 'attention' | 'neutral' {
+  switch (status) {
+    case 'settled':
+      return 'success';
+    case 'disputed':
+      return 'attention';
+    default:
       return 'neutral';
   }
 }

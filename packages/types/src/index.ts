@@ -73,6 +73,8 @@ export const BOOKING_STATUSES = [
   'confirmed',
   'cancelled',
   'expired',
+  'completed',
+  'disputed',
 ] as const;
 
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
@@ -87,6 +89,8 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   confirmed: 'Подтверждено',
   cancelled: 'Отменено',
   expired: 'Истекло',
+  completed: 'Завершено',
+  disputed: 'Спор по приёмке',
 };
 
 /** Действия журнала брони. Совпадают с enum BookingAction в Prisma-схеме. */
@@ -97,9 +101,23 @@ export const BOOKING_ACTIONS = [
   'confirmed',
   'cancelled',
   'expired',
+  'delivery_confirmed',
+  'delivery_disputed',
+  'system_auto_confirmed',
 ] as const;
 
 export type BookingAction = (typeof BOOKING_ACTIONS)[number];
+
+/** Оценка качества поставки при приёмке (v0.4.0-C, ADR-012). */
+export const QUALITY_FLAGS = ['ok', 'minor_issue', 'major_issue'] as const;
+
+export type QualityFlag = (typeof QUALITY_FLAGS)[number];
+
+export const QUALITY_FLAG_LABELS: Record<QualityFlag, string> = {
+  ok: 'Всё в порядке',
+  minor_issue: 'Мелкие проблемы',
+  major_issue: 'Серьёзная проблема',
+};
 
 /**
  * Лот продавца (DTO уровня API, без служебных полей БД).
@@ -136,6 +154,16 @@ export interface BookingDto {
   confirmedQuantity: number | null;
   status: BookingStatus;
   expiresAt: string;
+  /** Момент подтверждения брони продавцом (v0.4.0-C). */
+  confirmedAt: string | null;
+  /** Момент подтверждения приёмки покупателем (v0.4.0-C). */
+  deliveryConfirmedAt: string | null;
+  /** Фактически полученное количество (v0.4.0-C). */
+  receivedQuantity: number | null;
+  /** Комментарий качества при приёмке. */
+  qualityNotes: string | null;
+  /** Оценка качества поставки (ok / minor / major, ADR-012). */
+  qualityFlag: QualityFlag;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,6 +197,10 @@ export interface UserDto {
   phone: string | null;
   /** Прошёл ли подтверждение номера SMS-кодом. */
   phoneVerified: boolean;
+  /** Подтверждённых приёмок (репутационный счётчик, v0.4.0-C, ADR-012). */
+  totalConfirmations: number;
+  /** Споров по качеству (репутационный счётчик, v0.4.0-C). */
+  totalDisputes: number;
   createdAt: string;
 }
 
@@ -205,6 +237,189 @@ export function normalizePhone(input: string): string | null {
   }
   return `+7${digits}`;
 }
+
+// ─── Долги (v0.4.0, ADR-010) ────────────────────────────────────────────────
+
+/** Статусы долга. Совпадают с enum DebtStatus в Prisma-схеме. */
+export const DEBT_STATUSES = ['active', 'settled', 'disputed', 'cancelled'] as const;
+
+export type DebtStatus = (typeof DEBT_STATUSES)[number];
+
+/** Человекочитаемые статусы долга для UI. */
+export const DEBT_STATUS_LABELS: Record<DebtStatus, string> = {
+  active: 'Активен',
+  settled: 'Погашен',
+  disputed: 'Спор',
+  cancelled: 'Аннулирован',
+};
+
+/** Действия журнала долга. Совпадают с enum DebtAction в Prisma-схеме. */
+export const DEBT_ACTIONS = [
+  'created',
+  'settled',
+  'disputed',
+  'cancelled',
+  'reminder_sent',
+  'resolve_requested',
+  'resolve_confirmed',
+] as const;
+
+export type DebtAction = (typeof DEBT_ACTIONS)[number];
+
+/**
+ * Порог просрочки долга: активный долг старше 30 дней считается
+ * просроченным — янтарный акцент в виджете и карточке (ADR-010).
+ */
+export const DEBT_OVERDUE_DAYS = 30;
+
+/**
+ * Долг (DTO уровня API). Платформа не проводит деньги: запись — только
+ * договорённость сторон («товар отпущен в долг», ADR-010).
+ */
+export interface DebtDto {
+  id: string;
+  creditorId: string;
+  creditorName?: string;
+  debtorId: string;
+  debtorName?: string;
+  /** Decimal от Prisma приходит строкой — точность денег не теряется. */
+  amount: string;
+  currency: string;
+  description: string | null;
+  listingId: string | null;
+  bookingId: string | null;
+  status: DebtStatus;
+  /** Активный долг старше DEBT_OVERDUE_DAYS дней. */
+  isOverdue: boolean;
+  /** Кулдаун напоминаний (24 ч) прошёл — кредитор может напомнить. */
+  canRemind: boolean;
+  /** ISO-момент следующего допустимого напоминания; null — можно сразу. */
+  nextReminderAt: string | null;
+  /** Кто из сторон первым подтвердил разрешение спора (обоюдное, ADR-010). */
+  resolveRequestedById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  settledAt: string | null;
+}
+
+/** Часть сводки по долгам: сумма (строкой, Decimal) и количество. */
+export interface DebtsSummaryPart {
+  total: string;
+  count: number;
+  overdueCount: number;
+}
+
+/** Ответ GET /debts/summary — виджет главного экрана. */
+export interface DebtsSummaryDto {
+  /** Мне должны (я кредитор, активные). */
+  owedToMe: DebtsSummaryPart;
+  /** Я должен (я дебитор, активные). */
+  iOwe: DebtsSummaryPart;
+}
+
+/** Контрагент для формы создания долга — с кем уже были сделки. */
+export interface CounterpartyDto {
+  id: string;
+  displayName: string;
+  /** ISO-дата последней сделки (брони). */
+  lastDealAt: string;
+}
+
+/** Ответ POST /debts/:id/reminder. */
+export interface ReminderResultDto {
+  sentAt: string;
+  nextReminderAt: string;
+}
+
+// ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
+
+/** Типы in-app уведомлений. Совпадают с enum NotificationType в Prisma-схеме. */
+export const NOTIFICATION_TYPES = [
+  'debt_reminder',
+  'booking_delivery_confirmed',
+  'booking_delivery_disputed',
+] as const;
+
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/** In-app уведомление (DTO уровня API). */
+export interface NotificationDto {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** Ответ GET /notifications/me. */
+export interface NotificationsListDto {
+  items: NotificationDto[];
+  unreadCount: number;
+}
+
+// ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ────────────────────────────────────
+
+/**
+ * Рабочая сессия пары «водитель — продавец» (DTO уровня API).
+ * Это НЕ биллинг: только часы, никаких денег в интерфейсе.
+ */
+export interface WorkHoursSessionDto {
+  id: string;
+  driverId: string;
+  driverName: string;
+  sellerId: string;
+  sellerName: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationMinutes: number | null;
+  /** Месяц старта «YYYY-MM». */
+  month: string;
+}
+
+/** Пара за текущий месяц — строка экрана «Мои часы» / «Часы с водителями». */
+export interface WorkHoursPairDto {
+  /** Противоположная сторона пары: продавец (для driver) или водитель (для seller). */
+  counterpartId: string;
+  counterpartName: string;
+  /** Текущий месяц «YYYY-MM». */
+  month: string;
+  totalMinutes: number;
+  /** ≥ лимита часов в этом месяце (засчитан в «опасную» серию). */
+  monthCounted: boolean;
+  /** Цепочка месяцев подряд с monthCounted=true, включая текущий. */
+  series: number;
+  /** Пара заблокирована (289-ФЗ: нужна пауза). */
+  blocked: boolean;
+  /** Открытая сессия с этим контрагентом (для кнопки «Завершить»). */
+  activeSessionId: string | null;
+}
+
+/** Ответ GET /work-hours/check/:driverId/:sellerId — можно ли работать паре. */
+export interface WorkHoursCheckDto {
+  driverId: string;
+  sellerId: string;
+  blocked: boolean;
+  reason: string | null;
+  unblockAt: string | null;
+  /** Часы пары в текущем месяце. */
+  totalMinutesCurrent: number;
+  monthCounted: boolean;
+  series: number;
+}
+
+/**
+ * Пороговые константы для UI (значения по умолчанию; сервер может
+ * переопределять через WORK_HOURS_MONTHLY_LIMIT / WORK_MONTHS_SERIES).
+ */
+export const WORK_HOURS_UI = {
+  /** Янтарная зона прогресс-бара: 48 ч из 60. */
+  warningMinutes: 48 * 60,
+  /** Мягкое предупреждение «близки к лимиту»: >50 ч и серия 5 месяцев. */
+  approachingMinutes: 50 * 60,
+  approachingSeries: 5,
+} as const;
 
 /**
  * Маскированный телефон для логов и UI: +7***1234

@@ -12,6 +12,7 @@ import {
 import type { ListingDto } from '@agromoll/types';
 import { useRouter } from 'expo-router';
 import { ScreenHeader } from '@/components';
+import { DebtSummaryWidget } from '@/components/DebtSummaryWidget';
 import { ListingCard } from '@/components/ListingCard';
 import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
@@ -87,6 +88,10 @@ export default function FeedScreen() {
           )
         }
       />
+      {/* Виджет долгов (v0.4.0): «Вам должны / Вы должны», янтарный при просрочке. */}
+      <View style={{ paddingHorizontal: spacing.lg }}>
+        <DebtSummaryWidget />
+      </View>
       {state.phase === 'loading' ? (
         <View style={{ gap: spacing.md }}>
           <SkeletonCard />

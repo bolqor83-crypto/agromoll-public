@@ -4,7 +4,7 @@
  * Данные размечены бейджем «Демо-данные» — пользователь всегда понимает,
  * что смотрит витрину без сервера. Форма полностью совпадает с DTO API.
  */
-import type { BookingDto, ListingDto } from '@agromoll/types';
+import type { BookingDto, DebtDto, ListingDto } from '@agromoll/types';
 import { DEMO_ACCOUNTS } from '@agromoll/types';
 
 const NOW = new Date();
@@ -92,6 +92,11 @@ export const DEMO_BUYER_BOOKINGS: BookingDto[] = [
     buyerName: DEMO_ACCOUNTS.buyer.displayName,
     requestedQuantity: 20,
     confirmedQuantity: null,
+    confirmedAt: null,
+    deliveryConfirmedAt: null,
+    receivedQuantity: null,
+    qualityNotes: null,
+    qualityFlag: 'ok',
     status: 'counter_offered',
     expiresAt: minutesFromNow(18),
     createdAt: minutesFromNow(-12),
@@ -106,6 +111,11 @@ export const DEMO_BUYER_BOOKINGS: BookingDto[] = [
     buyerName: DEMO_ACCOUNTS.buyer.displayName,
     requestedQuantity: 3,
     confirmedQuantity: 3,
+    confirmedAt: null,
+    deliveryConfirmedAt: null,
+    receivedQuantity: null,
+    qualityNotes: null,
+    qualityFlag: 'ok',
     status: 'confirmed',
     expiresAt: minutesFromNow(42),
     createdAt: minutesFromNow(-30),
@@ -120,6 +130,11 @@ export const DEMO_BUYER_BOOKINGS: BookingDto[] = [
     buyerName: DEMO_ACCOUNTS.buyer.displayName,
     requestedQuantity: 50,
     confirmedQuantity: null,
+    confirmedAt: null,
+    deliveryConfirmedAt: null,
+    receivedQuantity: null,
+    qualityNotes: null,
+    qualityFlag: 'ok',
     status: 'requested',
     expiresAt: minutesFromNow(25),
     createdAt: minutesFromNow(-5),
@@ -134,3 +149,71 @@ export const DEMO_COUNTER_OFFERS: Record<
 > = {
   'demo-booking-1': { offeredQuantity: 15, pickupTime: 'после 9:00' },
 };
+
+// ─── Долги (v0.4.0, ADR-010) ────────────────────────────────────────────────
+
+const daysFromNow = (d: number) => new Date(NOW.getTime() - d * 86_400_000).toISOString();
+
+/** Демо-долги: продавец дал в долг покупателю (2 записи) и должен сам (1). */
+export const DEMO_DEBTS: DebtDto[] = [
+  {
+    id: 'demo-debt-1',
+    creditorId: DEMO_ACCOUNTS.seller.id,
+    creditorName: DEMO_ACCOUNTS.seller.displayName,
+    debtorId: DEMO_ACCOUNTS.buyer.id,
+    debtorName: DEMO_ACCOUNTS.buyer.displayName,
+    amount: '12500.00',
+    currency: 'RUB',
+    description: 'Помидоры розовые, 2 ящика',
+    listingId: null,
+    bookingId: null,
+    status: 'active',
+    isOverdue: true,
+    canRemind: true,
+    nextReminderAt: null,
+    resolveRequestedById: null,
+    createdAt: daysFromNow(34),
+    updatedAt: daysFromNow(34),
+    settledAt: null,
+  },
+  {
+    id: 'demo-debt-2',
+    creditorId: DEMO_ACCOUNTS.seller.id,
+    creditorName: DEMO_ACCOUNTS.seller.displayName,
+    debtorId: DEMO_ACCOUNTS.buyer.id,
+    debtorName: DEMO_ACCOUNTS.buyer.displayName,
+    amount: '4200.50',
+    currency: 'RUB',
+    description: 'Лук репчатый',
+    listingId: null,
+    bookingId: null,
+    status: 'active',
+    isOverdue: false,
+    canRemind: false,
+    nextReminderAt: hoursFromNow(20),
+    resolveRequestedById: null,
+    createdAt: daysFromNow(3),
+    updatedAt: daysFromNow(3),
+    settledAt: null,
+  },
+  {
+    id: 'demo-debt-3',
+    creditorId: DEMO_ACCOUNTS.driver.id,
+    creditorName: DEMO_ACCOUNTS.driver.displayName,
+    debtorId: DEMO_ACCOUNTS.seller.id,
+    debtorName: DEMO_ACCOUNTS.seller.displayName,
+    amount: '800.00',
+    currency: 'RUB',
+    description: 'Доставка до Левенцовки',
+    listingId: null,
+    bookingId: null,
+    status: 'settled',
+    isOverdue: false,
+    canRemind: false,
+    nextReminderAt: null,
+    resolveRequestedById: null,
+    createdAt: daysFromNow(10),
+    updatedAt: daysFromNow(9),
+    settledAt: daysFromNow(9),
+  },
+];

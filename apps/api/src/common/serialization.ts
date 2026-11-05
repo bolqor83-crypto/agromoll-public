@@ -46,6 +46,11 @@ export function toBookingDto(booking: BookingWithRelations): BookingDto {
     confirmedQuantity: booking.confirmedQuantity,
     status: booking.status,
     expiresAt: booking.expiresAt.toISOString(),
+    confirmedAt: booking.confirmedAt?.toISOString() ?? null,
+    deliveryConfirmedAt: booking.deliveryConfirmedAt?.toISOString() ?? null,
+    receivedQuantity: booking.receivedQuantity,
+    qualityNotes: booking.qualityNotes,
+    qualityFlag: booking.qualityFlag,
     createdAt: booking.createdAt.toISOString(),
     updatedAt: booking.updatedAt.toISOString(),
   };
