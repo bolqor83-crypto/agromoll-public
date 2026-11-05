@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "АгроМолл",
+    "slug": "agromoll",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "agromoll",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": ["ios", "android", "web"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ru.agromoll.app"
+    },
+    "android": {
+      "package": "ru.agromoll.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": ["expo-router"]
+  }
+}
