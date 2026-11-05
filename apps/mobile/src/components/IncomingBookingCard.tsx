@@ -11,7 +11,6 @@ import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
 export interface IncomingBookingCardProps {
   booking: BookingDto;
   /** id продавца (для запросов). */
-  userId: string;
   /** Обновить список после действия. */
   onChanged: () => void;
   /** Демо-режим: действия не ходят в API. */
@@ -24,7 +23,6 @@ export interface IncomingBookingCardProps {
  */
 export function IncomingBookingCard({
   booking,
-  userId,
   onChanged,
   demo,
 }: IncomingBookingCardProps) {
@@ -45,9 +43,9 @@ export function IncomingBookingCard({
     setBusy(action);
     try {
       if (action === 'confirm') {
-        await api.confirmBooking(userId, booking.id);
+        await api.confirmBooking(booking.id);
       } else {
-        await api.cancelBooking(userId, booking.id);
+        await api.cancelBooking(booking.id);
       }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
@@ -131,7 +129,6 @@ export function IncomingBookingCard({
       <CounterOfferModal
         visible={counterOpen}
         booking={booking}
-        userId={userId}
         demo={demo}
         onClose={() => setCounterOpen(false)}
         onDone={() => {

@@ -11,8 +11,8 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   // Мобильный клиент (Expo web / dev-клиенты) ходит к API из браузера.
-  // Пока аутентификация — заглушка X-User-Id, поэтому CORS открыт для всех
-  // источников; ужесточим вместе с JWT на следующем этапе.
+  // Аутентификация — JWT (v0.3.0), так что CORS может быть открыт для всех
+  // источников: токены не зависят от origin и не читаются из cookies.
   app.enableCors({ origin: true });
 
   const port = Number(process.env.API_PORT ?? 3000);

@@ -8,7 +8,6 @@ import { api, ApiError } from '@/lib/api';
 export interface CounterOfferModalProps {
   visible: boolean;
   booking: BookingDto;
-  userId: string;
   demo: boolean;
   onClose: () => void;
   /** Успешная корректировка. */
@@ -22,7 +21,6 @@ export interface CounterOfferModalProps {
 export function CounterOfferModal({
   visible,
   booking,
-  userId,
   demo,
   onClose,
   onDone,
@@ -46,7 +44,7 @@ export function CounterOfferModal({
     }
     setSending(true);
     try {
-      await api.counterOffer(userId, booking.id, {
+      await api.counterOffer(booking.id, {
         offeredQuantity: quantityValid ? parsedQuantity : undefined,
         pickupTime: pickupTime.trim() || undefined,
         note: note.trim() || undefined,

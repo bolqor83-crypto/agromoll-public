@@ -22,7 +22,7 @@ import type {
 } from '@agromoll/validation';
 import type { ZodType } from 'zod';
 import type { BookingStatus } from '@agromoll/types';
-import { CurrentUser, Roles, RolesGuard, UserGuard } from '../auth/user.guard';
+import { CurrentUser, Roles, RolesGuard, JwtAuthGuard } from '../auth/auth.guards';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { toBookingDto } from '../common/serialization';
@@ -35,7 +35,7 @@ import { BookingsService } from './bookings.service';
  * принадлежность конкретной брони — вторая (машина состояний в сервисе).
  */
 @Controller('bookings')
-@UseGuards(UserGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
 

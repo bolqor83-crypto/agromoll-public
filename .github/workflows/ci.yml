@@ -16,8 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXPO_NO_TELEMETRY: '1'
-      # e2e-тесты api работают с реальной БД (service-контейнер ниже).
+      # e2e-тесты api работают с реальной БД и Redis (service-контейнеры ниже).
       DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
+      REDIS_URL: redis://localhost:6379
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -29,6 +30,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U agromoll -d agromoll"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -66,7 +76,7 @@ jobs:
       - name: Test (unit)
         run: pnpm turbo run test
 
-      - name: Test e2e (api, реальный Postgres + PostGIS)
+      - name: Test e2e (api, реальный Postgres + PostGIS + Redis)
         run: pnpm --filter @agromoll/api test:e2e
 
       - name: Валидация docker-compose

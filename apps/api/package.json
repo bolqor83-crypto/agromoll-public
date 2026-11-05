@@ -1,6 +1,6 @@
 {
   "name": "@agromoll/api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "API АгроМолл (NestJS). v0.2.0: модель бронирования + доменный сервис броней.",
   "scripts": {
@@ -21,9 +21,12 @@
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.1",
+    "@nestjs/jwt": "^11.0.0",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schedule": "^5.0.0",
+    "@nestjs/throttler": "^6.4.0",
     "@prisma/client": "^6.2.1",
+    "ioredis": "^5.4.2",
     "nestjs-pino": "^4.2.0",
     "pino": "^9.6.0",
     "reflect-metadata": "^0.2.2",

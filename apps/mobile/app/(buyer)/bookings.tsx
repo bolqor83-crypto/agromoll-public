@@ -14,7 +14,6 @@ import { BookingCard } from '@/components/BookingCard';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS, DEMO_COUNTER_OFFERS } from '@/lib/demo-data';
-import { demoUserId } from '@/store/role';
 
 type BookingsState =
   { phase: 'loading' } | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
@@ -30,7 +29,7 @@ export default function MyBookingsScreen() {
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const bookings = await api.bookings(demoUserId('buyer'));
+      const bookings = await api.bookings();
       setState({ phase: 'ready', bookings, demo: false });
     } catch (error) {
       logger.warn('bookings', 'API недоступен, показываем демо-брони', { error: String(error) });
@@ -92,7 +91,6 @@ export default function MyBookingsScreen() {
             <BookingCard
               key={booking.id}
               booking={booking}
-              userId={demoUserId('buyer')}
               counterOffer={DEMO_COUNTER_OFFERS[booking.id]}
               onChanged={() => void load()}
               demo={state.demo}

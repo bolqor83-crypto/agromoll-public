@@ -19,7 +19,7 @@ import { CreateListingModal } from '@/components/CreateListingModal';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
-import { demoUserId, demoUserName } from '@/store/role';
+import { useAuthStore } from '@/store/auth';
 
 type ShowcaseState =
   { phase: 'loading' } | { phase: 'ready'; listings: ListingDto[]; demo: boolean };
@@ -28,6 +28,7 @@ type ShowcaseState =
  * Витрина продавца: свои лоты, остатки и резервы, FAB «+ Выставить лот».
  */
 export default function ShowcaseScreen() {
+  const userName = useAuthStore((s) => s.user?.displayName ?? 'Витрина');
   const insets = useSafeAreaInsets();
   const { colors, mode } = useTheme();
   const [state, setState] = useState<ShowcaseState>({ phase: 'loading' });
@@ -36,7 +37,7 @@ export default function ShowcaseScreen() {
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const listings = await api.myListings(demoUserId('seller'));
+      const listings = await api.myListings();
       setState({ phase: 'ready', listings, demo: false });
     } catch (error) {
       logger.warn('showcase', 'API недоступен, показываем демо-витрину', { error: String(error) });
@@ -60,7 +61,7 @@ export default function ShowcaseScreen() {
     <Screen scroll={false}>
       <ScreenHeader
         title="Витрина"
-        subtitle={`${demoUserName('seller')} · ваши лоты`}
+        subtitle={`${userName} · ваши лоты`}
         badge={
           state.phase === 'ready' && state.demo ? (
             <Badge label="Демо-данные · API недоступен" variant="attention" />
@@ -128,7 +129,6 @@ export default function ShowcaseScreen() {
 
       <CreateListingModal
         visible={modalOpen}
-        userId={demoUserId('seller')}
         demo={state.phase === 'ready' && state.demo}
         onClose={() => setModalOpen(false)}
         onCreated={() => {

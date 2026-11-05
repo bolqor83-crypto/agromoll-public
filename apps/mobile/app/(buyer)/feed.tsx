@@ -15,7 +15,6 @@ import { ListingCard } from '@/components/ListingCard';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
-import { demoUserId } from '@/store/role';
 
 type FeedState = { phase: 'loading' } | { phase: 'ready'; listings: ListingDto[]; demo: boolean };
 
@@ -31,7 +30,7 @@ export default function FeedScreen() {
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const listings = await api.listings(demoUserId('buyer'));
+      const listings = await api.listings();
       setState({ phase: 'ready', listings, demo: false });
     } catch (error) {
       logger.warn('feed', 'API недоступен, показываем демо-данные', { error: String(error) });

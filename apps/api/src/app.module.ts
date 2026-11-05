@@ -7,6 +7,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { HealthModule } from './health/health.module';
 import { ListingsModule } from './listings/listings.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { UsersModule } from './users/users.module';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -32,6 +33,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     HealthModule,
     AuthModule,
     PrismaModule,
+    UsersModule,
     ListingsModule,
     BookingsModule,
   ],

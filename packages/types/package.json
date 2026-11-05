@@ -1,6 +1,6 @@
 {
   "name": "@agromoll/types",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Общие типы домена АгроМолл (используются api и mobile).",
   "main": "dist/index.js",

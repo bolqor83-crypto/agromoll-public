@@ -1,10 +1,12 @@
-// АгроМолл — схема v0.2.0 «Бронирование».
+// АгроМолл — схема v0.3.0 «Аутентификация по телефону».
 //
 // Домен: продавец выставляет листинг (Listing), покупатель бронирует
 // количество (Booking), продавец может подтвердить или предложить
 // корректировку. Каждое изменение брони фиксируется в append-only журнале
 // BookingEvent — из него в будущем считается репутация.
-// Обоснование решений — docs/adr/ADR-004.
+// v0.3.0: вход по телефону + SMS-код (заглушка в dev), JWT-токены —
+// см. docs/adr/ADR-007.
+// Обоснование бронирования — docs/adr/ADR-004.
 
 generator client {
   provider = "prisma-client-js"
@@ -71,7 +73,16 @@ model User {
   id              String   @id @default(uuid())
   role            UserRole @default(buyer)
   displayName     String
-  phone           String?
+  /// Телефон — основной идентификатор входа (v0.3.0, ADR-007).
+  /// Nullable ради старых строк: новые пользователи создаются только
+  /// через /auth/request-code, где телефон обязателен и уникален.
+  /// В Postgres unique-индекс допускает несколько NULL.
+  phone           String?  @unique
+  /// Прошёл ли подтверждение номера SMS-кодом.
+  phoneVerified   Boolean  @default(false)
+  /// Пароль — опциональный запасной способ входа. В MVP вход только
+  /// по телефону + коду; колонка заложена на будущее (ADR-007).
+  passwordHash    String?
   reputationScore Float    @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

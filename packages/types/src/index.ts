@@ -159,3 +159,60 @@ export interface HealthResponse {
   /** Аптайм процесса в секундах. */
   uptimeSec: number;
 }
+
+/** Публичный профиль пользователя (DTO уровня API, v0.3.0). */
+export interface UserDto {
+  id: string;
+  role: UserRole;
+  displayName: string;
+  /** E.164: +7XXXXXXXXXX. У старых строк может отсутствовать. */
+  phone: string | null;
+  /** Прошёл ли подтверждение номера SMS-кодом. */
+  phoneVerified: boolean;
+  createdAt: string;
+}
+
+/** Пара JWT-токенов (v0.3.0, ADR-007). */
+export interface AuthTokensDto {
+  accessToken: string;
+  refreshToken: string;
+}
+
+/** Ответ POST /auth/verify: токены + профиль. */
+export interface AuthResponseDto extends AuthTokensDto {
+  user: UserDto;
+}
+
+/** Ответ POST /auth/refresh: только новый access-токен. */
+export interface RefreshResponseDto {
+  accessToken: string;
+}
+
+/**
+ * Нормализация телефона к E.164 (+7XXXXXXXXXX).
+ * Принимает +7…, 8…, 7…, с пробелами/скобками/тире.
+ * Возвращает null, если нормализовать не удалось (не российский формат).
+ */
+export function normalizePhone(input: string): string | null {
+  let digits = input.replace(/\D/g, '');
+  if (digits.length === 11 && (digits.startsWith('7') || digits.startsWith('8'))) {
+    digits = digits.slice(1);
+  }
+  if (digits.length !== 10) {
+    return null;
+  }
+  return `+7${digits}`;
+}
+
+/**
+ * Маскированный телефон для логов и UI: +7***1234
+ * (код страны, три звёздочки, последние 4 цифры).
+ */
+export function maskPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 4) {
+    return '***';
+  }
+  return `+7***${digits.slice(-4)}`;
+}
+

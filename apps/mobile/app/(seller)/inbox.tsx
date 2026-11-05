@@ -14,7 +14,6 @@ import { IncomingBookingCard } from '@/components/IncomingBookingCard';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS } from '@/lib/demo-data';
-import { demoUserId } from '@/store/role';
 
 type InboxState = { phase: 'loading' } | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
 
@@ -27,7 +26,7 @@ export default function InboxScreen() {
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const bookings = await api.bookings(demoUserId('seller'));
+      const bookings = await api.bookings();
       setState({ phase: 'ready', bookings, demo: false });
     } catch (error) {
       logger.warn('inbox', 'API недоступен, показываем демо-входящие', { error: String(error) });
@@ -90,7 +89,6 @@ export default function InboxScreen() {
             <IncomingBookingCard
               key={booking.id}
               booking={booking}
-              userId={demoUserId('seller')}
               onChanged={() => void load()}
               demo={state.demo}
             />

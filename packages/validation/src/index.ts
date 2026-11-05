@@ -6,6 +6,7 @@ import {
   LISTING_STATUSES,
   LISTING_UNITS,
   USER_ROLES,
+  normalizePhone,
 } from '@agromoll/types';
 
 /**
@@ -92,6 +93,64 @@ export const CancelBookingSchema = z
   .strict();
 
 export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
+
+/**
+ * Телефон в любом российском написании: +7 (961) 123-45-67, 8 961 123 45 67…
+ * Нормализуется к E.164 (+7XXXXXXXXXX) через normalizePhone из @agromoll/types.
+ */
+export const PhoneSchema = z
+  .string()
+  .trim()
+  .min(10, 'Телефон слишком короткий')
+  .max(20, 'Телефон слишком длинный')
+  .transform((value, ctx) => {
+    const normalized = normalizePhone(value);
+    if (normalized === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Введите российский номер: +7 XXX XXX-XX-XX',
+      });
+      return z.NEVER;
+    }
+    return normalized;
+  });
+
+/** Запрос SMS-кода: POST /auth/request-code (v0.3.0). */
+export const RequestCodeSchema = z.object({
+  phone: PhoneSchema,
+});
+
+export type RequestCodeInput = z.infer<typeof RequestCodeSchema>;
+
+/**
+ * Проверка SMS-кода: POST /auth/verify.
+ * 6 цифр в проде; 4 — код-заглушка «0000» в dev (ADR-007).
+ */
+export const VerifyCodeSchema = z.object({
+  phone: PhoneSchema,
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,6}$/, 'Код — 4–6 цифр'),
+});
+
+export type VerifyCodeInput = z.infer<typeof VerifyCodeSchema>;
+
+/** Обновление access-токена: POST /auth/refresh. */
+export const RefreshTokenSchema = z.object({
+  refreshToken: z.string().min(1, 'Не передан refreshToken'),
+});
+
+export type RefreshTokenInput = z.infer<typeof RefreshTokenSchema>;
+
+/** Смена роли: PATCH /users/me/role (любая роль на выбор). */
+export const UpdateRoleSchema = z
+  .object({
+    role: UserRoleSchema,
+  })
+  .strict();
+
+export type UpdateRoleInput = z.infer<typeof UpdateRoleSchema>;
 
 /** Переменные окружения API. */
 export const apiEnvSchema = z.object({

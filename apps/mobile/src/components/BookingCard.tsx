@@ -10,7 +10,6 @@ import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
 export interface BookingCardProps {
   booking: BookingDto;
   /** id покупателя (для запросов). */
-  userId: string;
   /** Показать детали корректировки (offeredQuantity/pickupTime/note). */
   counterOffer?: { offeredQuantity?: number; pickupTime?: string; note?: string };
   /** Обновить список после действия. */
@@ -23,7 +22,7 @@ export interface BookingCardProps {
  * Карточка брони покупателя («Мои брони»): статус-пилюля, количество,
  * время истечения, кнопки «Принять предложение» / «Отменить».
  */
-export function BookingCard({ booking, userId, counterOffer, onChanged, demo }: BookingCardProps) {
+export function BookingCard({ booking, counterOffer, onChanged, demo }: BookingCardProps) {
   const [busy, setBusy] = useState<'accept' | 'cancel' | null>(null);
 
   const canCancel = booking.status === 'requested' || booking.status === 'counter_offered';
@@ -41,9 +40,9 @@ export function BookingCard({ booking, userId, counterOffer, onChanged, demo }: 
     setBusy(action);
     try {
       if (action === 'accept') {
-        await api.acceptCounter(userId, booking.id);
+        await api.acceptCounter(booking.id);
       } else {
-        await api.cancelBooking(userId, booking.id);
+        await api.cancelBooking(booking.id);
       }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,

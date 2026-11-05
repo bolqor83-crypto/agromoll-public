@@ -20,7 +20,6 @@ import { api, ApiError } from '@/lib/api';
 import { formatAvailable, formatPrice } from '@/lib/format';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
-import { demoUserId } from '@/store/role';
 
 /** Шаг изменения количества — крупные кнопки для работы в перчатках. */
 const QTY_STEP = 5;
@@ -44,7 +43,7 @@ export default function ListingDetailScreen() {
   useEffect(() => {
     void (async (): Promise<void> => {
       try {
-        const found = await api.listing(demoUserId('buyer'), String(id));
+        const found = await api.listing(String(id));
         setListing(found);
       } catch {
         // Демо-режим: лента могла быть загружена из демо-данных.
@@ -67,7 +66,7 @@ export default function ListingDetailScreen() {
     setSending(true);
     setError(null);
     try {
-      await api.createBooking(demoUserId('buyer'), listing.id, quantity);
+      await api.createBooking(listing.id, quantity);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );

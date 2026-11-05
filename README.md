@@ -1,6 +1,6 @@
 # АгроМолл
 
-[![Version](https://img.shields.io/badge/version-0.2.0-2D6A4F)](package.json)
+[![Version](https://img.shields.io/badge/version-0.3.0-2D6A4F)](package.json)
 [![CI](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml)
 
 Мобильное приложение для оптово-розничного рынка «Агро Молл» (Ростов-на-Дону).

@@ -6,7 +6,8 @@ import { ROLE_LABELS } from '@agromoll/types';
 import type { UserRole } from '@agromoll/types';
 import * as Haptics from 'expo-haptics';
 import { ScreenHeader } from '@/components';
-import { useRoleStore } from '@/store/role';
+import { useAuthStore } from '@/store/auth';
+import { logger } from '@/lib/logger';
 
 interface RoleOption {
   role: UserRole;
@@ -37,28 +38,44 @@ const OPTIONS: RoleOption[] = [
 ];
 
 /**
- * Выбор роли — вход в приложение (v0.2.0).
- * На следующем этапе роль придёт с сервера после входа по телефону.
+ * Выбор роли (v0.3.0): роль сохраняется на сервере через PATCH
+ * /users/me/role, поэтому доступна с любого устройства пользователя.
+ * Экран показывается только аутентифицированным (гейт в root layout).
  */
 export default function RolePickerScreen() {
   const router = useRouter();
-  const setRole = useRoleStore((s) => s.setRole);
+  const user = useAuthStore((s) => s.user);
+  const changeRole = useAuthStore((s) => s.changeRole);
+
+  const handleSelect = (option: RoleOption): void => {
+    void Haptics.selectionAsync().catch(() => undefined);
+    changeRole(option.role)
+      .then(() => {
+        router.replace(option.route);
+      })
+      .catch((error) => {
+        logger.warn('role', 'не удалось сменить роль', { error: String(error) });
+        // даже при ошибке открываем экран роли — оффлайн-ядро догонит
+        router.replace(option.route);
+      });
+  };
 
   return (
     <Screen>
-      <ScreenHeader title="АгроМолл" subtitle="Оптовый рынок Ростова-на-Дону · утренняя смена" />
+      <ScreenHeader
+        title="АгроМолл"
+        subtitle={
+          user ? `${user.displayName} · выберите роль для работы` : 'Оптовый рынок Ростова-на-Дону'
+        }
+      />
       <Text variant="body" color="secondary" style={{ marginBottom: spacing.lg }}>
-        Выберите роль для работы:
+        Роль сохраняется в профиле и действует сразу после выбора:
       </Text>
       <View style={{ gap: spacing.md }}>
         {OPTIONS.map((option) => (
           <Card
             key={option.role}
-            onPress={() => {
-              void Haptics.selectionAsync().catch(() => undefined);
-              setRole(option.role);
-              router.replace(option.route);
-            }}
+            onPress={() => handleSelect(option)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}
           >
             <Icon name={option.icon} size={28} color="primary" />
@@ -68,7 +85,11 @@ export default function RolePickerScreen() {
                 {option.description}
               </Text>
             </View>
-            <Icon name="chevron-forward-outline" size={20} color="muted" />
+            {user?.role === option.role ? (
+              <Icon name="checkmark-circle-outline" size={22} color="primary" />
+            ) : (
+              <Icon name="chevron-forward-outline" size={20} color="muted" />
+            )}
           </Card>
         ))}
       </View>
