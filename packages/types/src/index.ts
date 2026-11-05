@@ -10,6 +10,19 @@ export const USER_ROLES = ['buyer', 'seller', 'driver'] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 
+/**
+ * Демо-аккаунты для этапа заглушки auth (X-User-Id, v0.2.0).
+ *
+ * ID фиксированные: их создаёт сид-скрипт apps/api (pnpm --filter
+ * @agromoll/api db:seed), мобильное приложение подставляет их в заголовок
+ * X-User-Id. Удаляются вместе с настоящей аутентификацией (JWT).
+ */
+export const DEMO_ACCOUNTS: Record<UserRole, { id: string; displayName: string }> = {
+  buyer: { id: '00000000-0000-4000-8000-000000000001', displayName: 'Ларёк «У Ашота»' },
+  seller: { id: '00000000-0000-4000-8000-000000000002', displayName: 'ФХ «Донская долина»' },
+  driver: { id: '00000000-0000-4000-8000-000000000003', displayName: 'Газель Next' },
+};
+
 /** Человекочитаемые названия ролей — для UI. */
 export const ROLE_LABELS: Record<UserRole, string> = {
   buyer: 'Покупатель',

@@ -21,7 +21,7 @@ function AppShell() {
   return (
     <>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
     </>
   );
 }
