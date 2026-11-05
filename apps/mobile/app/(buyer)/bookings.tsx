@@ -13,6 +13,7 @@ import {
 import type { BookingDto, BookingStatus, ListingUnit } from '@agromoll/types';
 import { ScreenHeader } from '@/components';
 import { BookingCard } from '@/components/BookingCard';
+import { ConfirmDeliveryModal } from '@/components/ConfirmDeliveryModal';
 import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS, DEMO_COUNTER_OFFERS } from '@/lib/demo-data';
@@ -50,6 +51,8 @@ export default function MyBookingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   // Каскадный вход — только первая отрисовка списка (ADR-009).
   const [firstEntrance, setFirstEntrance] = useState(true);
+  // Приёмка (v0.4.0-C): бронь, для которой открыта модалка подтверждения.
+  const [confirming, setConfirming] = useState<BookingDto | null>(null);
   // Предыдущие статусы: живая бронь стала «истекла» → мягкий warning-тактильный
   // сигнал один раз (не на каждый рендер).
   const prevStatuses = useRef<Map<string, BookingStatus>>(new Map());
@@ -111,6 +114,11 @@ export default function MyBookingsScreen() {
       confirmedQuantity: null,
       status: 'requested' as BookingStatus,
       expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      confirmedAt: null,
+      deliveryConfirmedAt: null,
+      receivedQuantity: null,
+      qualityNotes: null,
+      qualityFlag: 'ok',
       createdAt: create.createdAt,
       updatedAt: create.createdAt,
     }));
@@ -206,6 +214,7 @@ export default function MyBookingsScreen() {
                   counterOffer={DEMO_COUNTER_OFFERS[booking.id]}
                   pendingLabel={pendingLabelFor(booking.id, overrides)}
                   demo={state.phase === 'ready' ? state.demo : false}
+                  onConfirmDelivery={setConfirming}
                 />
               </Animated.View>
             );
@@ -215,6 +224,13 @@ export default function MyBookingsScreen() {
           ) : null}
         </PullToRefreshScrollView>
       )}
+
+      {/* Приёмка (v0.4.0-C, ADR-012): confirmed → completed/disputed. */}
+      <ConfirmDeliveryModal
+        visible={confirming !== null}
+        booking={confirming}
+        onClose={() => setConfirming(null)}
+      />
     </Screen>
   );
 }

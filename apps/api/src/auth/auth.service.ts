@@ -452,6 +452,8 @@ export function toUserDto(user: User): UserDto {
     displayName: user.displayName,
     phone: user.phone,
     phoneVerified: user.phoneVerified,
+    totalConfirmations: user.totalConfirmations,
+    totalDisputes: user.totalDisputes,
     createdAt: user.createdAt.toISOString(),
   };
 }

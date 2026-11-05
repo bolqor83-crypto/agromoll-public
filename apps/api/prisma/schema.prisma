@@ -58,12 +58,16 @@ enum ListingStatus {
 
 /// Статус брони. Совпадает с BOOKING_STATUSES из @agromoll/types.
 /// Допустимые переходы см. в bookings.service.ts (машина состояний).
+/// v0.4.0-C: completed — терминальный (приёмка подтверждена),
+/// disputed — спор по качеству поставки (ADR-012).
 enum BookingStatus {
   requested
   counter_offered
   confirmed
   cancelled
   expired
+  completed
+  disputed
 }
 
 /// Действие из журнала брони. Совпадает с BOOKING_ACTIONS из @agromoll/types.
@@ -74,6 +78,22 @@ enum BookingAction {
   confirmed
   cancelled
   expired
+  /// Покупатель подтвердил приёмку (v0.4.0-C, ADR-012).
+  delivery_confirmed
+  /// Покупатель заявил серьезную проблему качества — спор (v0.4.0-C).
+  delivery_disputed
+  /// Система закрыла бронь авто-подтверждением через 24 ч (v0.4.0-C).
+  system_auto_confirmed
+}
+
+/// Оценка качества поставки при приёмке (v0.4.0-C, ADR-012).
+/// ok — всё в порядке; minor_issue — недостача/мелкие проблемы
+/// (бронь всё равно завершается); major_issue — серьёзная проблема
+/// (бронь уходит в спор).
+enum QualityFlag {
+  ok
+  minor_issue
+  major_issue
 }
 
 model User {
@@ -94,6 +114,10 @@ model User {
   /// Токен FCM для push-уведомлений (v0.4.0). NULL — push недоступен,
   /// уведомление доставляется только in-app (ADR-010).
   fcmToken        String?
+  /// Репутационные счётчики (v0.4.0-C, ADR-012): фундамент публичного
+  /// рейтинга v0.5.0; источник правды — события, счётчики — быстрый view.
+  totalConfirmations Int   @default(0)
+  totalDisputes      Int   @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -188,6 +212,17 @@ model Booking {
   status            BookingStatus @default(requested)
   /// TTL запроса: по истечении бронь гасится кроном, резерв возвращается листингу.
   expiresAt         DateTime
+  /// Момент подтверждения брони продавцом (v0.4.0-C): якорь
+  /// авто-подтверждения приёмки через BOOKING_AUTO_CONFIRM_HOURS.
+  confirmedAt       DateTime?
+  /// Момент подтверждения приёмки покупателем (confirm-delivery).
+  deliveryConfirmedAt DateTime?
+  /// Фактически полученное количество (≤ confirmedQuantity).
+  receivedQuantity  Int?
+  /// Комментарий качества при приёмке (опционально).
+  qualityNotes      String?
+  /// Оценка качества: ok / minor_issue / major_issue (ADR-012).
+  qualityFlag       QualityFlag   @default(ok)
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -352,9 +387,11 @@ model DebtEvent {
 }
 
 /// Тип in-app уведомления. Совпадает с NOTIFICATION_TYPES из @agromoll/types.
-/// В v0.4.0 только напоминание о долге; подтверждение приёмки — v0.4.0-C.
+/// v0.4.0-A: напоминание о долге; v0.4.0-C: события приёмки (ADR-012).
 enum NotificationType {
   debt_reminder
+  booking_delivery_confirmed
+  booking_delivery_disputed
 }
 
 /// In-app уведомление (v0.4.0, ADR-010).

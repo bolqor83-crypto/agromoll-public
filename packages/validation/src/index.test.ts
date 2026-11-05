@@ -238,6 +238,11 @@ describe('@agromoll/validation', () => {
       confirmedQuantity: null,
       status: 'requested',
       expiresAt: '2026-11-05T13:00:00.000Z',
+      confirmedAt: null,
+      deliveryConfirmedAt: null,
+      receivedQuantity: null,
+      qualityNotes: null,
+      qualityFlag: 'ok',
       createdAt: '2026-11-05T12:30:00.000Z',
       updatedAt: '2026-11-05T12:30:00.000Z',
     };
@@ -263,6 +268,8 @@ describe('@agromoll/validation', () => {
       displayName: 'Ларёк «У Ашота»',
       phone: '+79611234567',
       phoneVerified: true,
+      totalConfirmations: 3,
+      totalDisputes: 0,
       createdAt: '2026-11-05T06:00:00.000Z',
     };
 

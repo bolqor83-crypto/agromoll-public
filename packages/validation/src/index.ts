@@ -8,6 +8,7 @@ import {
   LISTING_STATUSES,
   LISTING_UNITS,
   NOTIFICATION_TYPES,
+  QUALITY_FLAGS,
   USER_ROLES,
   normalizePhone,
 } from '@agromoll/types';
@@ -27,6 +28,8 @@ export const ListingUnitSchema = z.enum(LISTING_UNITS);
 export const ListingStatusSchema = z.enum(LISTING_STATUSES);
 export const BookingStatusSchema = z.enum(BOOKING_STATUSES);
 export const BookingActionSchema = z.enum(BOOKING_ACTIONS);
+/** Оценка качества поставки при приёмке (v0.4.0-C, ADR-012). */
+export const QualityFlagSchema = z.enum(QUALITY_FLAGS);
 
 /** Создание листинга: POST /listings (только seller). */
 export const CreateListingSchema = z.object({
@@ -102,6 +105,24 @@ export const CancelBookingSchema = z.object({
 });
 
 export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
+
+/**
+ * Подтверждение приёмки: POST /bookings/:id/confirm-delivery (только buyer,
+ * v0.4.0-C, ADR-012). НЕ strict по той же причине: outbox шлёт bookingId.
+ */
+export const ConfirmDeliverySchema = z.object({
+  /** Фактически полученное количество. */
+  receivedQuantity: z.coerce
+    .number()
+    .int('Количество — целое число')
+    .positive('Количество должно быть положительным')
+    .max(1_000_000),
+  /** Оценка качества. По умолчанию ok; при недостаче сервер поставит minor. */
+  qualityFlag: QualityFlagSchema.optional().default('ok'),
+  qualityNotes: z.string().trim().max(500).optional(),
+});
+
+export type ConfirmDeliveryInput = z.infer<typeof ConfirmDeliverySchema>;
 
 /**
  * Телефон в любом российском написании: +7 (961) 123-45-67, 8 961 123 45 67…
@@ -282,6 +303,11 @@ export const BookingResponseSchema = z
     confirmedQuantity: z.number().int().positive().nullable(),
     status: BookingStatusSchema,
     expiresAt: IsoDateString,
+    confirmedAt: IsoDateString.nullable(),
+    deliveryConfirmedAt: IsoDateString.nullable(),
+    receivedQuantity: z.number().int().positive().nullable(),
+    qualityNotes: z.string().nullable(),
+    qualityFlag: QualityFlagSchema,
     createdAt: IsoDateString,
     updatedAt: IsoDateString,
   })
@@ -300,6 +326,8 @@ export const UserResponseSchema = z
     displayName: z.string().min(1),
     phone: z.string().nullable(),
     phoneVerified: z.boolean(),
+    totalConfirmations: z.number().int().nonnegative(),
+    totalDisputes: z.number().int().nonnegative(),
     createdAt: IsoDateString,
   })
   .passthrough();
@@ -509,6 +537,8 @@ export const apiEnvSchema = z.object({
   WORK_HOURS_MONTHLY_LIMIT: z.coerce.number().int().positive().max(200).default(60),
   /** Месяцев подряд с ≥лимитом до блокировки пары (ADR-011). */
   WORK_MONTHS_SERIES: z.coerce.number().int().positive().max(24).default(6),
+  /** Окно авто-подтверждения приёмки в часах (ADR-012). */
+  BOOKING_AUTO_CONFIRM_HOURS: z.coerce.number().int().positive().max(24 * 30).default(24),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

@@ -1,23 +1,18 @@
 /**
- * Сервис брони — доменное ядро v0.2.0.
+ * Сервис брони — доменное ядро v0.2.0; v0.4.0-C — приёмка (ADR-012).
  *
- * Здесь живёт машина состояний брони (см. docs/adr/ADR-004):
+ * Здесь живёт машина состояний брони (см. docs/adr/ADR-004 + ADR-012):
  *
- *   requested ──(seller)──► counter_offered ──(buyer)──► confirmed
- *      │  │                       │  │
- *      │  └──(seller)──► confirmed│  └─(любая сторона)─► cancelled
+ *   requested ──(seller)──► counter_offered ──(buyer)──► confirmed ──(buyer, confirm-delivery)──► completed
+ *      │  │                       │  │                       │
+ *      │  └──(seller)──► confirmed│  └─(любая сторона)─► cancelled  └─(buyer, major_issue)─► disputed
  *      └─(любая сторона)─► cancelled
  *
  *   requested / counter_offered ──(cron, истёк TTL)──► expired
+ *   confirmed ──(cron, 24 ч без приёмки, ADR-012)──► completed (system_auto_confirmed)
  *
- * Правила целостности остатков:
- *   - резерв (Listing.quantityReserved) растёт при создании брони и
- *     перестраивается при принятии корректировки;
- *   - резерв возвращается при отмене и истечении TTL;
- *   - доступно к бронированию = quantityAvailable − quantityReserved,
- *     уход в минус исключён атомарным условным UPDATE внутри транзакции;
- *   - каждое изменение статуса фиксируется в append-only журнале
- *     BookingEvent и логируется в pino с bookingId/actorId/fromStatus/toStatus.
+ * completed — терминальный: отменить нельзя. disputed — спор по качеству
+ * (арбитраж — v0.5.0). Правила целостности остатков — ниже (ADR-004).
  */
 import {
   BadRequestException,
@@ -29,10 +24,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Booking, Prisma } from '@prisma/client';
-import type { BookingDto, BookingStatus } from '@agromoll/types';
+import type { BookingDto, BookingStatus, QualityFlag } from '@agromoll/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { toBookingDto } from '../common/serialization';
 import { BOOKING_TTL_MINUTES } from './bookings.constants';
+import { BOOKING_AUTO_CONFIRM_HOURS } from './bookings.constants';
+import { NotificationsService } from '../notifications/notifications.service';
+import { WorkHoursService } from '../work-hours/work-hours.service';
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -99,6 +97,16 @@ export interface CancelParams {
   reason?: string;
 }
 
+export interface ConfirmDeliveryParams {
+  bookingId: string;
+  /** Только покупатель брони (ADR-012). */
+  actorId: string;
+  /** Фактически полученное количество. */
+  receivedQuantity: number;
+  qualityFlag?: QualityFlag;
+  qualityNotes?: string;
+}
+
 /** Поле payload корректировки в журнале. */
 interface CounterOfferPayload {
   offeredQuantity?: number;
@@ -113,6 +121,9 @@ export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BOOKING_TTL_MINUTES) private readonly defaultTtlMinutes: number,
+    @Inject(BOOKING_AUTO_CONFIRM_HOURS) private readonly autoConfirmHours: number,
+    private readonly notifications: NotificationsService,
+    private readonly workHours: WorkHoursService,
   ) {}
 
   /** Покупатель запрашивает бронь. Резервирует количество атомарно. */
@@ -236,7 +247,7 @@ export class BookingsService {
 
       const updated = await tx.booking.update({
         where: { id: bookingId },
-        data: { status: 'confirmed', confirmedQuantity },
+        data: { status: 'confirmed', confirmedQuantity, confirmedAt: new Date() },
       });
 
       await tx.bookingEvent.create({
@@ -264,7 +275,11 @@ export class BookingsService {
 
       const updated = await tx.booking.update({
         where: { id: bookingId },
-        data: { status: 'confirmed', confirmedQuantity: booking.requestedQuantity },
+        data: {
+          status: 'confirmed',
+          confirmedQuantity: booking.requestedQuantity,
+          confirmedAt: new Date(),
+        },
       });
 
       await tx.bookingEvent.create({
@@ -317,6 +332,208 @@ export class BookingsService {
       this.logTransition(bookingId, actorId, booking.status, 'cancelled');
       return updated;
     });
+  }
+
+  /**
+   * Покупатель подтверждает приёмку: confirmed → completed (v0.4.0-C, ADR-012).
+   *
+   * Правила:
+   *  - только покупатель брони (403), только из статуса confirmed (409);
+   *  - receivedQuantity < confirmedQuantity → qualityFlag = minor_issue
+   *    (автоматически, если покупатель не указал major явно);
+   *  - major_issue → status = disputed + BookingEvent(delivery_disputed) +
+   *    уведомление продавцу + totalDisputes++ (арбитраж — v0.5.0);
+   *  - иначе → completed + deliveryConfirmedAt + BookingEvent(delivery_confirmed)
+   *    + totalConfirmations++ продавцу;
+   *  - если покупатель — водитель с открытой сменой у продавца лота —
+   *    смена закрывается (триггер из ADR-012, сценарий самовывоза).
+   */
+  async confirmDelivery(params: ConfirmDeliveryParams): Promise<Booking> {
+    const { bookingId, actorId } = params;
+    const booking = await this.prisma.$transaction(async (tx) => {
+      const current = await loadBookingForUpdate(tx, bookingId);
+      if (current.buyerId !== actorId) {
+        throw new ForbiddenException('Подтвердить приёмку может только покупатель брони');
+      }
+      if (current.status !== 'confirmed') {
+        throw new ConflictException(
+          `Приёмка невозможна из статуса «${current.status}» (нужен confirmed)`,
+        );
+      }
+      const confirmedQuantity = current.confirmedQuantity ?? current.requestedQuantity;
+
+      // Недостача — минимум minor_issue, даже если покупатель забыл переключить.
+      let qualityFlag: QualityFlag = params.qualityFlag ?? 'ok';
+      if (params.receivedQuantity < confirmedQuantity && qualityFlag === 'ok') {
+        qualityFlag = 'minor_issue';
+      }
+
+      if (qualityFlag === 'major_issue') {
+        const updated = await tx.booking.update({
+          where: { id: bookingId },
+          data: {
+            status: 'disputed',
+            deliveryConfirmedAt: new Date(),
+            receivedQuantity: params.receivedQuantity,
+            qualityFlag,
+            qualityNotes: params.qualityNotes,
+          },
+        });
+        await tx.bookingEvent.create({
+          data: {
+            bookingId,
+            actorId,
+            action: 'delivery_disputed',
+            payload: {
+              receivedQuantity: params.receivedQuantity,
+              qualityFlag,
+              ...(params.qualityNotes !== undefined ? { qualityNotes: params.qualityNotes } : {}),
+            },
+          },
+        });
+        await tx.user.update({
+          where: { id: current.listing.sellerId },
+          data: { totalDisputes: { increment: 1 } },
+        });
+        this.logTransition(bookingId, actorId, 'confirmed', 'disputed');
+        return updated;
+      }
+
+      const updated = await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          status: 'completed',
+          deliveryConfirmedAt: new Date(),
+          receivedQuantity: params.receivedQuantity,
+          qualityFlag,
+          qualityNotes: params.qualityNotes,
+        },
+      });
+      await tx.bookingEvent.create({
+        data: {
+          bookingId,
+          actorId,
+          action: 'delivery_confirmed',
+          payload: {
+            receivedQuantity: params.receivedQuantity,
+            qualityFlag,
+            ...(params.qualityNotes !== undefined ? { qualityNotes: params.qualityNotes } : {}),
+          },
+        },
+      });
+      await tx.user.update({
+        where: { id: current.listing.sellerId },
+        data: { totalConfirmations: { increment: 1 } },
+      });
+      this.logTransition(bookingId, actorId, 'confirmed', 'completed');
+      return updated;
+    });
+
+    // После фиксации транзакции — уведомление продавцу и закрытие смены
+    // (вспомогательные каналы не откатывают бизнес-операцию, ADR-012).
+    const sellerId = await this.prisma.booking
+      .findUniqueOrThrow({
+        where: { id: bookingId },
+        select: { listing: { select: { sellerId: true } } },
+      })
+      .then((b) => b.listing.sellerId);
+
+    if (booking.status === 'disputed') {
+      await this.notifications.send({
+        userId: sellerId,
+        type: 'booking_delivery_disputed',
+        title: 'Спор по приёмке',
+        body: `Покупатель заявил серьёзную проблему по брони. Откройте «Входящие», чтобы увидеть детали.`,
+        data: { bookingId },
+      });
+    } else {
+      await this.notifications.send({
+        userId: sellerId,
+        type: 'booking_delivery_confirmed',
+        title: 'Приёмка подтверждена',
+        body: 'Покупатель получил товар и подтвердил приёмку. Сделка завершена.',
+        data: { bookingId },
+      });
+    }
+
+    // Триггер ADR-012: покупатель-водитель с открытой сменой у этого
+    // продавца — смену закрыть (сценарий самовывоза водителем).
+    await this.closeRelatedWorkSession(bookingId);
+
+    return booking;
+  }
+
+  /**
+   * Авто-подтверждение приёмки (cron): confirmed → completed через
+   * BOOKING_AUTO_CONFIRM_HOURS (по умолчанию 24) после подтверждения
+   * брони — защита от «забыл подтвердить». qualityFlag=ok,
+   * BookingEvent(system_auto_confirmed), actorId NULL.
+   * Возвращает количество закрытых броней.
+   */
+  async autoConfirmStale(): Promise<number> {
+    const deadline = new Date(Date.now() - this.autoConfirmHours * 3_600_000);
+    const stale = await this.prisma.booking.findMany({
+      where: { status: 'confirmed', confirmedAt: { lt: deadline } },
+      select: { id: true },
+    });
+
+    let confirmed = 0;
+    for (const { id } of stale) {
+      try {
+        const done = await this.prisma.$transaction(async (tx) => {
+          const booking = await tx.booking.findUnique({ where: { id } });
+          if (!booking || booking.status !== 'confirmed') {
+            return false; // изменилась между findMany и транзакцией
+          }
+          await tx.booking.update({
+            where: { id },
+            data: {
+              status: 'completed',
+              deliveryConfirmedAt: new Date(),
+              receivedQuantity: booking.confirmedQuantity ?? booking.requestedQuantity,
+              qualityFlag: 'ok',
+            },
+          });
+          await tx.bookingEvent.create({
+            data: { bookingId: id, actorId: null, action: 'system_auto_confirmed' },
+          });
+          await tx.user.update({
+            where: { id: (await tx.booking.findUniqueOrThrow({ where: { id }, select: { listing: { select: { sellerId: true } } } })).listing.sellerId },
+            data: { totalConfirmations: { increment: 1 } },
+          });
+          this.logTransition(id, null, 'confirmed', 'completed');
+          return true;
+        });
+        if (done) confirmed++;
+      } catch (error) {
+        this.logger.error({ bookingId: id, err: error }, 'auto-confirm: не удалось закрыть бронь');
+      }
+    }
+    if (confirmed > 0) {
+      this.logger.log({ confirmed }, 'booking:auto-confirm closed stale bookings');
+    }
+    return confirmed;
+  }
+
+  /** Закрыть открытую смену «покупатель-водитель ↔ продавец лота» (ADR-012). */
+  private async closeRelatedWorkSession(bookingId: string): Promise<void> {
+    try {
+      const booking = await this.prisma.booking.findUniqueOrThrow({
+        where: { id: bookingId },
+        select: {
+          buyerId: true,
+          listing: { select: { sellerId: true } },
+        },
+      });
+      const open = await this.prisma.workSession.findFirst({
+        where: { driverId: booking.buyerId, sellerId: booking.listing.sellerId, endedAt: null },
+      });
+      if (open) {
+        await this.workHours.endSession(open.id, booking.buyerId);
+      }
+    } catch (error) {
+      this.logger.warn({ bookingId, err: error }, 'confirm-delivery: смену закрыть не удалось');
+    }
   }
 
   /**

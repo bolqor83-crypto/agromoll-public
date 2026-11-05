@@ -33,6 +33,7 @@ type ShowcaseState =
  */
 export default function ShowcaseScreen() {
   const userName = useAuthStore((s) => s.user?.displayName ?? 'Витрина');
+  const totalConfirmations = useAuthStore((s) => s.user?.totalConfirmations ?? 0);
   const insets = useSafeAreaInsets();
   const { colors, mode } = useTheme();
   const [state, setState] = useState<ShowcaseState>({ phase: 'loading' });
@@ -69,7 +70,7 @@ export default function ShowcaseScreen() {
     <Screen scroll={false}>
       <ScreenHeader
         title="Витрина"
-        subtitle={`${userName} · ваши лоты`}
+        subtitle={`${userName} · подтверждено сделок: ${totalConfirmations}`}
         badge={
           state.phase === 'ready' && state.demo ? (
             <Badge label="Демо-данные · API недоступен" variant="attention" />

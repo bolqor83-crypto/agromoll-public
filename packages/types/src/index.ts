@@ -73,6 +73,8 @@ export const BOOKING_STATUSES = [
   'confirmed',
   'cancelled',
   'expired',
+  'completed',
+  'disputed',
 ] as const;
 
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
@@ -87,6 +89,8 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   confirmed: 'Подтверждено',
   cancelled: 'Отменено',
   expired: 'Истекло',
+  completed: 'Завершено',
+  disputed: 'Спор по приёмке',
 };
 
 /** Действия журнала брони. Совпадают с enum BookingAction в Prisma-схеме. */
@@ -97,9 +101,23 @@ export const BOOKING_ACTIONS = [
   'confirmed',
   'cancelled',
   'expired',
+  'delivery_confirmed',
+  'delivery_disputed',
+  'system_auto_confirmed',
 ] as const;
 
 export type BookingAction = (typeof BOOKING_ACTIONS)[number];
+
+/** Оценка качества поставки при приёмке (v0.4.0-C, ADR-012). */
+export const QUALITY_FLAGS = ['ok', 'minor_issue', 'major_issue'] as const;
+
+export type QualityFlag = (typeof QUALITY_FLAGS)[number];
+
+export const QUALITY_FLAG_LABELS: Record<QualityFlag, string> = {
+  ok: 'Всё в порядке',
+  minor_issue: 'Мелкие проблемы',
+  major_issue: 'Серьёзная проблема',
+};
 
 /**
  * Лот продавца (DTO уровня API, без служебных полей БД).
@@ -136,6 +154,16 @@ export interface BookingDto {
   confirmedQuantity: number | null;
   status: BookingStatus;
   expiresAt: string;
+  /** Момент подтверждения брони продавцом (v0.4.0-C). */
+  confirmedAt: string | null;
+  /** Момент подтверждения приёмки покупателем (v0.4.0-C). */
+  deliveryConfirmedAt: string | null;
+  /** Фактически полученное количество (v0.4.0-C). */
+  receivedQuantity: number | null;
+  /** Комментарий качества при приёмке. */
+  qualityNotes: string | null;
+  /** Оценка качества поставки (ok / minor / major, ADR-012). */
+  qualityFlag: QualityFlag;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,6 +197,10 @@ export interface UserDto {
   phone: string | null;
   /** Прошёл ли подтверждение номера SMS-кодом. */
   phoneVerified: boolean;
+  /** Подтверждённых приёмок (репутационный счётчик, v0.4.0-C, ADR-012). */
+  totalConfirmations: number;
+  /** Споров по качеству (репутационный счётчик, v0.4.0-C). */
+  totalDisputes: number;
   createdAt: string;
 }
 
@@ -302,7 +334,11 @@ export interface ReminderResultDto {
 // ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
 
 /** Типы in-app уведомлений. Совпадают с enum NotificationType в Prisma-схеме. */
-export const NOTIFICATION_TYPES = ['debt_reminder'] as const;
+export const NOTIFICATION_TYPES = [
+  'debt_reminder',
+  'booking_delivery_confirmed',
+  'booking_delivery_disputed',
+] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

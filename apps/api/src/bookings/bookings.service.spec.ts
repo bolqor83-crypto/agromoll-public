@@ -8,9 +8,11 @@
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { Booking, Listing } from '@prisma/client';
-import { BOOKING_TTL_MINUTES } from './bookings.constants';
+import { BOOKING_TTL_MINUTES, BOOKING_AUTO_CONFIRM_HOURS } from './bookings.constants';
 import { BookingsService } from './bookings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { WorkHoursService } from '../work-hours/work-hours.service';
 
 /** Минимальный листинг для тестов. */
 function makeListing(overrides: Partial<Listing> = {}): Listing {
@@ -45,6 +47,11 @@ function makeBooking(overrides: Partial<Booking> = {}): Booking {
     confirmedQuantity: null,
     status: 'requested',
     expiresAt: new Date(Date.now() + 30 * 60_000),
+    confirmedAt: null,
+    deliveryConfirmedAt: null,
+    receivedQuantity: null,
+    qualityNotes: null,
+    qualityFlag: 'ok',
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -97,6 +104,9 @@ async function createService(prisma: PrismaService, ttlMinutes = 30): Promise<Bo
     providers: [
       { provide: PrismaService, useValue: prisma },
       { provide: BOOKING_TTL_MINUTES, useValue: ttlMinutes },
+      { provide: BOOKING_AUTO_CONFIRM_HOURS, useValue: 24 },
+      { provide: NotificationsService, useValue: { send: jest.fn() } },
+      { provide: WorkHoursService, useValue: { endSession: jest.fn() } },
       BookingsService,
     ],
   }).compile();

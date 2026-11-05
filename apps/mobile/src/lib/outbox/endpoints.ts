@@ -28,7 +28,10 @@ export const IDEMPOTENCY_ENDPOINTS: Record<OutboxOperationType, OutboxEndpoint> 
     url: (p) => `/bookings/${String(p.bookingId)}/accept-counter`,
   },
   create_debt: { method: 'POST', url: '/debts' }, // v0.4.0 (ADR-010)
-  confirm_delivery: { method: 'POST', url: '/deliveries/confirm' }, // будущее (v0.4+)
+  confirm_delivery: {
+    method: 'POST',
+    url: (p) => `/bookings/${String(p.bookingId)}/confirm-delivery`, // v0.4.0-C (ADR-012)
+  },
   settle_debt: {
     method: 'POST',
     url: (p) => `/debts/${String(p.debtId)}/settle`,

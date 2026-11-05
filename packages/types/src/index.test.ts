@@ -33,6 +33,9 @@ describe('@agromoll/types', () => {
       'confirmed',
       'cancelled',
       'expired',
+      // v0.4.0-C (ADR-012): приёмка закрывает жизненный цикл брони.
+      'completed',
+      'disputed',
     ]);
     expect(BOOKING_ACTIONS).toEqual([
       'created',
@@ -41,6 +44,9 @@ describe('@agromoll/types', () => {
       'confirmed',
       'cancelled',
       'expired',
+      'delivery_confirmed',
+      'delivery_disputed',
+      'system_auto_confirmed',
     ]);
   });
 

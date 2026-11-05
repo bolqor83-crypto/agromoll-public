@@ -66,6 +66,8 @@ const USER: UserDto = {
   displayName: 'Ларёк «У Ашота»',
   phone: '+79611234567',
   phoneVerified: true,
+  totalConfirmations: 0,
+  totalDisputes: 0,
   createdAt: new Date().toISOString(),
 };
 
