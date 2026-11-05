@@ -134,6 +134,86 @@ async function main(): Promise<void> {
     });
   }
 
+  // ─── Демо-долги (v0.4.0, ADR-010) ──────────────────────────────────
+  // Идемпотентно: не создаём дубли при повторном прогоне сида.
+  const existingDebts = await prisma.debt.count({
+    where: { creditorId: seller.id },
+  });
+  if (existingDebts === 0) {
+    const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
+
+    // продавец отпустил покупателю в долг (активный, просрочка >30 дней)
+    await prisma.debt.create({
+      data: {
+        creditorId: seller.id,
+        debtorId: buyer.id,
+        amount: 12_500,
+        description: 'Помидоры розовые, 2 ящика',
+        status: 'active',
+      },
+    });
+    await prisma.debtEvent.create({
+      data: {
+        debtId: (await prisma.debt.findFirstOrThrow({ where: { creditorId: seller.id } })).id,
+        actorId: seller.id,
+        action: 'created',
+        payload: { amount: '12500', currency: 'RUB' },
+      },
+    });
+
+    // покупатель должен водителю за доставку (молодой активный)
+    await prisma.debt.create({
+      data: {
+        creditorId: DEMO_ACCOUNTS.driver.id,
+        debtorId: buyer.id,
+        amount: 800.5,
+        description: 'Доставка до Левенцовки',
+        status: 'active',
+        createdAt: daysAgo(2),
+      },
+    });
+
+    console.log('  долгов:    2 (активные: просроченный + молодой)');
+  }
+
+  // ─── Демо-сессии часов (v0.4.0, ADR-011) ───────────────────────────
+  // Водитель отработал смену у продавца: сессия + месячный итог.
+  const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const existingSession = await prisma.workSession.count({
+    where: { driverId: DEMO_ACCOUNTS.driver.id },
+  });
+  if (existingSession === 0) {
+    const startedAt = new Date(Date.now() - 5 * 3_600_000);
+    await prisma.workSession.create({
+      data: {
+        driverId: DEMO_ACCOUNTS.driver.id,
+        sellerId: seller.id,
+        startedAt,
+        endedAt: new Date(startedAt.getTime() + 3 * 3_600_000),
+        durationMinutes: 180,
+        month,
+      },
+    });
+    await prisma.monthlyPairTotal.upsert({
+      where: {
+        driverId_sellerId_month: {
+          driverId: DEMO_ACCOUNTS.driver.id,
+          sellerId: seller.id,
+          month,
+        },
+      },
+      create: {
+        driverId: DEMO_ACCOUNTS.driver.id,
+        sellerId: seller.id,
+        month,
+        totalMinutes: 180,
+        monthCounted: false,
+      },
+      update: {},
+    });
+    console.log('  часов:     1 смена (3 ч у продавца)');
+  }
+
   console.log('Сид завершён:');
   console.log(`  покупатель: ${buyer.displayName} (${buyer.id})`);
   console.log(`  продавец:   ${seller.displayName} (${seller.id})`);

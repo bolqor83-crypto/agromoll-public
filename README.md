@@ -1,15 +1,138 @@
 # АгроМолл
 
-[![Version](https://img.shields.io/badge/version-0.3.1-2D6A4F)](package.json)
+[![Version](https://img.shields.io/badge/version-0.4.0-2D6A4F)](package.json)
 [![CI](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml)
 
 Мобильное приложение для оптово-розничного рынка «Агро Молл» (Ростов-на-Дону).
-**Текущий этап — v0.3.0 «Аутентификация и офлайн-ядро»**: вход по телефону
+**Текущий этап — v0.4.0 «Долги · Учёт часов 289-ФЗ · Приёмка»**:
+бронирование (v0.2.0), аутентификация с офлайн-ядром (v0.3.0),
+отзыв токенов и визуальная полировка (v0.3.1) — полностью сохранены.
+Доставка попутчиками, геозоны и публичный рейтинг — v0.5.0.
 
-- JWT, локальная очередь мутаций (outbox) с идемпотентностью на сервере,
-  zod-валидация ответов API на клиенте.
-  Бронирование (v0.2.0) полностью сохранено. Долги, учёт часов, доставка
-  и оплата — на следующих этапах.
+## Что нового в v0.4.0
+
+Три фичи, закрывающие «рыночный» контур: учёт доверия (долги),
+юридическая защита (289-ФЗ) и закрытие сделки (приёмка).
+
+- **Долги (Ledger)** — [ADR-010](docs/adr/ADR-010-debts-ledger.md).
+  Учёт договорённостей «продавец отпустил в долг»: `Debt` +
+  append-only журнал `DebtEvent` (из него в v0.5.0 считается
+  «надёжность оплаты»). Платформа **не является платёжным агентом** —
+  только запись, деньги стороны передают напрямую.
+  - `POST /debts` (идемпотентно, 0 < сумма ≤ 1 000 000 ₽, не самому
+    себе), `GET /debts` + фильтры, `GET /debts/summary` (виджет
+    «Вам должны / Вы должны», просрочка >30 дней — янтарный),
+    `GET /debts/counterparties` (только те, с кем были сделки);
+  - погашение — любая сторона; спор — обоюдное разрешение (два
+    подтверждения разных сторон → settled);
+  - напоминание дебитору: только кредитор, кулдаун 24 ч
+    (429 `DEBT_REMINDER_COOLDOWN` + момент следующей попытки);
+    in-app уведомление + push (FCM legacy, без ключа — no-op);
+  - экран «Долги» в табах покупателя и продавца, виджет на главных
+    экранах, форма «Отпустить в долг»; создание/погашение/спор
+    работают офлайн через outbox.
+- **Учёт часов 289-ФЗ** — [ADR-011](docs/adr/ADR-011-work-hours-289fz.md).
+  Юридическая страховка платформы: самозанятый водитель с 60+ часами
+  в месяц у одного продавца 6 месяцев подряд — признак трудовых
+  отношений (штраф до 500 тыс. ₽). **В интерфейсе нет денег — только
+  часы.**
+  - пары «водитель — продавец»: `WorkSession` → помесячный счётчик
+    `MonthlyPairTotal` (unique driver+seller+month, `monthCounted`
+    при ≥60 ч) → `BlockedPair` (крон 03:00, серия 6 месяцев);
+  - `POST /work-hours/sessions` (409 `WORK_PAIR_BLOCKED` с мягким
+    «по закону нужна пауза»), `/:id/end` (идемпотентно, минуты
+    атрибутируются месяцу старта), `GET /work-hours/me`,
+    `GET /work-hours/check/:driverId/:sellerId`;
+  - пороги ENV: `WORK_HOURS_MONTHLY_LIMIT=60`, `WORK_MONTHS_SERIES=6`;
+  - экран «Мои часы» (водитель): прогресс-бар до 60 ч (янтарный с
+    48 ч), серия месяцев, предупреждение «близки к лимиту» (>50 ч и
+    серия 5); у продавца — «Часы с водителями» (только просмотр).
+- **Приёмка (confirm-delivery)** —
+  [ADR-012](docs/adr/ADR-012-confirm-delivery.md). Закрытие жизненного
+  цикла брони: `confirmed → completed | disputed`, completed —
+  терминальный.
+  - `POST /bookings/:id/confirm-delivery` (только buyer,
+    идемпотентно): количество + качество (ok / minor_issue /
+    major_issue) + комментарий; недостача автоматически → minor;
+    major → `disputed` + уведомление продавцу (арбитраж — v0.5.0);
+  - авто-подтверждение через `BOOKING_AUTO_CONFIRM_HOURS` (24 ч,
+    крон ежечасно): `system_auto_confirmed`, защита от «забыл
+    подтвердить»;
+  - репутационные счётчики продавца: `totalConfirmations` /
+    `totalDisputes` («подтверждено сделок: 42» на витрине) — фундамент
+    публичного рейтинга v0.5.0;
+  - приёмка закрывает открытую смену «покупатель-водитель ↔ продавец
+    лота» (интеграция с ADR-011).
+- **fix(validation)**: `CancelBookingSchema` больше не strict —
+  мобильный outbox шлёт в теле весь payload (`{ bookingId, reason }`),
+  strict ломал отмену с реального устройства (400), при этом e2e с
+  «чистым» телом баг не ловил.
+- **Тесты**: 240 unit (api 133, mobile 54, validation 25, ui 23,
+  types 5) и **51 e2e** против реальных Postgres+PostGIS+Redis
+  (включая: долг полный цикл и обоюдный resolve; напоминание 429;
+  идемпотентность create_debt; 6 месяцев ≥60 ч прямым insert →
+  блокировка пары → 409; разорванная серия; приёмка ok/minor/major;
+  терминальность completed; авто-подтверждение).
+
+### Скриншоты v0.4.0
+
+| Долги (светлая)                                                | Долги (тёмная)                                                 |
+| -------------------------------------------------------------- | -------------------------------------------------------------- |
+| ![Долги, светлая](docs/design/screenshots/v0.4.0/debts-light.png)   | ![Долги, тёмная](docs/design/screenshots/v0.4.0/debts-dark.png)   |
+| Витрина продавца с виджетом долгов                              | Витрина: «подтверждено сделок»                                  |
+| ![Виджет, светлая](docs/design/screenshots/v0.4.0/seller-widget.png) | ![Счётчик сделок](docs/design/screenshots/v0.4.0/seller-counter.png) |
+| Мои часы (светлая)                                             | Мои часы (тёмная)                                              |
+| ![Часы, светлая](docs/design/screenshots/v0.4.0/hours-light.png)    | ![Часы, тёмная](docs/design/screenshots/v0.4.0/hours-dark.png)    |
+| Приёмка: модалка ok                                            | Приёмка: предупреждение о споре (major)                        |
+| ![Приёмка ok](docs/design/screenshots/v0.4.0/confirm-modal-light.png) | ![Приёмка major](docs/design/screenshots/v0.4.0/confirm-modal-major.png) |
+
+### curl-примеры v0.4.0
+
+```bash
+BASE=http://localhost:3000
+TOKEN=<accessToken>          # POST /auth/request-code + /auth/verify
+
+# ── Долги (ADR-010) ──────────────────────────────────────────────────
+# записать «отпустил в долг» (идемпотентно: X-Idempotency-Key)
+curl -s -X POST $BASE/debts \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"debtorId":"<uuid>","amount":12500.50,"description":"Помидоры, 2 ящика"}'
+
+# мои долги (обе стороны) и сводка для виджета
+curl -s $BASE/debts?status=active -H "Authorization: Bearer $TOKEN"
+curl -s $BASE/debts/summary   -H "Authorization: Bearer $TOKEN"
+
+# погасить / спор / обоюдное разрешение / напомнить (кулдаун 24 ч)
+curl -s -X POST $BASE/debts/<id>/settle   -H "Authorization: Bearer $TOKEN"
+curl -s -X POST $BASE/debts/<id>/dispute  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"reason":"частично вернул"}'
+curl -s -X POST $BASE/debts/<id>/resolve  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST $BASE/debts/<id>/reminder -H "Authorization: Bearer $TOKEN" \
+  -w "\n%{http_code}\n"   # второй раз подряд → 429 DEBT_REMINDER_COOLDOWN
+
+# ── Учёт часов 289-ФЗ (ADR-011) ──────────────────────────────────────
+# начать/закончить смену с продавцом (водитель)
+curl -s -X POST $BASE/work-hours/sessions \
+  -H "Authorization: Bearer $DRIVER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"sellerId":"<uuid>"}'
+curl -s -X POST $BASE/work-hours/sessions/<sessionId>/end \
+  -H "Authorization: Bearer $DRIVER_TOKEN"
+
+# мои пары за месяц и проверка пары перед заказом
+curl -s $BASE/work-hours/me -H "Authorization: Bearer $DRIVER_TOKEN"
+curl -s $BASE/work-hours/check/<driverId>/<sellerId> -H "Authorization: Bearer $TOKEN"
+# заблокированная пара → {"blocked":true,...}; POST sessions → 409 WORK_PAIR_BLOCKED
+
+# ── Приёмка (ADR-012) ────────────────────────────────────────────────
+curl -s -X POST $BASE/bookings/<id>/confirm-delivery \
+  -H "Authorization: Bearer $BUYER_TOKEN" \
+  -H "X-Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"receivedQuantity":15,"qualityFlag":"minor_issue","qualityNotes":"не хватило 5 кг"}'
+# major_issue → статус disputed + уведомление продавцу
+```
 
 ## Что нового в v0.3.1
 
