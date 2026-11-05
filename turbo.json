@@ -3,15 +3,22 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!**/*.md"],
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts", "!**/*.spec.ts"],
       "outputs": ["dist/**"]
     },
+    "db:generate": {
+      "cache": false
+    },
     "lint": {},
-    "typecheck": {},
+    "typecheck": {
+      "dependsOn": ["^build", "db:generate"]
+    },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": ["^build", "db:generate"],
+      "outputs": ["coverage/**"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     }
