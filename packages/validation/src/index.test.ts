@@ -1,41 +1,27 @@
 import { describe, expect, it } from 'vitest';
+import { UserRoleSchema, apiEnvSchema } from './index';
 
-import { idSchema, paginationSchema, roleSchema } from './index';
-
-describe('roleSchema', () => {
-  it('принимает все роли рынка', () => {
-    expect(roleSchema.parse('buyer')).toBe('buyer');
-    expect(roleSchema.parse('seller')).toBe('seller');
-    expect(roleSchema.parse('driver')).toBe('driver');
+describe('@agromoll/validation', () => {
+  it('UserRoleSchema принимает все роли рынка', () => {
+    for (const role of ['buyer', 'seller', 'driver'] as const) {
+      expect(UserRoleSchema.parse(role)).toBe(role);
+    }
   });
 
-  it('отклоняет неизвестные роли', () => {
-    expect(roleSchema.safeParse('admin').success).toBe(false);
-    expect(roleSchema.safeParse('').success).toBe(false);
-  });
-});
-
-describe('paginationSchema', () => {
-  it('подставляет значения по умолчанию', () => {
-    expect(paginationSchema.parse({})).toEqual({ page: 1, pageSize: 20 });
+  it('UserRoleSchema отклоняет неизвестную роль', () => {
+    expect(UserRoleSchema.safeParse('admin').success).toBe(false);
   });
 
-  it('приводит строки к числам (query-параметры)', () => {
-    expect(paginationSchema.parse({ page: '3', pageSize: '10' })).toEqual({
-      page: 3,
-      pageSize: 10,
+  it('apiEnvSchema подставляет дефолты и конвертирует порт', () => {
+    const env = apiEnvSchema.parse({
+      API_PORT: '4000',
+      DATABASE_URL: 'postgresql://localhost:5432/agromoll',
     });
+    expect(env.API_PORT).toBe(4000);
+    expect(env.LOG_LEVEL).toBe('info');
   });
 
-  it('отклоняет некорректные значения', () => {
-    expect(paginationSchema.safeParse({ page: 0 }).success).toBe(false);
-    expect(paginationSchema.safeParse({ pageSize: 1000 }).success).toBe(false);
-  });
-});
-
-describe('idSchema', () => {
-  it('принимает uuid и отклоняет остальное', () => {
-    expect(idSchema.safeParse('2f6b9d3e-1a4c-4d8e-9f0a-7b3c5d8e9f0a').success).toBe(true);
-    expect(idSchema.safeParse('not-a-uuid').success).toBe(false);
+  it('apiEnvSchema требует DATABASE_URL', () => {
+    expect(apiEnvSchema.safeParse({}).success).toBe(false);
   });
 });

@@ -1,24 +1,22 @@
 import { z } from 'zod';
-
-import { ROLES } from '@agromoll/types';
+import { USER_ROLES } from '@agromoll/types';
 
 /**
- * Схемы валидации АгроМолл.
+ * Пакет-заглушка этапа «фундамент».
  *
- * Этап 1 (каркас): только универсальные схемы. Бизнес-схемы — заявки, брони,
- * доставки, долги — добавляются на следующих этапах вместе с эндпоинтами.
+ * На следующем этапе здесь появятся схемы броней, заказов, геозон и доставки.
+ * Сейчас — только базовые схемы инфраструктуры, чтобы пакеты api и mobile
+ * уже могли опираться на единый источник валидации.
  */
 
-/** Роль участника рынка. */
-export const roleSchema = z.enum(ROLES);
-export type RoleInput = z.infer<typeof roleSchema>;
+/** Роль пользователя. Дублирует enum UserRole из Prisma-схемы (apps/api). */
+export const UserRoleSchema = z.enum(USER_ROLES);
 
-/** Пагинация для списков (прайсы, заявки, доставки). */
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+/** Переменные окружения API. */
+export const apiEnvSchema = z.object({
+  API_PORT: z.coerce.number().int().positive().default(3000),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  DATABASE_URL: z.string().min(1),
 });
-export type Pagination = z.infer<typeof paginationSchema>;
 
-/** Идентификатор сущности (uuid). */
-export const idSchema = z.string().uuid();
+export type ApiEnv = z.infer<typeof apiEnvSchema>;
