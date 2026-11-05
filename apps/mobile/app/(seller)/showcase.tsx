@@ -16,13 +16,15 @@ import * as Haptics from 'expo-haptics';
 import { ScreenHeader } from '@/components';
 import { ListingCard } from '@/components/ListingCard';
 import { CreateListingModal } from '@/components/CreateListingModal';
-import { api } from '@/lib/api';
+import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
 import { useAuthStore } from '@/store/auth';
 
 type ShowcaseState =
-  { phase: 'loading' } | { phase: 'ready'; listings: ListingDto[]; demo: boolean };
+  | { phase: 'loading' }
+  | { phase: 'invalid' }
+  | { phase: 'ready'; listings: ListingDto[]; demo: boolean };
 
 /**
  * Витрина продавца: свои лоты, остатки и резервы, FAB «+ Выставить лот».
@@ -40,6 +42,10 @@ export default function ShowcaseScreen() {
       const listings = await api.myListings();
       setState({ phase: 'ready', listings, demo: false });
     } catch (error) {
+      if (isInvalidResponseError(error)) {
+        setState({ phase: 'invalid' });
+        return;
+      }
       logger.warn('showcase', 'API недоступен, показываем демо-витрину', { error: String(error) });
       setState({ phase: 'ready', listings: DEMO_LISTINGS, demo: true });
     }
@@ -75,6 +81,13 @@ export default function ShowcaseScreen() {
           <SkeletonCard />
           <SkeletonCard />
         </View>
+      ) : state.phase === 'invalid' ? (
+        <EmptyState
+          illustration="box"
+          title="Не удалось загрузить"
+          description="Данные пришли в неожиданном формате. Попробуем ещё раз — просто потяните вниз."
+          action={{ label: 'Попробовать ещё раз', onPress: handleRefresh }}
+        />
       ) : state.listings.length === 0 ? (
         <EmptyState
           illustration="box"

@@ -11,12 +11,15 @@ import {
 import type { BookingDto } from '@agromoll/types';
 import { ScreenHeader } from '@/components';
 import { IncomingBookingCard } from '@/components/IncomingBookingCard';
-import { api } from '@/lib/api';
+import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS } from '@/lib/demo-data';
 import { useOutboxStore } from '@/store/outbox';
 
-type InboxState = { phase: 'loading' } | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
+type InboxState =
+  | { phase: 'loading' }
+  | { phase: 'invalid' }
+  | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
 
 /**
  * Входящие брони продавца: подтверждить / скорректировать / отклонить.
@@ -37,6 +40,10 @@ export default function InboxScreen() {
       const bookings = await api.bookings();
       setState({ phase: 'ready', bookings, demo: false });
     } catch (error) {
+      if (isInvalidResponseError(error)) {
+        setState({ phase: 'invalid' });
+        return;
+      }
       logger.warn('inbox', 'API недоступен, показываем демо-входящие', { error: String(error) });
       setState({ phase: 'ready', bookings: DEMO_BUYER_BOOKINGS, demo: true });
     }
@@ -83,6 +90,13 @@ export default function InboxScreen() {
           <SkeletonCard />
           <SkeletonCard />
         </View>
+      ) : state.phase === 'invalid' ? (
+        <EmptyState
+          illustration="calendar"
+          title="Не удалось загрузить"
+          description="Данные пришли в неожиданном формате. Попробуем ещё раз — просто потяните вниз."
+          action={{ label: 'Попробовать ещё раз', onPress: handleRefresh }}
+        />
       ) : merged.length === 0 ? (
         <EmptyState
           illustration="calendar"

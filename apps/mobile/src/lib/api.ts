@@ -25,6 +25,17 @@ import type {
 import { normalizePhone } from '@agromoll/types';
 import { tokenStore } from './token-store';
 import { logger } from './logger';
+import {
+  AuthResponseSchema,
+  BookingResponseSchema,
+  BookingsResponseSchema,
+  ListingResponseSchema,
+  ListingsResponseSchema,
+  RefreshResponseSchema,
+  RequestCodeResponseSchema,
+  UserResponseSchema,
+} from '@agromoll/validation';
+import type { ZodType } from 'zod';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -93,6 +104,36 @@ export function toApiError(error: unknown): ApiError {
     return new ApiError('Сеть недоступна', undefined, 'NETWORK', undefined);
   }
   return new ApiError(String(error), undefined, 'UNKNOWN', undefined);
+}
+
+/** Ошибка формата ответа: сервер ответил, но данные не соответствуют схеме. */
+export function isInvalidResponseError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'INVALID_RESPONSE';
+}
+
+/**
+ * Валидация ответа zod-схемой (подэтап C, ADR-006).
+ * Старый клиент + новый сервер, баги сериализации, MITM (частично) —
+ * рендерим только проверенные данные. Лишние поля не отвергаются
+ * (passthrough) — обратная совместимость.
+ */
+function validateResponse<T>(schema: ZodType<T>, data: unknown, context: string): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    // structured-лог с сырым ответом: без этого такой баг не отловить
+    logger.error('api', 'невалидный ответ API', {
+      context,
+      raw: data,
+      issues: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+    });
+    throw new ApiError(
+      `API вернул неверный формат (${context})`,
+      undefined,
+      'INVALID_RESPONSE',
+      data,
+    );
+  }
+  return result.data;
 }
 
 /** HTTP-клиент. */
@@ -199,7 +240,7 @@ export const api = {
       method: 'POST',
       url: '/auth/request-code',
       data: { phone },
-    });
+    }).then((data) => validateResponse(RequestCodeResponseSchema, data, 'auth/request-code'));
   },
 
   /** Шаг 2: проверить код → токены + профиль. */
@@ -212,7 +253,7 @@ export const api = {
       method: 'POST',
       url: '/auth/verify',
       data: { phone: normalized, code },
-    });
+    }).then((data) => validateResponse(AuthResponseSchema, data, 'auth/verify'));
   },
 
   /** Обновить access-токен (используется интерцептором и bootstrap-ом). */
@@ -221,12 +262,14 @@ export const api = {
       method: 'POST',
       url: '/auth/refresh',
       data: { refreshToken },
-    });
+    }).then((data) => validateResponse(RefreshResponseSchema, data, 'auth/refresh'));
   },
 
   /** Мой профиль. */
   me(): Promise<UserDto> {
-    return apiRequest<UserDto>({ method: 'GET', url: '/users/me' });
+    return apiRequest<UserDto>({ method: 'GET', url: '/users/me' }).then((d) =>
+      validateResponse(UserResponseSchema, d, 'users/me'),
+    );
   },
 
   /** Сменить роль (сохраняется на сервере). */
@@ -235,29 +278,37 @@ export const api = {
       method: 'PATCH',
       url: '/users/me/role',
       data: { role },
-    });
+    }).then((d) => validateResponse(UserResponseSchema, d, 'users/me/role'));
   },
 
   // ── Чтения (v0.2.0, без X-User-Id) ───────────────────────────────────────
 
   /** Лента активных лотов. */
   listings(): Promise<ListingDto[]> {
-    return apiRequest<ListingDto[]>({ method: 'GET', url: '/listings' });
+    return apiRequest<ListingDto[]>({ method: 'GET', url: '/listings' }).then((d) =>
+      validateResponse(ListingsResponseSchema, d, 'listings'),
+    );
   },
 
   /** Карточка лота. */
   listing(id: string): Promise<ListingDto> {
-    return apiRequest<ListingDto>({ method: 'GET', url: `/listings/${id}` });
+    return apiRequest<ListingDto>({ method: 'GET', url: `/listings/${id}` }).then((d) =>
+      validateResponse(ListingResponseSchema, d, 'listings/:id'),
+    );
   },
 
   /** Витрина продавца — свои лоты. */
   myListings(): Promise<ListingDto[]> {
-    return apiRequest<ListingDto[]>({ method: 'GET', url: '/listings/mine' });
+    return apiRequest<ListingDto[]>({ method: 'GET', url: '/listings/mine' }).then((d) =>
+      validateResponse(ListingsResponseSchema, d, 'listings/mine'),
+    );
   },
 
   /** Мои брони (buyer — свои, seller — входящие). */
   bookings(): Promise<BookingDto[]> {
-    return apiRequest<BookingDto[]>({ method: 'GET', url: '/bookings' });
+    return apiRequest<BookingDto[]>({ method: 'GET', url: '/bookings' }).then((d) =>
+      validateResponse(BookingsResponseSchema, d, 'bookings'),
+    );
   },
 
   // ── Мутации ───────────────────────────────────────────────────────────────
@@ -274,6 +325,8 @@ export const api = {
     lineNumber?: number;
     isPerishable?: boolean;
   }): Promise<ListingDto> {
-    return apiRequest<ListingDto>({ method: 'POST', url: '/listings', data: body });
+    return apiRequest<ListingDto>({ method: 'POST', url: '/listings', data: body }).then((d) =>
+      validateResponse(ListingResponseSchema, d, 'listings (POST)'),
+    );
   },
 };

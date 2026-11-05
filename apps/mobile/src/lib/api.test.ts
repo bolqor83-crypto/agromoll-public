@@ -47,6 +47,25 @@ function respond<T>(status: number, data: T, config: InternalAxiosRequestConfig)
   );
 }
 
+/** Полный валидный ListingDto — мок ответа, проходящий zod-валидацию. */
+const VALID_LISTING = {
+    id: 'l-1',
+    sellerId: 'u-1',
+    sellerName: 'ФХ «Донская долина»',
+    title: 'Помидоры розовые',
+    category: 'vegetables',
+    unit: 'kg',
+    pricePerUnit: '85.50',
+    quantityAvailable: 100,
+    quantityReserved: 0,
+    quantityAvailableForBooking: 100,
+    lineNumber: 12,
+    isPerishable: true,
+    status: 'active',
+    createdAt: '2026-11-05T06:00:00.000Z',
+    updatedAt: '2026-11-05T06:00:00.000Z',
+  };
+
 describe('api-клиент (axios + JWT)', () => {
   beforeAll(() => {
     adapterMock = jest.fn();
@@ -64,12 +83,12 @@ describe('api-клиент (axios + JWT)', () => {
 
   it('отправляет Authorization: Bearer и парсит JSON ответа', async () => {
     adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
-      respond(200, [{ id: 'l-1' }], config),
+      respond(200, [VALID_LISTING], config),
     );
 
     const listings = await api.listings();
 
-    expect(listings).toEqual([{ id: 'l-1' }]);
+    expect(listings).toEqual([VALID_LISTING]);
     const config = adapterMock.mock.calls[0][0] as InternalAxiosRequestConfig;
     expect(config.url).toBe('/listings');
     expect(config.headers.Authorization).toBe(`Bearer ${ACCESS}`);
@@ -97,7 +116,7 @@ describe('api-клиент (axios + JWT)', () => {
 
   it('POST-запросы несут тело в JSON', async () => {
     adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
-      respond(201, { id: 'l-1', status: 'active' }, config),
+      respond(201, VALID_LISTING, config),
     );
 
     await api.createListing({
@@ -175,6 +194,49 @@ describe('api-клиент (axios + JWT)', () => {
     // токены стёрты: сессия сгорела (auth store выйдет по событию sign-out)
     await expect(tokenStore.getAccessToken()).resolves.toBeNull();
     await expect(tokenStore.getRefreshToken()).resolves.toBeNull();
+  });
+
+  it('невалидный ответ API → ApiError INVALID_RESPONSE (zod-валидация)', async () => {
+    // сервер «испортил» лот: цена числом вместо строки
+    adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
+      respond(200, [{ id: 'l-1', pricePerUnit: 85.5 }], config),
+    );
+
+    const error = await api.listings().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe('INVALID_RESPONSE');
+  });
+
+  it('валидный ответ проходит zod-валидацию без изменений', async () => {
+    adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
+      respond(
+        200,
+        [
+          {
+            id: 'l-1',
+            sellerId: 'u-1',
+            title: 'Помидоры',
+            category: 'vegetables',
+            unit: 'kg',
+            pricePerUnit: '85.50',
+            quantityAvailable: 100,
+            quantityReserved: 0,
+            quantityAvailableForBooking: 100,
+            lineNumber: null,
+            isPerishable: true,
+            status: 'active',
+            createdAt: '2026-11-05T06:00:00.000Z',
+            updatedAt: '2026-11-05T06:00:00.000Z',
+          },
+        ],
+        config,
+      ),
+    );
+
+    const listings = await api.listings();
+    expect(listings).toHaveLength(1);
+    expect(listings[0].title).toBe('Помидоры');
   });
 
   it('токена нет — запрос без Authorization', async () => {

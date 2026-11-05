@@ -11,13 +11,15 @@ import {
 import type { BookingDto, BookingStatus, ListingUnit } from '@agromoll/types';
 import { ScreenHeader } from '@/components';
 import { BookingCard } from '@/components/BookingCard';
-import { api } from '@/lib/api';
+import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS, DEMO_COUNTER_OFFERS } from '@/lib/demo-data';
 import { useOutboxStore } from '@/store/outbox';
 
 type BookingsState =
-  { phase: 'loading' } | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
+  | { phase: 'loading' }
+  | { phase: 'invalid' }
+  | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
 
 /** Подпись «Ждёт сети»: бронь создана офлайн или её статус переопределён локально. */
 function pendingLabelFor(
@@ -52,6 +54,10 @@ export default function MyBookingsScreen() {
       const bookings = await api.bookings();
       setState({ phase: 'ready', bookings, demo: false });
     } catch (error) {
+      if (isInvalidResponseError(error)) {
+        setState({ phase: 'invalid' });
+        return;
+      }
       logger.warn('bookings', 'API недоступен, показываем демо-брони', { error: String(error) });
       setState({ phase: 'ready', bookings: DEMO_BUYER_BOOKINGS, demo: true });
     }
@@ -124,6 +130,13 @@ export default function MyBookingsScreen() {
       />
       {state.phase === 'loading' ? (
         <SkeletonCard />
+      ) : state.phase === 'invalid' ? (
+        <EmptyState
+          illustration="calendar"
+          title="Не удалось загрузить"
+          description="Данные пришли в неожиданном формате. Попробуем ещё раз — просто потяните вниз."
+          action={{ label: 'Попробовать ещё раз', onPress: handleRefresh }}
+        />
       ) : allBookings.length === 0 ? (
         <EmptyState
           illustration="calendar"

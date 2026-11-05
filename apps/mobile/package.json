@@ -17,6 +17,7 @@
   "dependencies": {
     "@agromoll/types": "workspace:^",
     "@agromoll/ui": "workspace:*",
+    "@agromoll/validation": "workspace:^",
     "@expo/metro-runtime": "~4.0.1",
     "@expo/vector-icons": "^14.0.4",
     "@react-native-community/netinfo": "7.1.7",

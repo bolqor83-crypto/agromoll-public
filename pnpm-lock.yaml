@@ -123,6 +123,9 @@ importers:
       '@agromoll/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@agromoll/validation':
+        specifier: workspace:^
+        version: link:../../packages/validation
       '@expo/metro-runtime':
         specifier: ~4.0.1
         version: 4.0.1(react-native@0.76.9(@babel/core@7.29.13)(@babel/preset-env@7.29.7(@babel/core@7.29.13))(@types/react@18.3.31)(react@18.3.1))

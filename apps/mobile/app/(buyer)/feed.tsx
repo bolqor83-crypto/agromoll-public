@@ -12,11 +12,14 @@ import type { ListingDto } from '@agromoll/types';
 import { useRouter } from 'expo-router';
 import { ScreenHeader } from '@/components';
 import { ListingCard } from '@/components/ListingCard';
-import { api } from '@/lib/api';
+import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
 
-type FeedState = { phase: 'loading' } | { phase: 'ready'; listings: ListingDto[]; demo: boolean };
+type FeedState =
+  | { phase: 'loading' }
+  | { phase: 'invalid' }
+  | { phase: 'ready'; listings: ListingDto[]; demo: boolean };
 
 /**
  * Лента покупателя: GET /listings со skeleton-загрузкой,
@@ -33,6 +36,12 @@ export default function FeedScreen() {
       const listings = await api.listings();
       setState({ phase: 'ready', listings, demo: false });
     } catch (error) {
+      if (isInvalidResponseError(error)) {
+        // сервер ответил неожиданным форматом — демо-данные не показываем,
+        // честный EmptyState с повтором (подэтап C)
+        setState({ phase: 'invalid' });
+        return;
+      }
       logger.warn('feed', 'API недоступен, показываем демо-данные', { error: String(error) });
       setState({ phase: 'ready', listings: DEMO_LISTINGS, demo: true });
     }
@@ -66,6 +75,13 @@ export default function FeedScreen() {
           <SkeletonCard />
           <SkeletonCard />
         </View>
+      ) : state.phase === 'invalid' ? (
+        <EmptyState
+          illustration="basket"
+          title="Не удалось загрузить"
+          description="Данные пришли в неожиданном формате. Попробуем ещё раз — просто потяните вниз."
+          action={{ label: 'Попробовать ещё раз', onPress: handleRefresh }}
+        />
       ) : state.listings.length === 0 ? (
         <EmptyState
           illustration="basket"
