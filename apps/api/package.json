@@ -16,10 +16,12 @@
   },
   "dependencies": {
     "@agromoll/types": "workspace:*",
+    "@agromoll/validation": "workspace:^",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^5.0.0",
     "@prisma/client": "^6.2.1",
     "nestjs-pino": "^4.2.0",
     "pino": "^9.6.0",

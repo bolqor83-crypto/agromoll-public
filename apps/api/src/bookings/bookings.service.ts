@@ -29,10 +29,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Booking, Prisma } from '@prisma/client';
+import type { BookingDto, BookingStatus } from '@agromoll/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { toBookingDto } from '../common/serialization';
 import { BOOKING_TTL_MINUTES } from './bookings.constants';
 
 type TransactionClient = Prisma.TransactionClient;
+
+/** Include для списков броней: название/единица лота и имя покупателя. */
+const BOOKING_LIST_VIEW_INCLUDE = {
+  listing: { select: { title: true, unit: true } },
+  buyer: { select: { displayName: true } },
+} as const satisfies Prisma.BookingInclude;
 
 /** Загрузка брони вместе с лотами — для проверок ролей и остатков. */
 const BOOKING_WITH_LISTING_INCLUDE = {
@@ -328,7 +336,9 @@ export class BookingsService {
     for (const { id } of stale) {
       try {
         const done = await this.prisma.$transaction(async (tx) => {
-          const booking = await loadBookingForUpdate(tx, id);
+          // Без TTL-защиты loadBookingForUpdate: крона работает именно
+          // с просроченными бронями, это не действие пользователя.
+          const booking = await loadBooking(tx, id);
           if (booking.status !== 'requested' && booking.status !== 'counter_offered') {
             return false; // кто-то успел изменить бронь между findMany и транзакцией
           }
@@ -355,6 +365,28 @@ export class BookingsService {
     return expired;
   }
 
+  /** Мои брони покупателя — «Мои брони» в приложении. */
+  async findByBuyer(buyerId: string, status?: BookingStatus): Promise<BookingDto[]> {
+    const bookings = await this.prisma.booking.findMany({
+      where: { buyerId, status },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 200,
+      include: BOOKING_LIST_VIEW_INCLUDE,
+    });
+    return bookings.map(toBookingDto);
+  }
+
+  /** Входящие брони по листингам продавца — «Входящие» в приложении. */
+  async findIncomingForSeller(sellerId: string, status?: BookingStatus): Promise<BookingDto[]> {
+    const bookings = await this.prisma.booking.findMany({
+      where: { listing: { sellerId }, status },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 200,
+      include: BOOKING_LIST_VIEW_INCLUDE,
+    });
+    return bookings.map(toBookingDto);
+  }
+
   private logTransition(
     bookingId: string,
     actorId: string | null,
@@ -368,11 +400,8 @@ export class BookingsService {
 
 /* ────────────────────────── Внутренние помощники ────────────────────────── */
 
-/** Загружает бронь с лотом; 404 если нет; конфликт, если TTL уже истёк. */
-async function loadBookingForUpdate(
-  tx: TransactionClient,
-  bookingId: string,
-): Promise<BookingWithListing> {
+/** Загружает бронь с лотом; 404 если нет. Без TTL-защиты (для крона и чтения). */
+async function loadBooking(tx: TransactionClient, bookingId: string): Promise<BookingWithListing> {
   const booking = await tx.booking.findUnique({
     where: { id: bookingId },
     include: BOOKING_WITH_LISTING_INCLUDE,
@@ -380,6 +409,15 @@ async function loadBookingForUpdate(
   if (!booking) {
     throw new NotFoundException('Бронь не найдена');
   }
+  return booking;
+}
+
+/** Загружает бронь с лотом; 404 если нет; конфликт, если TTL уже истёк. */
+async function loadBookingForUpdate(
+  tx: TransactionClient,
+  bookingId: string,
+): Promise<BookingWithListing> {
+  const booking = await loadBooking(tx, bookingId);
   if (
     (booking.status === 'requested' || booking.status === 'counter_offered') &&
     booking.expiresAt.getTime() <= Date.now()

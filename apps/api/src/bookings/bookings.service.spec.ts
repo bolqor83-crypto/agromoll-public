@@ -433,7 +433,12 @@ describe('BookingsService (unit)', () => {
   describe('expireStale — истечение TTL', () => {
     it('гасит просроченную бронь, возвращает резерв, пишет событие без актёра', async () => {
       const { prisma, tx, prismaMock } = createPrismaMock();
-      const stale = makeBooking({ id: 'booking-1', status: 'requested', requestedQuantity: 10 });
+      const stale = makeBooking({
+        id: 'booking-1',
+        status: 'requested',
+        requestedQuantity: 10,
+        expiresAt: new Date(Date.now() - 60_000), // TTL уже истёк — как в проде
+      });
       prismaMock.booking.findMany.mockResolvedValue([{ id: 'booking-1' }]);
       tx.booking.findUnique.mockResolvedValue(makeBookingWithListing(stale, makeListing()));
       tx.$executeRaw.mockResolvedValue(1);
@@ -473,7 +478,11 @@ describe('BookingsService (unit)', () => {
       const { prisma, tx, prismaMock } = createPrismaMock();
       prismaMock.booking.findMany.mockResolvedValue([{ id: 'bad' }, { id: 'good' }]);
 
-      const stale = makeBooking({ id: 'good', status: 'requested' });
+      const stale = makeBooking({
+        id: 'good',
+        status: 'requested',
+        expiresAt: new Date(Date.now() - 60_000),
+      });
       tx.booking.findUnique
         .mockRejectedValueOnce(new Error('db hiccup'))
         .mockResolvedValueOnce(makeBookingWithListing(stale, makeListing()));

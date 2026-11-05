@@ -1,16 +1,24 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BookingsController } from './bookings.controller';
+import { BookingTtlCron } from './booking-ttl.cron';
 import { BOOKING_TTL_MINUTES, DEFAULT_BOOKING_TTL_MINUTES } from './bookings.constants';
 import { BookingsService } from './bookings.service';
 
 /**
- * Модуль броней. На подэтапе A (v0.2.0) содержит только доменный сервис —
- * контроллеры и cron появляются в подэтапе B (см. docs/adr/ADR-004).
+ * Модуль броней v0.2.0: флоу «запрос → корректировка → подтверждение».
+ *
+ * - BookingsService — машина состояний + атомарный резерв количества;
+ * - BookingTtlCron — гашение просроченных броней каждую минуту;
+ * - TTL настраивается через BOOKING_TTL_MINUTES (по умолчанию 30).
+ *
  * PrismaModule глобальный, поэтому здесь не импортируется.
  */
 @Module({
+  controllers: [BookingsController],
   providers: [
     BookingsService,
+    BookingTtlCron,
     {
       provide: BOOKING_TTL_MINUTES,
       inject: [ConfigService],

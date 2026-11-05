@@ -100,13 +100,17 @@ jobs:
         run: pnpm --filter @agromoll/api exec prisma migrate deploy
 
       - name: Миграции в точности соответствуют schema.prisma
+        working-directory: apps/api
         run: |
-          DIFF=$(pnpm --filter @agromoll/api exec prisma migrate diff \
+          DIFF=$(pnpm exec prisma migrate diff \
             --from-url "$DATABASE_URL" \
-            --to-schema-datamodel apps/api/prisma/schema.prisma \
+            --to-schema-datamodel prisma/schema.prisma \
             --script)
           echo "$DIFF"
-          if echo "$DIFF" | grep -qE 'CREATE|ALTER|DROP'; then
+          # PostGIS-таблицы (spatial_ref_sys и пр.) живут в схеме public,
+          # но не входят в datamodel — это ожидаемо, исключаем из проверки.
+          DIFF_FILTERED=$(echo "$DIFF" | grep -viE 'spatial_ref_sys|geometry_columns|geography_columns|raster_columns|raster_overviews' || true)
+          if echo "$DIFF_FILTERED" | grep -qE 'CREATE|ALTER|DROP'; then
             echo "::error::Миграции не соответствуют schema.prisma — применён diff выше"
             exit 1
           fi
