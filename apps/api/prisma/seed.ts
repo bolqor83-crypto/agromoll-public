@@ -1,9 +1,11 @@
 /**
- * Сид-скрипт АгроМолл (v0.2.0): демо-аккаунты и витрина.
+ * Сид-скрипт АгроМолл (v0.3.0): демо-аккаунты и витрина.
  *
  * Создаёт трёх пользователей с ФИКСИРОВАННЫМИ id из @agromoll/types.DEMO_ACCOUNTS
- * (мобильное приложение подставляет их в X-User-Id — заглушка auth) и несколько
- * активных лотов, чтобы лента не была пустой при ручной проверке.
+ * и телефонами: в dev на них можно войти по коду-заглушке «0000»
+ * (POST /auth/request-code → POST /auth/verify, см. ADR-007).
+ * Парольного входа в MVP нет — passwordHash не заполняется (колонка
+ * заложена на будущее); телефон — единственный идентификатор входа.
  *
  * Запуск: pnpm --filter @agromoll/api db:seed
  * Идемпотентен: upsert по id.
@@ -21,6 +23,8 @@ async function main(): Promise<void> {
       id: DEMO_ACCOUNTS.buyer.id,
       role: 'buyer',
       displayName: DEMO_ACCOUNTS.buyer.displayName,
+      phone: '+79611230001',
+      phoneVerified: true,
       reputationScore: 4.2,
     },
   });
@@ -32,6 +36,8 @@ async function main(): Promise<void> {
       id: DEMO_ACCOUNTS.seller.id,
       role: 'seller',
       displayName: DEMO_ACCOUNTS.seller.displayName,
+      phone: '+79611230002',
+      phoneVerified: true,
       reputationScore: 4.8,
     },
   });
@@ -43,6 +49,8 @@ async function main(): Promise<void> {
       id: DEMO_ACCOUNTS.driver.id,
       role: 'driver',
       displayName: DEMO_ACCOUNTS.driver.displayName,
+      phone: '+79611230003',
+      phoneVerified: true,
       reputationScore: 4.5,
     },
   });
