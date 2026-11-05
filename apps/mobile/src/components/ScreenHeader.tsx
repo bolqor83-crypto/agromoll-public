@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Icon, radius, spacing, Text, useTheme } from '@agromoll/ui';
 import { ThemeToggle } from './ThemeToggle';
+import { ConnectionBadge } from './ConnectionBadge';
 import { useAuthStore } from '@/store/auth';
 
 interface ScreenHeaderProps {
@@ -20,9 +21,14 @@ export function ScreenHeader({ title, subtitle, badge }: ScreenHeaderProps) {
 
   return (
     <View style={{ gap: spacing.xs, marginBottom: spacing.lg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="display">{title}</Text>
-        <ThemeToggle />
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm }}>
+        <Text variant="display" style={{ flexShrink: 1 }}>
+          {title}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+          <ConnectionBadge />
+          <ThemeToggle />
+        </View>
       </View>
       {subtitle ? (
         <Text variant="body" color="secondary">

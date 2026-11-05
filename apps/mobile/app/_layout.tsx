@@ -9,6 +9,8 @@ import { ThemeProvider, useTheme } from '@agromoll/ui';
 import { logger } from '@/lib/logger';
 import { useThemeStore } from '@/store/theme';
 import { listenForcedSignOut, useAuthStore } from '@/store/auth';
+import { initOutboxBridge } from '@/store/outbox';
+import { ConflictDialog } from '@/components/ConflictDialog';
 
 function AppShell() {
   const { mode } = useTheme();
@@ -32,6 +34,15 @@ function AppShell() {
   // Интерцептор axios сказал «разлогинь» — слушаем один раз.
   useEffect(() => listenForcedSignOut(), []);
 
+  // Офлайн-ядро: события очереди, сеть (NetInfo), передний план (AppState).
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    void initOutboxBridge().then((fn) => {
+      cleanup = fn;
+    });
+    return () => cleanup?.();
+  }, []);
+
   useEffect(() => {
     logger.info('app', 'приложение запущено', {
       version: Constants.expoConfig?.version ?? 'unknown',
@@ -43,6 +54,8 @@ function AppShell() {
     <>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
+      {/* Конфликт outbox ↔ сервер: решает человек, не молча (ADR-006) */}
+      <ConflictDialog />
     </>
   );
 }

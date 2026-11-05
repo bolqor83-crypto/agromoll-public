@@ -16,6 +16,8 @@ import { api } from '@/lib/api';
 import { AUTH_SIGN_OUT_EVENT, toApiError } from '@/lib/api';
 import { tokenStore } from '@/lib/token-store';
 import { logger } from '@/lib/logger';
+import { getOutbox } from '@/lib/outbox/outbox-instance';
+import { useOutboxStore } from '@/store/outbox';
 
 export type AuthStatus = 'booting' | 'unauthenticated' | 'authenticated';
 
@@ -66,6 +68,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     await tokenStore.clear();
+    // Критично (ADR-006): локальная очередь и оптимистичные состояния
+    // очищаются — операции одного пользователя не утекают в сессию другого.
+    try {
+      const outbox = await getOutbox();
+      await outbox.clearAll();
+    } catch (error) {
+      logger.warn('auth', 'не удалось очистить локальную очередь при выходе', {
+        error: String(error),
+      });
+    }
+    useOutboxStore.setState({
+      queue: [],
+      pendingCount: 0,
+      pendingCreates: {},
+      overrides: {},
+      conflictedOperation: null,
+      version: 0,
+    });
     set({ status: 'unauthenticated', user: null });
     logger.info('auth', 'выход выполнен');
   },

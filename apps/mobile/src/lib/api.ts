@@ -260,10 +260,11 @@ export const api = {
     return apiRequest<BookingDto[]>({ method: 'GET', url: '/bookings' });
   },
 
-  // ── Мутации (v0.3.0: без userId — пользователя определяет JWT).
-  // В подэтапе B эти вызовы переедут в outbox с идемпотентностью. ─────────
+  // ── Мутации ───────────────────────────────────────────────────────────────
+  // Мутации БРОНЕЙ (create/cancel/confirm/counter-offer/accept-counter)
+  // живут в офлайн-ядре: src/lib/outbox/* (X-Idempotency-Key, ADR-006).
 
-  /** Выставить лот (seller). */
+  /** Выставить лот (seller). Не идемпотентно: офлайн-очереди не требует. */
   createListing(body: {
     title: string;
     category: string;
@@ -274,53 +275,5 @@ export const api = {
     isPerishable?: boolean;
   }): Promise<ListingDto> {
     return apiRequest<ListingDto>({ method: 'POST', url: '/listings', data: body });
-  },
-
-  /** Создать бронь (buyer). */
-  createBooking(listingId: string, requestedQuantity: number): Promise<BookingDto> {
-    return apiRequest<BookingDto>({
-      method: 'POST',
-      url: '/bookings',
-      data: { listingId, requestedQuantity },
-    });
-  },
-
-  /** Отменить бронь (любая сторона переговоров). */
-  cancelBooking(bookingId: string, reason?: string): Promise<BookingDto> {
-    return apiRequest<BookingDto>({
-      method: 'POST',
-      url: `/bookings/${bookingId}/cancel`,
-      data: reason !== undefined ? { reason } : {},
-    });
-  },
-
-  /** Принять корректировку продавца (buyer). */
-  acceptCounter(bookingId: string): Promise<BookingDto> {
-    return apiRequest<BookingDto>({
-      method: 'POST',
-      url: `/bookings/${bookingId}/accept-counter`,
-      data: {},
-    });
-  },
-
-  /** Подтвердить бронь как есть (seller). */
-  confirmBooking(bookingId: string): Promise<BookingDto> {
-    return apiRequest<BookingDto>({
-      method: 'POST',
-      url: `/bookings/${bookingId}/confirm`,
-      data: {},
-    });
-  },
-
-  /** Предложить корректировку (seller). */
-  counterOffer(
-    bookingId: string,
-    body: { offeredQuantity?: number; pickupTime?: string; note?: string },
-  ): Promise<BookingDto> {
-    return apiRequest<BookingDto>({
-      method: 'POST',
-      url: `/bookings/${bookingId}/counter-offer`,
-      data: body,
-    });
   },
 };

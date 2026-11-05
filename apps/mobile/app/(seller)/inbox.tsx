@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import {
   Badge,
@@ -14,15 +14,23 @@ import { IncomingBookingCard } from '@/components/IncomingBookingCard';
 import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_BUYER_BOOKINGS } from '@/lib/demo-data';
+import { useOutboxStore } from '@/store/outbox';
 
 type InboxState = { phase: 'loading' } | { phase: 'ready'; bookings: BookingDto[]; demo: boolean };
 
 /**
- * Входящие брони продавца: подтверждить / предложить корректировку / отклонить.
+ * Входящие брони продавца: подтверждить / скорректировать / отклонить.
+ * v0.3.0: действия идут через outbox (работают офлайн), статусы
+ * оптимистично переопределяются локально, список перечитывается
+ * по событиям очереди (version).
  */
 export default function InboxScreen() {
   const [state, setState] = useState<InboxState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
+
+  const version = useOutboxStore((s) => s.version);
+  const runSync = useOutboxStore((s) => s.runSync);
+  const overrides = useOutboxStore((s) => s.overrides);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -36,18 +44,26 @@ export default function InboxScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, version]);
 
   const handleRefresh = useCallback((): void => {
     setRefreshing(true);
+    void runSync();
     void load().finally(() => setRefreshing(false));
-  }, [load]);
+  }, [load, runSync]);
+
+  const merged = useMemo(() => {
+    if (state.phase !== 'ready') {
+      return [];
+    }
+    return state.bookings.map((booking) => {
+      const override = overrides[booking.id];
+      return override ? { ...booking, status: override.status } : booking;
+    });
+  }, [state, overrides]);
 
   const pendingCount =
-    state.phase === 'ready'
-      ? state.bookings.filter((b) => b.status === 'requested' || b.status === 'counter_offered')
-          .length
-      : 0;
+    merged.filter((b) => b.status === 'requested' || b.status === 'counter_offered').length;
 
   return (
     <Screen scroll={false}>
@@ -67,7 +83,7 @@ export default function InboxScreen() {
           <SkeletonCard />
           <SkeletonCard />
         </View>
-      ) : state.bookings.length === 0 ? (
+      ) : merged.length === 0 ? (
         <EmptyState
           illustration="calendar"
           title="Новых броней нет"
@@ -85,12 +101,12 @@ export default function InboxScreen() {
             paddingBottom: spacing.xxl,
           }}
         >
-          {state.bookings.map((booking) => (
+          {merged.map((booking) => (
             <IncomingBookingCard
               key={booking.id}
               booking={booking}
-              onChanged={() => void load()}
-              demo={state.demo}
+              pendingLabel={overrides[booking.id] ? 'Ждёт сети' : undefined}
+              demo={state.phase === 'ready' ? state.demo : false}
             />
           ))}
         </PullToRefreshScrollView>

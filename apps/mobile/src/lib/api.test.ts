@@ -80,7 +80,15 @@ describe('api-клиент (axios + JWT)', () => {
       respond(409, { message: 'Недостаточно товара: свободно 5' }, config),
     );
 
-    const error = await api.createBooking('listing-1', 10).catch((e: unknown) => e);
+    const error = await api
+      .createListing({
+        title: 'Лук репчатый',
+        category: 'vegetables',
+        unit: 'kg',
+        pricePerUnit: 30,
+        quantityAvailable: 10,
+      })
+      .catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(409);
@@ -89,14 +97,28 @@ describe('api-клиент (axios + JWT)', () => {
 
   it('POST-запросы несут тело в JSON', async () => {
     adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
-      respond(201, { id: 'b-1', status: 'requested' }, config),
+      respond(201, { id: 'l-1', status: 'active' }, config),
     );
 
-    await api.createBooking('listing-1', 20);
+    await api.createListing({
+      title: 'Лук репчатый',
+      category: 'vegetables',
+      unit: 'kg',
+      pricePerUnit: 30,
+      quantityAvailable: 10,
+    });
 
     const config = adapterMock.mock.calls[0][0] as InternalAxiosRequestConfig;
     expect(config.method).toBe('post');
-    expect(config.data).toBe(JSON.stringify({ listingId: 'listing-1', requestedQuantity: 20 }));
+    expect(config.data).toBe(
+      JSON.stringify({
+        title: 'Лук репчатый',
+        category: 'vegetables',
+        unit: 'kg',
+        pricePerUnit: 30,
+        quantityAvailable: 10,
+      }),
+    );
   });
 
   it('сетевой сбой → ApiError NETWORK (экран уйдёт в демо-режим)', async () => {

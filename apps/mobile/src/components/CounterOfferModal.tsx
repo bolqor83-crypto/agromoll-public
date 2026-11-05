@@ -3,7 +3,7 @@ import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, View } from '
 import type { BookingDto } from '@agromoll/types';
 import { Button, Card, Input, spacing, Text, useTheme } from '@agromoll/ui';
 import * as Haptics from 'expo-haptics';
-import { api, ApiError } from '@/lib/api';
+import { counterOfferMutation } from '@/lib/outbox/mutations';
 
 export interface CounterOfferModalProps {
   visible: boolean;
@@ -44,7 +44,7 @@ export function CounterOfferModal({
     }
     setSending(true);
     try {
-      await api.counterOffer(booking.id, {
+      await counterOfferMutation(booking.id, {
         offeredQuantity: quantityValid ? parsedQuantity : undefined,
         pickupTime: pickupTime.trim() || undefined,
         note: note.trim() || undefined,
@@ -52,11 +52,11 @@ export function CounterOfferModal({
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
+      // Список обновится сам по событию outbox (version++).
       onDone();
     } catch (error) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
-      const hint = error instanceof ApiError ? error.hint : undefined;
-      Alert.alert('Не получилось', hint ?? 'Проверьте соединение с API и попробуйте ещё раз.');
+      Alert.alert('Не получилось', String(error instanceof Error ? error.message : error));
     } finally {
       setSending(false);
     }

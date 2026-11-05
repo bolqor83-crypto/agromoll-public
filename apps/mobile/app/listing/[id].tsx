@@ -17,6 +17,8 @@ import type { ListingDto } from '@agromoll/types';
 import * as Haptics from 'expo-haptics';
 import { ScreenHeader } from '@/components';
 import { api, ApiError } from '@/lib/api';
+import { createBookingMutation } from '@/lib/outbox/mutations';
+import { useOutboxStore } from '@/store/outbox';
 import { formatAvailable, formatPrice } from '@/lib/format';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
@@ -53,6 +55,8 @@ export default function ListingDetailScreen() {
     })();
   }, [id]);
 
+  const isOnline = useOutboxStore((s) => s.isOnline);
+
   const book = async (): Promise<void> => {
     if (!listing) return;
     if (demo) {
@@ -66,13 +70,22 @@ export default function ListingDetailScreen() {
     setSending(true);
     setError(null);
     try {
-      await api.createBooking(listing.id, quantity);
+      // v0.3.0: бронь уходит через локальный outbox — работает и офлайн,
+      // UI покажет её в «Моих бронях» с пометкой «Ждёт сети».
+      await createBookingMutation({
+        listingId: listing.id,
+        requestedQuantity: quantity,
+        listingTitle: listing.title,
+        listingUnit: listing.unit,
+      });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
       Alert.alert(
-        'Забронировано',
-        `«${listing.title}» — ${quantity} ждёт подтверждения продавца (30 минут).`,
+        isOnline ? 'Забронировано' : 'Заявка сохранена',
+        isOnline
+          ? `«${listing.title}» — ${quantity} ждёт подтверждения продавца (30 минут).`
+          : `Сети нет — «${listing.title}» (${quantity}) сохранено в очередь и уйдёт продавцу, как только появится связь.`,
         [
           { text: 'К моим броням', onPress: () => router.push('/(buyer)/bookings') },
           { text: 'Остаться', style: 'cancel' },
@@ -81,8 +94,8 @@ export default function ListingDetailScreen() {
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
       const hint = err instanceof ApiError ? err.hint : undefined;
-      setError(hint ?? 'Не получилось создать бронь. Попробуйте ещё раз.');
-      logger.warn('booking', 'не удалось создать бронь', { error: String(err) });
+      setError(hint ?? 'Не получилось сохранить бронь. Попробуйте ещё раз.');
+      logger.warn('booking', 'не удалось поставить бронь в очередь', { error: String(err) });
     } finally {
       setSending(false);
     }

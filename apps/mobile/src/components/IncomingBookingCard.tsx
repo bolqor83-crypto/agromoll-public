@@ -4,15 +4,14 @@ import { BOOKING_STATUS_LABELS } from '@agromoll/types';
 import type { BookingDto } from '@agromoll/types';
 import { Badge, Button, Card, spacing, Text } from '@agromoll/ui';
 import * as Haptics from 'expo-haptics';
-import { api, ApiError } from '@/lib/api';
+import { cancelBookingMutation, confirmBookingMutation } from '@/lib/outbox/mutations';
 import { CounterOfferModal } from './CounterOfferModal';
 import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
 
 export interface IncomingBookingCardProps {
   booking: BookingDto;
-  /** id продавца (для запросов). */
-  /** Обновить список после действия. */
-  onChanged: () => void;
+  /** Оптимистичная операция ещё не подтверждена сервером. */
+  pendingLabel?: string;
   /** Демо-режим: действия не ходят в API. */
   demo: boolean;
 }
@@ -23,7 +22,7 @@ export interface IncomingBookingCardProps {
  */
 export function IncomingBookingCard({
   booking,
-  onChanged,
+  pendingLabel,
   demo,
 }: IncomingBookingCardProps) {
   const [busy, setBusy] = useState<'confirm' | 'cancel' | null>(null);
@@ -43,18 +42,17 @@ export function IncomingBookingCard({
     setBusy(action);
     try {
       if (action === 'confirm') {
-        await api.confirmBooking(booking.id);
+        await confirmBookingMutation(booking.id);
       } else {
-        await api.cancelBooking(booking.id);
+        await cancelBookingMutation(booking.id);
       }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
-      onChanged();
+      // Список обновится сам: событие outbox → version++ → экран перечитает.
     } catch (error) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
-      const hint = error instanceof ApiError ? error.hint : undefined;
-      Alert.alert('Не получилось', hint ?? 'Проверьте соединение с API и попробуйте ещё раз.');
+      Alert.alert('Не получилось', String(error instanceof Error ? error.message : error));
     } finally {
       setBusy(null);
     }
@@ -76,10 +74,17 @@ export function IncomingBookingCard({
             {`${booking.listingTitle ?? 'Лот'} · ${formatQuantity(booking.requestedQuantity, booking.listingUnit)} · истекает в ${formatClock(booking.expiresAt)}`}
           </Text>
         </View>
-        <Badge
-          label={BOOKING_STATUS_LABELS[booking.status]}
-          variant={bookingBadgeVariant(booking.status)}
-        />
+        <View style={{ gap: spacing.xs, alignItems: 'flex-end' }}>
+          <Badge
+            label={BOOKING_STATUS_LABELS[booking.status]}
+            variant={bookingBadgeVariant(booking.status)}
+          />
+          {pendingLabel ? (
+            <Text variant="caption" color="onWarning">
+              {pendingLabel}
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       {booking.status === 'counter_offered' ? (
@@ -131,10 +136,7 @@ export function IncomingBookingCard({
         booking={booking}
         demo={demo}
         onClose={() => setCounterOpen(false)}
-        onDone={() => {
-          setCounterOpen(false);
-          onChanged();
-        }}
+        onDone={() => setCounterOpen(false)}
       />
     </Card>
   );

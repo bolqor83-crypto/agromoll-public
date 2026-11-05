@@ -4,16 +4,15 @@ import { BOOKING_STATUS_LABELS } from '@agromoll/types';
 import type { BookingDto } from '@agromoll/types';
 import { Badge, Button, Card, spacing, Text } from '@agromoll/ui';
 import * as Haptics from 'expo-haptics';
-import { api, ApiError } from '@/lib/api';
+import { acceptCounterMutation, cancelBookingMutation } from '@/lib/outbox/mutations';
 import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
 
 export interface BookingCardProps {
   booking: BookingDto;
-  /** id покупателя (для запросов). */
   /** Показать детали корректировки (offeredQuantity/pickupTime/note). */
   counterOffer?: { offeredQuantity?: number; pickupTime?: string; note?: string };
-  /** Обновить список после действия. */
-  onChanged: () => void;
+  /** Оптимистичная операция ещё не подтверждена сервером. */
+  pendingLabel?: string;
   /** Демо-режим: кнопки не ходят в API. */
   demo: boolean;
 }
@@ -21,8 +20,12 @@ export interface BookingCardProps {
 /**
  * Карточка брони покупателя («Мои брони»): статус-пилюля, количество,
  * время истечения, кнопки «Принять предложение» / «Отменить».
+ *
+ * v0.3.0: действия уходят через локальный outbox — работают офлайн,
+ * UI сразу показывает оптимистичное состояние (список перерисовывает
+ * стор по событиям очереди).
  */
-export function BookingCard({ booking, counterOffer, onChanged, demo }: BookingCardProps) {
+export function BookingCard({ booking, counterOffer, pendingLabel, demo }: BookingCardProps) {
   const [busy, setBusy] = useState<'accept' | 'cancel' | null>(null);
 
   const canCancel = booking.status === 'requested' || booking.status === 'counter_offered';
@@ -40,18 +43,17 @@ export function BookingCard({ booking, counterOffer, onChanged, demo }: BookingC
     setBusy(action);
     try {
       if (action === 'accept') {
-        await api.acceptCounter(booking.id);
+        await acceptCounterMutation(booking.id);
       } else {
-        await api.cancelBooking(booking.id);
+        await cancelBookingMutation(booking.id);
       }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => undefined,
       );
-      onChanged();
+      // Список обновится сам: событие outbox → version++ → экран перечитает.
     } catch (error) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
-      const hint = error instanceof ApiError ? error.hint : undefined;
-      Alert.alert('Не получилось', hint ?? 'Проверьте соединение с API и попробуйте ещё раз.');
+      Alert.alert('Не получилось', String(error instanceof Error ? error.message : error));
     } finally {
       setBusy(null);
     }
@@ -78,10 +80,17 @@ export function BookingCard({ booking, counterOffer, onChanged, demo }: BookingC
             {formatClock(booking.expiresAt)}
           </Text>
         </View>
-        <Badge
-          label={BOOKING_STATUS_LABELS[booking.status]}
-          variant={bookingBadgeVariant(booking.status)}
-        />
+        <View style={{ gap: spacing.xs, alignItems: 'flex-end' }}>
+          <Badge
+            label={BOOKING_STATUS_LABELS[booking.status]}
+            variant={bookingBadgeVariant(booking.status)}
+          />
+          {pendingLabel ? (
+            <Text variant="caption" color="onWarning">
+              {pendingLabel}
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       {canAccept && counterOffer ? (
