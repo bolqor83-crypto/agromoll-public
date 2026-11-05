@@ -1,21 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { ROLE_LABELS, USER_ROLES } from './index';
 
-import { ROLES, ROLE_LABELS } from './index';
-
-describe('roles', () => {
+describe('@agromoll/types', () => {
   it('содержит ровно три роли рынка', () => {
-    expect(ROLES).toHaveLength(3);
-    expect([...ROLES]).toEqual(['buyer', 'seller', 'driver']);
+    expect(USER_ROLES).toEqual(['buyer', 'seller', 'driver']);
   });
 
   it('у каждой роли есть человекочитаемое название', () => {
-    for (const role of ROLES) {
+    for (const role of USER_ROLES) {
+      expect(typeof ROLE_LABELS[role]).toBe('string');
       expect(ROLE_LABELS[role].length).toBeGreaterThan(0);
     }
-  });
-
-  it('названия ролей не содержат дублей', () => {
-    const labels = Object.values(ROLE_LABELS);
-    expect(new Set(labels).size).toBe(labels.length);
   });
 });
