@@ -1,40 +1,40 @@
+import 'react-native-gesture-handler';
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import Constants from 'expo-constants';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-
 import { ThemeProvider, useTheme } from '@agromoll/ui';
+import { logger } from '@/lib/logger';
+import { useThemeStore } from '@/store/theme';
 
-import { useSettingsStore } from '../src/store/settings';
+function AppShell() {
+  const { mode } = useTheme();
 
-/** Стек навигации с фоном из темы — без белых вспышек при переходах. */
-function ThemedStack() {
-  const { colors } = useTheme();
+  useEffect(() => {
+    logger.info('app', 'приложение запущено', {
+      version: Constants.expoConfig?.version ?? 'unknown',
+      sdk: String(Constants.expoConfig?.sdkVersion ?? 'unknown'),
+    });
+  }, []);
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        animation: 'slide_from_right',
-        contentStyle: { backgroundColor: colors.background },
-      }}
-    />
+    <>
+      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <Stack screenOptions={{ headerShown: false }} />
+    </>
   );
 }
 
-function ThemedStatusBar() {
-  const { mode } = useTheme();
-  return <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />;
-}
-
 export default function RootLayout() {
-  const themeMode = useSettingsStore((state) => state.themeMode);
+  // Тема живёт в zustand-сторе, а ThemeProvider из @agromoll/ui рисует её по токенам.
+  const setting = useThemeStore((s) => s.setting);
+  const setSetting = useThemeStore((s) => s.setSetting);
 
   return (
     <SafeAreaProvider>
-      <ThemeProvider mode={themeMode}>
-        <ThemedStatusBar />
-        <ThemedStack />
+      <ThemeProvider setting={setting} onSettingChange={setSetting}>
+        <AppShell />
       </ThemeProvider>
     </SafeAreaProvider>
   );

@@ -1,95 +1,69 @@
-import React, { useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
-import type { StyleProp, TextInputProps, ViewStyle } from 'react-native';
-
-import { useTheme } from '../theme/ThemeContext';
-import { spacing } from '../tokens';
+/**
+ * Input — поле ввода: крупное (52 px), скруглённое, с мягкой рамкой.
+ * Ошибки — янтарным (красный запрещён, ADR-002).
+ */
+import { useState } from 'react';
+import { TextInput, View } from 'react-native';
+import type { TextInputProps } from 'react-native';
+import { useTheme } from '../theme';
+import { radius, spacing, typography } from '../tokens';
 import { Text } from './Text';
 
 export interface InputProps extends TextInputProps {
-  /** Подпись поля сверху (например, «Что нужно найти?»). */
   label?: string;
-  /** Подсказка снизу (ошибки/подсказки). */
-  helperText?: string;
-  /** helperText в янтарном тоне — внимание без тревоги. */
-  helperTone?: 'default' | 'warning';
-  containerStyle?: StyleProp<ViewStyle>;
+  error?: string | null;
+  hint?: string | null;
 }
 
-/** Крупное поле ввода: высота 56 px — удобно попасть пальцем в перчатке. */
-export function Input({
-  label,
-  helperText,
-  helperTone = 'default',
-  containerStyle,
-  style,
-  onFocus,
-  onBlur,
-  ...rest
-}: InputProps) {
-  const { colors, radius } = useTheme();
+export function Input({ label, error, hint, style, ...rest }: InputProps) {
+  const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
 
-  const borderColor = focused ? colors.primary : colors.border;
+  const borderColor = error ? colors.warning : focused ? colors.primary : colors.border;
 
   return (
-    <View style={containerStyle}>
+    <View style={{ gap: spacing.sm }}>
       {label ? (
-        <Text variant="caption" color="secondary" style={styles.label}>
+        <Text variant="caption" color="secondary">
           {label}
         </Text>
       ) : null}
-
       <TextInput
         placeholderTextColor={colors.textMuted}
-        selectionColor={colors.primary}
         onFocus={(e) => {
           setFocused(true);
-          onFocus?.(e);
+          rest.onFocus?.(e);
         }}
         onBlur={(e) => {
           setFocused(false);
-          onBlur?.(e);
+          rest.onBlur?.(e);
         }}
+        accessibilityLabel={label ?? rest.accessibilityLabel ?? rest.placeholder}
         style={[
-          styles.input,
           {
-            backgroundColor: colors.surface,
-            borderColor,
+            minHeight: 52,
             borderRadius: radius.md,
+            borderWidth: 1.5,
+            borderColor,
+            backgroundColor: colors.surface,
+            paddingHorizontal: spacing.lg,
+            fontSize: typography.body.fontSize,
+            lineHeight: typography.body.lineHeight,
             color: colors.text,
           },
           style,
         ]}
         {...rest}
       />
-
-      {helperText ? (
-        <Text
-          variant="caption"
-          color={helperTone === 'warning' ? 'warning' : 'muted'}
-          style={styles.helper}
-        >
-          {helperText}
+      {error ? (
+        <Text variant="caption" color="onWarning" weight="600">
+          {error}
+        </Text>
+      ) : hint ? (
+        <Text variant="caption" color="muted">
+          {hint}
         </Text>
       ) : null}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  label: {
-    marginBottom: spacing.sm,
-  },
-  input: {
-    minHeight: 56,
-    borderWidth: 1.5,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    fontSize: 17,
-    lineHeight: 24,
-  },
-  helper: {
-    marginTop: spacing.xs + 2,
-  },
-});

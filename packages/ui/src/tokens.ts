@@ -1,114 +1,97 @@
 /**
- * Дизайн-токены АгроМолл — единственный источник истины для оформления.
+ * Дизайн-токены «АгроМолл» — единый источник правды для всего UI.
  *
- * Философия (см. docs/adr/ADR-002-design-system.md):
- *  — приложение используют в 4:00–14:00, в спешке, на улице, иногда в перчатках;
- *  — фон тёплый нейтральный, чтобы не слепил в темноте машины и на улице;
- *  — акцент — тёмно-зелёный (рыночный, спокойный);
- *  — срочность — мягкий янтарный. Красный запрещён: в 4 утра он читается как тревога;
- *  — скругления 12–20 px единообразно, тени мягкие, зоны нажатия от 48×48 px.
+ * Философия (ADR-002): приложение используется в 4–5 утра, на улице, в спешке,
+ * часто в перчатках. Поэтому: крупная типографика, тач-зоны от 48 px,
+ * тёплый фон вместо чисто белого, тёмно-зелёный акцент вместо тревожного
+ * синего/красного, мягкий янтарный вместо красного для срочности.
+ *
+ * Файл не импортирует react-native — чтобы токены можно было использовать
+ * и в чистом TS (тесты, web, будущее админ-приложение).
  */
 
-// ---------------------------------------------------------------------------
-// Цвета
-// ---------------------------------------------------------------------------
+/** Режимы темы. */
+export type ThemeMode = 'light' | 'dark';
 
-export interface ColorTokens {
-  /** Тёплый нейтральный фон приложения (не чисто белый). */
+/** Настройка темы: конкретный режим или «как в системе». */
+export type ThemeSetting = ThemeMode | 'system';
+
+/** Палитра темы. Обязательный набор + служебные цвета «на цветном» (on-color). */
+export interface ThemeColors {
+  /** Тёплый нейтральный фон приложения (не чисто белый — не слепит в темноте). */
   background: string;
   /** Фон карточек и полей. */
   surface: string;
-  /** Приподнятые поверхности (модалки, меню, кнопки-иконки). */
+  /** Повышенная поверхность: тосты, поповеры, шапки. */
   surfaceElevated: string;
-  /** Тёмно-зелёный — главный акцент (рыночная зелень, спокойствие). */
+  /** Главный акцент: тёмно-зелёный, «рыночный». */
   primary: string;
-  /** Мягкая зелёная подложка (бейджи, подложки иконок). */
+  /** Мягкая зелёная подложка (бейджи, вторичные кнопки). */
   primaryMuted: string;
-  /** Дополнительный зелёный для ссылок и акцентов, поярче primary. */
+  /** Дополнительный зелёный для акцентов/ссылок. */
   accent: string;
-  /** Мягкий янтарный — срочность/внимание БЕЗ тревоги (замена красному). */
+  /** Мягкий янтарный: срочность без тревоги. Красный запрещён (ADR-002). */
   warning: string;
-  /** Янтарная подложка для бейджей срочности. */
-  warningSoft: string;
-  /** Основной текст. */
+  /** Текст на warning/primary-заливках и «глубокий янтарный» текст. */
+  onWarning: string;
+  /** Основной текст с высоким контрастом. */
   text: string;
-  /** Второстепенный текст (цены, подписи к карточкам). */
   textSecondary: string;
-  /** Приглушённый текст (подсказки, метаданные). */
   textMuted: string;
-  /** Границы и разделители. */
   border: string;
-  /** Текст/иконки поверх primary. */
+  /** Текст на primary-заливке (в тёмной теме primary светлее — текст тёмный). */
   onPrimary: string;
 }
 
-export const lightColors: ColorTokens = {
-  background: '#FAF8F4',
-  surface: '#FFFFFF',
-  surfaceElevated: '#FFFFFF',
-  primary: '#2E6B4E',
-  primaryMuted: '#E4EFE8',
-  accent: '#3E8E68',
-  warning: '#A96E1F',
-  warningSoft: '#FBF1DE',
-  text: '#1B241F',
-  textSecondary: '#4C5850',
-  textMuted: '#8B958D',
-  border: '#E7E2D9',
-  onPrimary: '#FFFFFF',
+/**
+ * Палитры светлой и тёмной тем.
+ * Обоснование каждого цвета — docs/design/palette.md.
+ */
+export const palette: Record<ThemeMode, ThemeColors> = {
+  light: {
+    background: '#F7F4EE', // тёплая бумага
+    surface: '#FFFDF9', // молочно-белая карточка
+    surfaceElevated: '#FFFFFF',
+    primary: '#2D6A4F', // тёмно-зелёный, контраст с фоном ≈ 6.4:1
+    primaryMuted: '#E3EFE7',
+    accent: '#40916C',
+    warning: '#DE911D', // мягкий янтарный
+    onWarning: '#7C4A0C', // глубокий янтарный для текста
+    text: '#212A24',
+    textSecondary: '#525D55',
+    textMuted: '#8A9189',
+    border: '#E7E2D8',
+    onPrimary: '#FFFFFF',
+  },
+  dark: {
+    background: '#161917', // тёплый графит, без синевы
+    surface: '#1E2320',
+    surfaceElevated: '#262C28',
+    primary: '#7BC496', // светло-зелёный для контраста на тёмном
+    primaryMuted: '#24382D',
+    accent: '#9AD6B2',
+    warning: '#E0AC4E',
+    onWarning: '#F2D9A6',
+    text: '#EFEDE7',
+    textSecondary: '#B7BAB1',
+    textMuted: '#7E847C',
+    border: '#333A34',
+    onPrimary: '#0E1F16',
+  },
 };
 
-export const darkColors: ColorTokens = {
-  background: '#151816',
-  surface: '#1D211E',
-  surfaceElevated: '#242925',
-  primary: '#5FB385',
-  primaryMuted: '#24352B',
-  accent: '#7CC9A2',
-  warning: '#DFAE62',
-  warningSoft: '#3A2F1D',
-  text: '#F1F4F0',
-  textSecondary: '#B7C0B9',
-  textMuted: '#7F897F',
-  border: '#2A2F2B',
-  onPrimary: '#0C1410',
-};
-
-export const colors: { light: ColorTokens; dark: ColorTokens } = {
-  light: lightColors,
-  dark: darkColors,
-};
-
-// ---------------------------------------------------------------------------
-// Типографика — крупная, с высоким контрастом (спешка, перчатки, улица)
-// ---------------------------------------------------------------------------
-
-export type TypographyVariant = 'display' | 'title' | 'body' | 'caption' | 'button';
-
-export interface TextStyleTokens {
-  fontSize: number;
-  lineHeight: number;
-  fontWeight: '400' | '500' | '600' | '700';
-  letterSpacing?: number;
-}
-
-export const typography: Record<TypographyVariant, TextStyleTokens> = {
-  /** Крупные заголовки экранов. */
-  display: { fontSize: 32, lineHeight: 38, fontWeight: '700', letterSpacing: -0.5 },
-  /** Заголовки секций и карточек. */
-  title: { fontSize: 22, lineHeight: 28, fontWeight: '600', letterSpacing: -0.2 },
-  /** Основной текст — крупнее стандартного, читается в спешке. */
+/** Типографика: крупная, с высоким контрастом (минимум текста на карточках). */
+export const typography = {
+  display: { fontSize: 34, lineHeight: 41, fontWeight: '700' },
+  title: { fontSize: 22, lineHeight: 28, fontWeight: '600' },
   body: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
-  /** Подписи, цены, метаданные. */
   caption: { fontSize: 13, lineHeight: 18, fontWeight: '400' },
-  /** Текст кнопок — по требованиям к зонам нажатия всегда крупный. */
-  button: { fontSize: 17, lineHeight: 24, fontWeight: '600' },
-};
+  button: { fontSize: 17, lineHeight: 22, fontWeight: '600' },
+} as const;
 
-// ---------------------------------------------------------------------------
-// Отступы
-// ---------------------------------------------------------------------------
+export type TextVariant = keyof typeof typography;
 
+/** Шкала отступов: 4 / 8 / 12 / 16 / 24 / 32. */
 export const spacing = {
   xs: 4,
   sm: 8,
@@ -118,10 +101,9 @@ export const spacing = {
   xxl: 32,
 } as const;
 
-// ---------------------------------------------------------------------------
-// Скругления (единообразно 12–20 px)
-// ---------------------------------------------------------------------------
+export type SpacingToken = keyof typeof spacing;
 
+/** Скругления: 12–20 px + pill (iOS-like, никаких резких углов). */
 export const radius = {
   sm: 12,
   md: 16,
@@ -129,41 +111,57 @@ export const radius = {
   pill: 999,
 } as const;
 
-// ---------------------------------------------------------------------------
-// Движение: 200–300 мс, spring-характер
-// ---------------------------------------------------------------------------
-
+/** Движение: 200–300 мс, spring-характер. */
 export const motion = {
   fast: 200,
   normal: 300,
   easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+  /** Пружина тактильного отклика нажатий (Reanimated withSpring). */
+  pressSpring: { damping: 15, mass: 0.6, stiffness: 320 },
 } as const;
 
-// ---------------------------------------------------------------------------
-// Тени — мягкие, без жёстких границ
-// ---------------------------------------------------------------------------
+/** Минимальная зона нажатия — 48×48 (перчатки, спешка). */
+export const touchTarget = { min: 48 } as const;
 
+/** Мягкая тень без жёстких границ. */
 export interface ShadowTokens {
   shadowColor: string;
   shadowOpacity: number;
   shadowRadius: number;
   shadowOffset: { width: number; height: number };
+  /** Android-эквивалент тени. */
   elevation: number;
 }
 
-export const shadows: { light: ShadowTokens; dark: ShadowTokens } = {
+/**
+ * Мягкая тень без жёстких границ.
+ * shadow* работает на iOS, elevation — на Android, на web react-native-web
+ * сам собирает из них box-shadow.
+ */
+export const shadow: Record<ThemeMode, ShadowTokens> = {
   light: {
-    shadowColor: '#223028',
+    shadowColor: '#1F2A24',
     shadowOpacity: 0.07,
     shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   dark: {
     shadowColor: '#000000',
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
 };
+
+/** Приводит настройку темы к конкретному режиму с учётом системной. */
+export function resolveTheme(
+  setting: ThemeSetting,
+  system: 'light' | 'dark' | null | undefined,
+): ThemeMode {
+  if (setting === 'system') {
+    return system === 'dark' ? 'dark' : 'light';
+  }
+  return setting;
+}

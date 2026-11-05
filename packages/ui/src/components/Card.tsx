@@ -1,70 +1,68 @@
-import React from 'react';
+/**
+ * Card — карточка дизайн-системы: скругление 20, мягкая тень, тёплая рамка.
+ * Фото, название, цена, бейдж — минимум текста (ADR-002).
+ */
+import type { ReactNode } from 'react';
 import { Pressable, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { useTheme } from '../theme';
+import { motion, radius, shadow, spacing } from '../tokens';
 
-import { useTheme } from '../theme/ThemeContext';
-import { spacing } from '../tokens';
-
-const CARD_SPRING = { damping: 20, stiffness: 340, mass: 0.9 } as const;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export interface CardProps {
-  children: React.ReactNode;
-  /** Если передан — карточка нажимаемая (spring-отклик 0.98, зона ≥ 48 px). */
+  children: ReactNode;
+  /** Карточка-кнопка получает тактильный spring-отклик. */
   onPress?: () => void;
-  /** Отступы: none — 0, sm — 12, md — 16 (по умолчанию). */
-  padding?: 'none' | 'sm' | 'md';
+  padding?: number;
+  /** Повышенная поверхность (шапка, важные блоки). */
+  elevated?: boolean;
   style?: StyleProp<ViewStyle>;
-  testID?: string;
 }
 
-/** Карточка: мягкое скругление 20 px, едва заметная тень и граница. */
 export function Card({
   children,
   onPress,
-  padding = 'md',
+  padding = spacing.lg,
+  elevated = false,
   style,
-  testID,
 }: CardProps) {
-  const { colors, radius, shadows } = useTheme();
+  const { colors, mode } = useTheme();
   const scale = useSharedValue(1);
-
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
-  const paddingValue = { none: 0, sm: spacing.md, md: spacing.lg }[padding];
-
-  const flattened: ViewStyle = {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: paddingValue,
-    ...shadows,
-  };
+  const baseStyle: StyleProp<ViewStyle> = [
+    {
+      backgroundColor: elevated ? colors.surfaceElevated : colors.surface,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding,
+    },
+    shadow[mode],
+    style,
+  ];
 
   if (!onPress) {
-    return (
-      <View testID={testID} style={[flattened, style]}>
-        {children}
-      </View>
-    );
+    return <View style={baseStyle}>{children}</View>;
   }
 
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
+    <AnimatedPressable
       onPress={onPress}
       onPressIn={() => {
-        scale.value = withSpring(0.98, CARD_SPRING);
+        scale.value = withSpring(0.98, motion.pressSpring);
       }}
       onPressOut={() => {
-        scale.value = withSpring(1, CARD_SPRING);
+        scale.value = withSpring(1, motion.pressSpring);
       }}
+      accessibilityRole="button"
+      style={[animatedStyle, baseStyle]}
     >
-      <Animated.View style={[flattened, animatedStyle, style]}>{children}</Animated.View>
-    </Pressable>
+      {children}
+    </AnimatedPressable>
   );
 }

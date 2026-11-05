@@ -1,42 +1,38 @@
-# Инфраструктура разработки АгроМолл.
-# PostgreSQL + PostGIS (геозоны — задел на будущее) и Redis (заложен, используется со следующих этапов).
-# Переменные берутся из корневого .env (см. .env.example).
-
-name: agromoll
-
+# Стек для локальной разработки: PostgreSQL + PostGIS и Redis.
+# Redis на этом этапе не используется приложением — заложен на будущее (ADR-001).
 services:
   postgres:
     image: postgis/postgis:16-3.4
     container_name: agromoll-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-agromoll}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agromoll}
-      POSTGRES_DB: ${POSTGRES_DB:-agromoll}
+      POSTGRES_USER: agromoll
+      POSTGRES_PASSWORD: agromoll
+      POSTGRES_DB: agromoll
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
-      - agromoll-postgres:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agromoll} -d ${POSTGRES_DB:-agromoll}"]
+      test: ['CMD-SHELL', 'pg_isready -U agromoll -d agromoll']
       interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 10
 
   redis:
     image: redis:7-alpine
     container_name: agromoll-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
-      - agromoll-redis:/data
+      - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
-      timeout: 5s
-      retries: 12
+      timeout: 3s
+      retries: 10
 
 volumes:
-  agromoll-postgres:
-  agromoll-redis:
+  pgdata:
+  redisdata:

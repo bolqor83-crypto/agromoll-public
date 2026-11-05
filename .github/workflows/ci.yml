@@ -7,31 +7,78 @@ on:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: lint · typecheck · test · build
+  quality:
+    name: lint / typecheck / test / build
     runs-on: ubuntu-latest
     env:
-      # Заглушка для prisma generate на этапе установки (реальная БД в CI не нужна).
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      EXPO_NO_TELEMETRY: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
+      - name: Установка pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node
+      - name: Установка Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: pnpm
 
-      - name: Install dependencies
+      - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
-      - name: Lint / Typecheck / Test / Build
-        run: pnpm check
+      - name: Prisma Client (db:generate)
+        run: pnpm turbo run db:generate
+
+      - name: Build
+        run: pnpm turbo run build
+
+      - name: Lint
+        run: pnpm turbo run lint
+
+      - name: Typecheck
+        run: pnpm turbo run typecheck
+
+      - name: Test
+        run: pnpm turbo run test
+
+      - name: Валидация docker-compose
+        run: docker compose config -q
+
+  stack:
+    name: docker compose (postgres + postgis + redis)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Установка pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Установка Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
+
+      - name: Поднимаем стек и ждём healthcheck
+        run: docker compose up -d --wait
+
+      - name: Применяем миграции (создание PostGIS + таблицы users)
+        run: pnpm --filter @agromoll/api exec prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
+
+      - name: PostGIS установлен
+        run: docker compose exec -T postgres psql -U agromoll -d agromoll -t -c "SELECT postgis_version();"
+
+      - name: Redis отвечает
+        run: docker compose exec -T redis redis-cli ping

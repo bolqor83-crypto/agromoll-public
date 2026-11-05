@@ -1,18 +1,17 @@
-import type { INestApplication } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-
-import { AppModule } from './../src/app.module';
+import { AppModule } from '../src/app.module';
 
 describe('HealthController (e2e)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    const moduleFixture = await Test.createTestingModule({
+    const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleRef.createNestApplication();
     await app.init();
   });
 
@@ -20,14 +19,11 @@ describe('HealthController (e2e)', () => {
     await app.close();
   });
 
-  it('GET /health отвечает 200 и статусом ok', async () => {
-    const response = await request(app.getHttpServer()).get('/health').expect(200);
-
-    expect(response.body).toMatchObject({
-      status: 'ok',
-      service: 'agromoll-api',
-    });
-    expect(typeof response.body.uptime).toBe('number');
-    expect(typeof response.body.timestamp).toBe('string');
+  it('GET /health отвечает 200 и status ok', async () => {
+    const res = await request(app.getHttpServer()).get('/health').expect(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.service).toBe('agromoll-api');
+    expect(typeof res.body.uptimeSec).toBe('number');
+    expect(typeof res.body.timestamp).toBe('string');
   });
 });
