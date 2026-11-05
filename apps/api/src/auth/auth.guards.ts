@@ -1,13 +1,17 @@
 /**
- * Guard'ы аутентификации v0.3.0 (телефон + JWT, см. ADR-007).
+ * Guard'ы аутентификации v0.3.0/v0.3.1 (телефон + JWT, ADR-007/008).
  *
  * JwtAuthGuard читает Authorization: Bearer <accessToken>, проверяет
- * подпись и срок, затем перечитывает пользователя из БД — роль всегда
- * свежая (смена роли действует сразу), а удалённый пользователь теряет
- * доступ даже с живым токеном. X-User-Id полностью удалён (переход v0.2.0 → v0.3.0).
+ * подпись и срок, сверяет jti с блэклистом отозванных access-токенов
+ * (v0.3.1: после logout access жив не дольше остатка своих 15 минут),
+ * затем перечитывает пользователя из БД — роль всегда свежая (смена
+ * роли действует сразу), а удалённый пользователь теряет доступ даже
+ * с живым токеном. X-User-Id полностью удалён (переход v0.2.0 → v0.3.0).
  *
  * RolesGuard и @CurrentUser() перенесены без изменений логики:
  * проверка ролей идёт по request.user.role, который теперь приходит из БД.
+ * Данные токена (jti, familyId) guard кладёт в request.auth — они нужны
+ * контроллеру смены роли (v0.3.1), чтобы не отзывать текущую сессию.
  */
 import {
   CanActivate,
@@ -26,11 +30,13 @@ import type { UserRole } from '@agromoll/types';
 // runtime-метаданных design:paramtypes.
 import { AuthService } from './auth.service';
 import { DEV_ACCESS_SECRET } from './auth.constants';
-import type { AuthenticatedUser, JwtPayload } from './auth.types';
+import type { AuthenticatedUser, JwtPayload, TokenAuthContext } from './auth.types';
 
 /** Запрос с прикреплённым пользователем. */
 export interface RequestWithUser extends Request {
   user?: AuthenticatedUser;
+  /** Данные access-токена: jti (блэклист) и familyId (текущая сессия). */
+  auth?: TokenAuthContext;
 }
 
 /** Схема заголовка: Authorization: Bearer <token>. */
@@ -64,6 +70,12 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Access-токен недействителен или истёк');
     }
 
+    // v0.3.1: токен отозван через logout? Блэклист живёт остаток жизни
+    // access-токена (≤ 15 минут). Store недоступен — fail-closed (401).
+    if (await this.auth.isAccessTokenRevoked(payload.jti)) {
+      throw new UnauthorizedException('Сессия завершена');
+    }
+
     // Роль из БД, не из токена: смена роли действует сразу, а удалённый
     // пользователь не проходит даже с живым токеном.
     const user = await this.auth.getAuthenticatedUser(payload.sub);
@@ -72,6 +84,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     request.user = user;
+    request.auth = { jti: payload.jti, familyId: payload.familyId };
     return true;
   }
 }

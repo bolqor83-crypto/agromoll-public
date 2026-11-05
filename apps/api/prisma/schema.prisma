@@ -1,4 +1,4 @@
-// АгроМолл — схема v0.3.0 «Аутентификация по телефону».
+// АгроМолл — схема v0.3.0 «Аутентификация по телефону» + v0.3.1 «Сессии».
 //
 // Домен: продавец выставляет листинг (Listing), покупатель бронирует
 // количество (Booking), продавец может подтвердить или предложить
@@ -6,6 +6,9 @@
 // BookingEvent — из него в будущем считается репутация.
 // v0.3.0: вход по телефону + SMS-код (заглушка в dev), JWT-токены —
 // см. docs/adr/ADR-007.
+// v0.3.1: Session — аудит-запись «семьи» refresh-токенов для ротации
+// с обнаружением повторного использования (ADR-008). Источник решений
+// об авторизации — Redis (см. session-store.ts), таблица — журнал.
 // Обоснование бронирования — docs/adr/ADR-004.
 
 generator client {
@@ -91,8 +94,43 @@ model User {
   bookings         Booking[] // брони, созданные пользователем как покупатель
   bookingEvents    BookingEvent[] // действия пользователя в журнале броней
   outboxOperations OutboxOperation[] // идемпотентные операции (ADR-006)
+  sessions         Session[] // сессии refresh-токенов (ADR-008)
 
   @@map("users")
+}
+
+/// Аудит-запись «семьи» refresh-токенов (v0.3.1, ADR-008).
+///
+/// Одна строка = один вход (POST /auth/verify). При каждом refresh токен
+/// ротируется: currentJti обновляется, старый jti уходит в usedJtis.
+/// Повторное использование старого jti — признак кражи: вся семья
+/// отзывается (revokedAt). Решения об авторизации принимает Redis
+/// (session-store.ts) — таблица нужна для аудита, поддержки и очистки.
+model Session {
+  id     String  @id @default(uuid())
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// UUID семьи: все ротации одного входа живут под одним familyId.
+  familyId   String
+  /// Актуальный jti refresh-токена (после последней ротации).
+  currentJti String
+  /// История ротаций — какие jti уже были использованы.
+  usedJtis   String[] @default([])
+  /// Момент отзыва семьи (logout / обнаружение повторного использования).
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  /// User-Agent устройства — для экрана «активные сессии» в будущем.
+  userAgent String?
+  /// IP устройства на момент входа.
+  ip        String?
+
+  @@unique([familyId])
+  @@unique([currentJti])
+  @@index([userId])
+  @@index([familyId])
+  @@index([currentJti])
+  @@map("sessions")
 }
 
 model Listing {

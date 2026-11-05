@@ -1,5 +1,6 @@
 /**
- * Unit-тесты аутентификации v0.3.0: JwtAuthGuard и RolesGuard.
+ * Unit-тесты аутентификации v0.3.0/v0.3.1: JwtAuthGuard и RolesGuard.
+ * v0.3.1: JwtAuthGuard дополнительно проверяет блэклист access-jti.
  */
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -21,14 +22,18 @@ describe('JwtAuthGuard (Authorization: Bearer)', () => {
   const secret = 'test-access-secret';
 
   let jwt: JwtService;
-  let auth: { getAuthenticatedUser: jest.Mock };
+  let auth: { getAuthenticatedUser: jest.Mock; isAccessTokenRevoked: jest.Mock };
   let guard: JwtAuthGuard;
 
   beforeEach(() => {
     // guard читает секрет из env — задаём один и тот же для подписи и проверки
     process.env.JWT_ACCESS_SECRET = secret;
     jwt = new JwtService({ secret });
-    auth = { getAuthenticatedUser: jest.fn() };
+    auth = {
+      getAuthenticatedUser: jest.fn(),
+      // по умолчанию токен не в блэклисте; отдельные тесты переопределяют
+      isAccessTokenRevoked: jest.fn().mockResolvedValue(false),
+    };
     guard = new JwtAuthGuard(jwt, auth as unknown as AuthService);
   });
 
@@ -98,6 +103,38 @@ describe('JwtAuthGuard (Authorization: Bearer)', () => {
     await expect(guard.canActivate(makeContext(request))).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+  });
+
+  it('v0.3.1: 401, когда jti в блэклисте (logout отозвал access)', async () => {
+    const token = jwt.sign({ sub: 'u-1', role: 'buyer' }, { jwtid: 'j-blacklisted' });
+    auth.isAccessTokenRevoked.mockResolvedValue(true);
+    const request = {
+      headers: { authorization: `Bearer ${token}` },
+    } as unknown as RequestWithUser;
+
+    await expect(guard.canActivate(makeContext(request))).rejects.toThrow('Сессия завершена');
+    // пользователя даже не ищем — токен отозван
+    expect(auth.getAuthenticatedUser).not.toHaveBeenCalled();
+  });
+
+  it('v0.3.1: проверяет блэклист по jti и кладёт auth-контекст в request', async () => {
+    const token = jwt.sign(
+      { sub: 'u-1', role: 'buyer', familyId: 'f-1' },
+      { jwtid: 'j-1' },
+    );
+    auth.getAuthenticatedUser.mockResolvedValue({
+      id: 'u-1',
+      role: 'buyer',
+      displayName: 'X',
+      phone: null,
+    });
+    const request = {
+      headers: { authorization: `Bearer ${token}` },
+    } as unknown as RequestWithUser;
+
+    await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+    expect(auth.isAccessTokenRevoked).toHaveBeenCalledWith('j-1');
+    expect(request.auth).toEqual({ jti: 'j-1', familyId: 'f-1' });
   });
 
   it('принимает Bearer в любом регистре', async () => {

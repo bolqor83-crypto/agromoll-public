@@ -206,7 +206,11 @@ describe('схемы ответов API (v0.3.0)', () => {
   });
 
   it('RefreshResponseSchema и RequestCodeResponseSchema', () => {
-    expect(RefreshResponseSchema.safeParse({ accessToken: 'a' }).success).toBe(true);
+    // v0.3.1: refresh возвращает ПАРУ токенов (ротация)
+    expect(
+      RefreshResponseSchema.safeParse({ accessToken: 'a', refreshToken: 'r' }).success,
+    ).toBe(true);
+    expect(RefreshResponseSchema.safeParse({ accessToken: 'a' }).success).toBe(false);
     expect(RefreshResponseSchema.safeParse({}).success).toBe(false);
     expect(RequestCodeResponseSchema.safeParse({ expiresInSec: 300 }).success).toBe(true);
   });

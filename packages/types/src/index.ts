@@ -183,10 +183,12 @@ export interface AuthResponseDto extends AuthTokensDto {
   user: UserDto;
 }
 
-/** Ответ POST /auth/refresh: только новый access-токен. */
-export interface RefreshResponseDto {
-  accessToken: string;
-}
+/**
+ * Ответ POST /auth/refresh: НОВАЯ пара токенов (ротация, v0.3.1, ADR-008).
+ * Старый refresh-токен после успешного refresh помечается использованным:
+ * предъявление повторно = признак кражи → отзыв всей семьи.
+ */
+export type RefreshResponseDto = AuthTokensDto;
 
 /**
  * Нормализация телефона к E.164 (+7XXXXXXXXXX).
