@@ -33,6 +33,9 @@ import type {
   ReminderResultDto,
   UserDto,
   UserRole,
+  WorkHoursCheckDto,
+  WorkHoursPairDto,
+  WorkHoursSessionDto,
 } from '@agromoll/types';
 import { normalizePhone } from '@agromoll/types';
 import { tokenStore } from './token-store';
@@ -50,6 +53,9 @@ import {
   ReminderResponseSchema,
   RequestCodeResponseSchema,
   UserResponseSchema,
+  WorkHoursCheckResponseSchema,
+  WorkHoursPairsResponseSchema,
+  WorkHoursSessionResponseSchema,
 } from '@agromoll/validation';
 import type { ZodType } from 'zod';
 
@@ -427,6 +433,53 @@ export const api = {
   notifications(): Promise<NotificationsListDto> {
     return apiRequest<NotificationsListDto>({ method: 'GET', url: '/notifications/me' }).then(
       (d) => validateResponse(NotificationsListResponseSchema, d, 'notifications/me'),
+    );
+  },
+
+  // ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ──────────────────────────────
+  // Только часы, никаких денег. Сессии — прямые вызовы (серверные
+  // временные метки авторитетны, офлайн-очередь исказила бы время).
+
+  /** Мои пары за текущий месяц (driver — по продавцам, seller — по водителям). */
+  workHoursMine(): Promise<WorkHoursPairDto[]> {
+    return apiRequest<WorkHoursPairDto[]>({ method: 'GET', url: '/work-hours/me' }).then((d) =>
+      validateResponse(WorkHoursPairsResponseSchema, d, 'work-hours/me'),
+    );
+  },
+
+  /** Открытая смена водителя (для кнопки «Завершить»). */
+  workHoursOpenSession(): Promise<WorkHoursSessionDto | null> {
+    return apiRequest<WorkHoursSessionDto | null>({
+      method: 'GET',
+      url: '/work-hours/open-session',
+    }).then((d) => (d === null ? null : validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/open-session')));
+  },
+
+  /** Можно ли паре работать (блокировка, часы, серия). */
+  workHoursCheck(driverId: string, sellerId: string): Promise<WorkHoursCheckDto> {
+    return apiRequest<WorkHoursCheckDto>({
+      method: 'GET',
+      url: `/work-hours/check/${driverId}/${sellerId}`,
+    }).then((d) => validateResponse(WorkHoursCheckResponseSchema, d, 'work-hours/check'));
+  },
+
+  /** Начать смену с продавцом (только driver). 409 WORK_PAIR_BLOCKED — пауза. */
+  startWorkSession(sellerId: string): Promise<WorkHoursSessionDto> {
+    return apiRequest<WorkHoursSessionDto>({
+      method: 'POST',
+      url: '/work-hours/sessions',
+      data: { sellerId },
+    }).then((d) => validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/sessions'));
+  },
+
+  /** Завершить смену (водитель или продавец пары; идемпотентно). */
+  endWorkSession(sessionId: string): Promise<WorkHoursSessionDto> {
+    return apiRequest<WorkHoursSessionDto>({
+      method: 'POST',
+      url: `/work-hours/sessions/${sessionId}/end`,
+      data: {},
+    }).then((d) =>
+      validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/sessions/:id/end'),
     );
   },
 

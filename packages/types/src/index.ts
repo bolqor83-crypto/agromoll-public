@@ -323,6 +323,68 @@ export interface NotificationsListDto {
   unreadCount: number;
 }
 
+// ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ────────────────────────────────────
+
+/**
+ * Рабочая сессия пары «водитель — продавец» (DTO уровня API).
+ * Это НЕ биллинг: только часы, никаких денег в интерфейсе.
+ */
+export interface WorkHoursSessionDto {
+  id: string;
+  driverId: string;
+  driverName: string;
+  sellerId: string;
+  sellerName: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationMinutes: number | null;
+  /** Месяц старта «YYYY-MM». */
+  month: string;
+}
+
+/** Пара за текущий месяц — строка экрана «Мои часы» / «Часы с водителями». */
+export interface WorkHoursPairDto {
+  /** Противоположная сторона пары: продавец (для driver) или водитель (для seller). */
+  counterpartId: string;
+  counterpartName: string;
+  /** Текущий месяц «YYYY-MM». */
+  month: string;
+  totalMinutes: number;
+  /** ≥ лимита часов в этом месяце (засчитан в «опасную» серию). */
+  monthCounted: boolean;
+  /** Цепочка месяцев подряд с monthCounted=true, включая текущий. */
+  series: number;
+  /** Пара заблокирована (289-ФЗ: нужна пауза). */
+  blocked: boolean;
+  /** Открытая сессия с этим контрагентом (для кнопки «Завершить»). */
+  activeSessionId: string | null;
+}
+
+/** Ответ GET /work-hours/check/:driverId/:sellerId — можно ли работать паре. */
+export interface WorkHoursCheckDto {
+  driverId: string;
+  sellerId: string;
+  blocked: boolean;
+  reason: string | null;
+  unblockAt: string | null;
+  /** Часы пары в текущем месяце. */
+  totalMinutesCurrent: number;
+  monthCounted: boolean;
+  series: number;
+}
+
+/**
+ * Пороговые константы для UI (значения по умолчанию; сервер может
+ * переопределять через WORK_HOURS_MONTHLY_LIMIT / WORK_MONTHS_SERIES).
+ */
+export const WORK_HOURS_UI = {
+  /** Янтарная зона прогресс-бара: 48 ч из 60. */
+  warningMinutes: 48 * 60,
+  /** Мягкое предупреждение «близки к лимиту»: >50 ч и серия 5 месяцев. */
+  approachingMinutes: 50 * 60,
+  approachingSeries: 5,
+} as const;
+
 /**
  * Маскированный телефон для логов и UI: +7***1234
  * (код страны, три звёздочки, последние 4 цифры).

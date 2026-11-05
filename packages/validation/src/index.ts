@@ -221,6 +221,17 @@ export const DisputeDebtSchema = z.object({
 
 export type DisputeDebtInput = z.infer<typeof DisputeDebtSchema>;
 
+// ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ──────────────────────────────────
+
+/** Начало смены: POST /work-hours/sessions (только driver). */
+export const StartWorkSessionSchema = z
+  .object({
+    sellerId: z.string().uuid('Выберите продавца'),
+  })
+  .strict();
+
+export type StartWorkSessionInput = z.infer<typeof StartWorkSessionSchema>;
+
 // ─── Схемы ответов API (v0.3.0, подэтап C) ─────────────────────────────────
 //
 // Каждый ответ API валидируется на клиенте перед рендером: защита от
@@ -412,6 +423,55 @@ export const NotificationsListResponseSchema = z
 
 export type NotificationsListResponse = z.infer<typeof NotificationsListResponseSchema>;
 
+/** Ответ эндпоинтов рабочих сессий (v0.4.0, ADR-011). */
+export const WorkHoursSessionResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    driverId: z.string().min(1),
+    driverName: z.string().min(1),
+    sellerId: z.string().min(1),
+    sellerName: z.string().min(1),
+    startedAt: IsoDateString,
+    endedAt: IsoDateString.nullable(),
+    durationMinutes: z.number().int().positive().nullable(),
+    month: z.string().regex(/^\d{4}-\d{2}$/, 'Месяц в формате YYYY-MM'),
+  })
+  .passthrough();
+
+export type WorkHoursSessionResponse = z.infer<typeof WorkHoursSessionResponseSchema>;
+
+/** Ответ GET /work-hours/me — пары текущего месяца. */
+export const WorkHoursPairsResponseSchema = z.array(
+  z
+    .object({
+      counterpartId: z.string().min(1),
+      counterpartName: z.string().min(1),
+      month: z.string().regex(/^\d{4}-\d{2}$/),
+      totalMinutes: z.number().int().nonnegative(),
+      monthCounted: z.boolean(),
+      series: z.number().int().nonnegative(),
+      blocked: z.boolean(),
+      activeSessionId: z.string().nullable(),
+    })
+    .passthrough(),
+);
+
+/** Ответ GET /work-hours/check/:driverId/:sellerId. */
+export const WorkHoursCheckResponseSchema = z
+  .object({
+    driverId: z.string().min(1),
+    sellerId: z.string().min(1),
+    blocked: z.boolean(),
+    reason: z.string().nullable(),
+    unblockAt: IsoDateString.nullable(),
+    totalMinutesCurrent: z.number().int().nonnegative(),
+    monthCounted: z.boolean(),
+    series: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+export type WorkHoursCheckResponse = z.infer<typeof WorkHoursCheckResponseSchema>;
+
 /**
  * Форма ошибки API (NestJS ExceptionFilter): message может быть строкой
  * или массивом (ValidationPipe), code — наш доменный код.
@@ -445,6 +505,10 @@ export const apiEnvSchema = z.object({
     .positive()
     .max(24 * 7)
     .default(24),
+  /** Лимит часов в месяц на пару «водитель — продавец» (ADR-011). */
+  WORK_HOURS_MONTHLY_LIMIT: z.coerce.number().int().positive().max(200).default(60),
+  /** Месяцев подряд с ≥лимитом до блокировки пары (ADR-011). */
+  WORK_MONTHS_SERIES: z.coerce.number().int().positive().max(24).default(6),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

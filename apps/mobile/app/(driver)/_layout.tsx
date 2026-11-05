@@ -7,6 +7,7 @@ export default function DriverTabsLayout() {
     <Tabs tabBar={(props) => <RoleTabsBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="radar" />
       <Tabs.Screen name="deliveries" />
+      <Tabs.Screen name="hours" />
     </Tabs>
   );
 }

@@ -11,6 +11,7 @@ export default function SellerTabsLayout() {
       <Tabs.Screen name="showcase" />
       <Tabs.Screen name="inbox" />
       <Tabs.Screen name="debts" />
+      <Tabs.Screen name="hours" />
     </Tabs>
   );
 }

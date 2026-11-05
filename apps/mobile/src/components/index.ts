@@ -11,3 +11,4 @@ export { DebtsScreen } from './DebtsScreen';
 export { DebtCard } from './DebtCard';
 export { CreateDebtModal } from './CreateDebtModal';
 export { DebtSummaryWidget } from './DebtSummaryWidget';
+export { WorkHoursScreen } from './WorkHoursScreen';

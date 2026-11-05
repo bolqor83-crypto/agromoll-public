@@ -12,6 +12,7 @@ import { ListingsModule } from './listings/listings.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
+import { WorkHoursModule } from './work-hours/work-hours.module';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -42,6 +43,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     BookingsModule,
     DebtsModule,
     NotificationsModule,
+    WorkHoursModule,
   ],
   providers: [
     // Идемпотентность POST-мутаций (X-Idempotency-Key, ADR-006):

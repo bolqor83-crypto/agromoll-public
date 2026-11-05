@@ -106,6 +106,13 @@ model User {
   debtsAsDebtor    Debt[] @relation("DebtDebtor") // долги, где я должен
   debtEvents       DebtEvent[] // действия пользователя в журнале долгов
   notifications    Notification[] // in-app уведомления (v0.4.0)
+  // Учёт часов 289-ФЗ (v0.4.0, ADR-011): пары «водитель — продавец».
+  workSessionsAsDriver  WorkSession[] @relation("WorkSessionDriver")
+  workSessionsAsSeller  WorkSession[] @relation("WorkSessionSeller")
+  monthlyTotalsAsDriver MonthlyPairTotal[] @relation("MonthlyPairDriver")
+  monthlyTotalsAsSeller MonthlyPairTotal[] @relation("MonthlyPairSeller")
+  blockedPairsAsDriver  BlockedPair[] @relation("BlockedPairDriver")
+  blockedPairsAsSeller  BlockedPair[] @relation("BlockedPairSeller")
 
   @@map("users")
 }
@@ -369,4 +376,74 @@ model Notification {
 
   @@index([userId, readAt])
   @@map("notifications")
+}
+
+/// Рабочая сессия пары «водитель — продавец» (v0.4.0, ADR-011).
+///
+/// Юридическая страховка платформы (289-ФЗ): самозанятый водитель,
+/// работающий 60+ часов в месяц с одним продавцом 6 месяцев подряд, —
+/// признак трудовых отношений, а не самозанятости. Платформа считает
+/// часы и требует паузу. Это НЕ биллинг и НЕ зарплата — только часы.
+model WorkSession {
+  id       String   @id @default(uuid())
+  driverId String
+  driver   User     @relation("WorkSessionDriver", fields: [driverId], references: [id])
+  sellerId String
+  seller   User     @relation("WorkSessionSeller", fields: [sellerId], references: [id])
+  startedAt DateTime @default(now())
+  /// Момент закрытия (подтверждение приёмки, отмена или ручное завершение).
+  endedAt   DateTime?
+  /// durationMinutes = endedAt − startedAt; NULL, пока сессия открыта.
+  durationMinutes Int?
+  /// Месяц старта «YYYY-MM» — денормализация для агрегации по парам.
+  month    String
+  createdAt DateTime @default(now())
+
+  @@index([driverId, sellerId, month])
+  @@index([month])
+  @@map("work_sessions")
+}
+
+/// Помесячный итог пары «водитель — продавец» (v0.4.0, ADR-011).
+///
+/// Материализованный счётчик: инкремент при закрытии сессии.
+/// monthCounted — засчитан ли месяц в «опасную» серию (≥ лимита часов);
+/// при <60 ч в месяце серия сбрасывается (пересчёта истории нет).
+model MonthlyPairTotal {
+  id        String   @id @default(uuid())
+  driverId  String
+  driver    User     @relation("MonthlyPairDriver", fields: [driverId], references: [id])
+  sellerId  String
+  seller    User     @relation("MonthlyPairSeller", fields: [sellerId], references: [id])
+  month     String
+  totalMinutes Int   @default(0)
+  /// ≥ WORK_HOURS_MONTHLY_LIMIT часов в этом месяце.
+  monthCounted Boolean @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@unique([driverId, sellerId, month])
+  @@index([month])
+  @@map("monthly_pair_totals")
+}
+
+/// Активная блокировка пары «водитель — продавец» (v0.4.0, ADR-011).
+///
+/// Создаётся кроном при 6 месяцах подряд с monthCounted=true:
+/// 289-ФЗ требует паузу — новые сессии пары отклоняются (409).
+/// Уникальный ключ — одна активная блокировка на пару.
+model BlockedPair {
+  id        String   @id @default(uuid())
+  driverId  String
+  driver    User     @relation("BlockedPairDriver", fields: [driverId], references: [id])
+  sellerId  String
+  seller    User     @relation("BlockedPairSeller", fields: [sellerId], references: [id])
+  blockedAt DateTime @default(now())
+  /// Причина — текст для мягкого экрана паузы в приложении.
+  reason    String
+  /// NULL — бессрочно (MVP: снятие блокировки — вручную поддержкой).
+  unblockAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@unique([driverId, sellerId])
+  @@map("blocked_pairs")
 }
