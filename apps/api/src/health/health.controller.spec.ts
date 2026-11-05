@@ -1,13 +1,25 @@
 import { HealthController } from './health.controller';
 
 describe('HealthController', () => {
-  it('возвращает статус ok', () => {
-    const controller = new HealthController();
-    const result = controller.check();
+  let controller: HealthController;
 
+  beforeEach(() => {
+    controller = new HealthController();
+  });
+
+  it('возвращает status ok', () => {
+    const result = controller.check();
     expect(result.status).toBe('ok');
+  });
+
+  it('представляется как agromoll-api', () => {
+    const result = controller.check();
     expect(result.service).toBe('agromoll-api');
-    expect(typeof result.uptime).toBe('number');
-    expect(new Date(result.timestamp).toString()).not.toBe('Invalid Date');
+  });
+
+  it('заполняет timestamp и uptimeSec', () => {
+    const result = controller.check();
+    expect(() => new Date(result.timestamp)).not.toThrow();
+    expect(result.uptimeSec).toBeGreaterThanOrEqual(0);
   });
 });

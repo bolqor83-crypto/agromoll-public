@@ -1,28 +1,20 @@
-/*
-  Начальная миграция АгроМолл.
-
-  Этап 1 (каркас): расширение PostGIS (задел под геозоны рынка и маршруты
-  доставщиков — см. docs/adr/ADR-001-tech-stack.md) и таблица users с ролью.
-  Бизнес-таблицы (заявки, брони, долги, доставки) — следующие этапы.
-*/
-
--- Расширение PostGIS: безопасно выполняется повторно.
+-- АгроМолл: стартовая миграция (этап «фундамент»).
+--
+-- PostGIS ставим сразу: геозоны рынка и доставка попутчиками появятся
+-- на следующих этапах, а расширение должно быть в миграции с первого дня,
+-- чтобы любое окружение (локальное, CI, прод) поднималось одинаково.
 CREATE EXTENSION IF NOT EXISTS "postgis";
 
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('BUYER', 'SELLER', 'DRIVER');
+-- RFC: тип enum должен полностью совпадать с USER_ROLES из @agromoll/types.
+CREATE TYPE "UserRole" AS ENUM ('buyer', 'seller', 'driver');
 
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
-    "phone" TEXT,
-    "name" TEXT,
-    "role" "Role" NOT NULL DEFAULT 'BUYER',
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL,
+    "role" "UserRole" NOT NULL DEFAULT 'buyer',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
-
--- CreateIndex
-CREATE UNIQUE INDEX "users_phone_key" ON "users"("phone");

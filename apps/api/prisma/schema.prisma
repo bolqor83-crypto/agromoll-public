@@ -1,9 +1,6 @@
-// Prisma-схема АгроМолл.
-//
-// Этап 1 (каркас): только базовая модель пользователя с ролью.
-// Бизнес-модели (заявки, брони, долги, доставки, геозоны) — следующие этапы.
-// Расширение PostGIS для геоданных закладывается в первой миграции
-// (prisma/migrations/..._init/migration.sql) — см. ADR-001.
+// АгроМолл — базовая схема.
+// Этап «фундамент»: только User с ролью. Бизнес-модели (брони, заказы, долги,
+// геозоны, смены) появятся на следующих этапах — см. docs/adr/ADR-001.
 
 generator client {
   provider = "prisma-client-js"
@@ -14,21 +11,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Роли участников рынка. Согласовано с @agromoll/types (packages/types/src/index.ts).
-enum Role {
-  BUYER
-  SELLER
-  DRIVER
+/// Роль участника рынка. Совпадает с USER_ROLES из @agromoll/types
+/// и UserRoleSchema из @agromoll/validation.
+enum UserRole {
+  buyer
+  seller
+  driver
 }
 
-/// Участник рынка. Аутентификация — следующий этап, поэтому поля phone/name опциональны.
 model User {
   id        String   @id @default(uuid())
-  phone     String?  @unique
-  name      String?
-  role      Role     @default(BUYER)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  role      UserRole @default(buyer)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("users")
 }
