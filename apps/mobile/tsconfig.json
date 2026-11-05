@@ -1,0 +1,21 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@agromoll/ui": [
+        "../../packages/ui/src/index.ts"
+      ],
+      "@agromoll/types": [
+        "../../packages/types/src/index.ts"
+      ],
+      "@agromoll/validation": [
+        "../../packages/validation/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}

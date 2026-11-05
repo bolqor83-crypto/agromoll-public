@@ -1,0 +1,39 @@
+{
+  "name": "agromoll",
+  "version": "0.1.0",
+  "private": true,
+  "description": "АгроМолл — мобильное приложение оптово-розничного рынка (Ростов-на-Дону). Монорепозиторий: mobile + api + дизайн-система.",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "check": "turbo run lint typecheck test build",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @agromoll/api prisma:migrate",
+    "db:deploy": "pnpm --filter @agromoll/api prisma:deploy",
+    "db:studio": "pnpm --filter @agromoll/api exec prisma studio"
+  },
+  "devDependencies": {
+    "eslint": "^9.28.0",
+    "turbo": "^2.5.4",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.33.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "unrs-resolver",
+      "core-js"
+    ]
+  }
+}
