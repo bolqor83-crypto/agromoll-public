@@ -11,6 +11,92 @@
   Бронирование (v0.2.0) полностью сохранено. Долги, учёт часов, доставка
   и оплата — на следующих этапах.
 
+## Что нового в v0.3.1
+
+- **Безопасность: отзыв refresh-токенов** —
+  [ADR-008](docs/adr/ADR-008-refresh-token-revocation.md). Паттерн
+  «Refresh Token Family + Rotation + Reuse Detection»:
+  - каждый `/auth/refresh` **ротирует пару** токенов (старый jti →
+    `used`, выдаётся новый); повторное предъявление старого = признак
+    кражи → **вся семья отзывается**, 401 `TOKEN_REUSE_DETECTED`;
+  - `POST /auth/logout` (204, идемпотентен) отзывает семью и кладёт
+    jti access-токена в блэклист на остаток его ≤15 минут;
+  - смена роли отзывает все сессии пользователя, кроме текущей;
+  - Redis — источник решений (ключи `session:family:*` / `session:jti:*`,
+    Lua-CAS для конкурентных refresh), Postgres `Session` — аудит;
+    **fail-closed**: Redis недоступен → 401/503, а не «fail-open»;
+  - rate limit `/auth/refresh` — 10/мин на IP;
+  - мобильный клиент: logout вызывает сервер ДО локальной очистки,
+    при `TOKEN_REUSE_DETECTED` — мягкое «Сессия завершена. Войдите
+    снова» (без слова «кража»).
+- **Визуальная полировка** —
+  [ADR-009](docs/adr/ADR-009-visual-patterns.md):
+  - «карточка раскрывается в экран»: морф фото карточки ленты в шапку
+    детального экрана (spring ~300 мс); модалки — «листы» снизу с
+    spring-физикой (`SheetModal`);
+  - staggered-вход карточек (40 мс между, только первая отрисовка);
+    бейджи статусов морфятся цветом 300 мс + cross-fade текста;
+    «Синхронизация…» пульсирует 1→0.6→1 (2 с);
+  - skeleton с **shimmer**: блик 45% ширины, 1.5 с loop, база
+    surfaceElevated, блик +8% светлее;
+  - пустые состояния с действием: «Пока тихо. Обновите или загляните
+    позже» + «Обновить»; «Здесь появятся ваши заказы. Начните с ленты»
+    - «В ленту»; иллюстрации появляются scale 0.9→1 (400 мс);
+  - pull-to-refresh: haptic-«щелчок» в момент пересечения порога;
+  - tab bar: cross-fade иконок + подпрыг 1→1.1→1, blur-подложка
+    (expo-blur; на web — solid);
+  - тактильная карта `packages/ui/haptics.ts`: tap / success / warning
+    (+selection), троттлинг 150 мс — весь haptics приложения через неё;
+  - тёмная тема: токен `scrim`, тени из `shadow[mode]`, shimmer и
+    пустые состояния проверены в обеих темах.
+- **Тесты**: 190+ unit (api + mobile + пакеты) и 30 e2e против реальных
+  Postgres+PostGIS+Redis: ротация → повторное использование → мёртвая
+  семья; logout → access и refresh невалидны; throttling refresh;
+  booking-флоу не регрессировал.
+
+### Скриншоты v0.3.1: до/после (светлая + тёмная тема)
+
+| Лента — было (v0.3.0)                                          | Лента — стало (staggered, tab bar c blur)                                   |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| ![Лента v0.3.0](docs/design/screenshots/light-feed.png)        | ![Лента v0.3.1](docs/design/screenshots/v0.3.1/after-feed-light.png)        |
+| ![Лента v0.3.0, тёмная](docs/design/screenshots/dark-feed.png) | ![Лента v0.3.1, тёмная](docs/design/screenshots/v0.3.1/after-feed-dark.png) |
+
+| Детальный экран (морф из карточки)                                           | Модалка-лист (spring снизу)                                               |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| ![Детальный, светлая](docs/design/screenshots/v0.3.1/after-detail-light.png) | ![Модалка, светлая](docs/design/screenshots/v0.3.1/after-modal-light.png) |
+| ![Детальный, тёмная](docs/design/screenshots/v0.3.1/after-detail-dark.png)   | ![Модалка, тёмная](docs/design/screenshots/v0.3.1/after-modal-dark.png)   |
+
+| Skeleton с shimmer                                                                   | Пустое состояние с действием                                                        |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| ![Shimmer, светлая](docs/design/screenshots/v0.3.1/after-skeleton-shimmer-light.png) | ![Пустая лента, светлая](docs/design/screenshots/v0.3.1/after-empty-feed-light.png) |
+| ![Shimmer, тёмная](docs/design/screenshots/v0.3.1/after-skeleton-shimmer-dark.png)   | ![Пустая лента, тёмная](docs/design/screenshots/v0.3.1/after-empty-feed-dark.png)   |
+
+### Отзыв refresh-токенов вручную (curl)
+
+```bash
+# 1. Вход (dev-код «0000»)
+curl -s -X POST localhost:3000/auth/request-code -H 'Content-Type: application/json'   -d '{"phone":"+79611230001"}'
+curl -s -X POST localhost:3000/auth/verify -H 'Content-Type: application/json'   -d '{"phone":"+79611230001","code":"0000"}'
+# → {"accessToken":"…","refreshToken":"R1",…}
+
+# 2. Ротация: старый refresh → НОВАЯ пара
+curl -s -X POST localhost:3000/auth/refresh -H 'Content-Type: application/json'   -d '{"refreshToken":"R1"}'
+# → {"accessToken":"…","refreshToken":"R2"}     # R1 теперь «used»
+
+# 3. Вор предъявил R1 повторно → семья отозвана
+curl -s -X POST localhost:3000/auth/refresh -H 'Content-Type: application/json'   -d '{"refreshToken":"R1"}'
+# → 401 {"code":"TOKEN_REUSE_DETECTED","message":"Сессия завершена. Войдите снова"}
+
+# 4. Легитимный R2 тоже мёртв (семья отозвана целиком)
+curl -s -X POST localhost:3000/auth/refresh -H 'Content-Type: application/json'   -d '{"refreshToken":"R2"}'
+# → 401 "Сессия завершена"
+
+# 5. Logout: доступ к /bookings с access → 401 (блэклист jti)
+curl -s -X POST localhost:3000/auth/logout -H 'Content-Type: application/json'   -d '{"refreshToken":"R3","accessToken":"A3"}' -o /dev/null -w '%{http_code}
+'
+# → 204, повторный logout — тоже 204 (идемпотентен)
+```
+
 ## Что нового в v0.3.0
 
 - **Аутентификация: телефон + SMS-код → JWT** —
