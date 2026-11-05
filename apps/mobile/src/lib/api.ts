@@ -1,22 +1,64 @@
 /**
- * Тонкий клиент API АгроМолл (v0.2.0).
+ * Клиент API АгроМолл (v0.3.0): axios + JWT-аутентификация.
  *
- * Аутентификация пока — заглушка X-User-Id (см. ADR-004): id демо-аккаунта
- * роли подставляется из @agromoll/types.DEMO_ACCOUNTS. Все запросы идут
- * с 8-секундным таймаутом; при недоступности API экраны переключаются
- * на демо-данные (виден бейдж «Демо-данные»).
+ * Вместо X-User-Id (v0.2.0) — Authorization: Bearer. Interceptor:
+ *  - каждый запрос получает access-токен из secure store;
+ *  - при 401 — одна попытка refresh (single-flight, чтобы параллельные
+ *    запросы не устроили гонку) и повтор исходного запроса;
+ *  - если refresh не удался — токены стираются, экраны уходят на вход
+ *    (событие 'auth:sign-out').
+ *
+ * Ответы API валидируются zod-схемами (подэтап C) — см. apiValidate.
+ * Каждая мутация броней уходит через outbox (подэтап B), здесь — только
+ * чтения и auth-вызовы.
  */
-import type { BookingDto, ListingDto } from '@agromoll/types';
+import axios from 'axios';
+import type { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import type {
+  AuthResponseDto,
+  BookingDto,
+  ListingDto,
+  RefreshResponseDto,
+  UserDto,
+  UserRole,
+} from '@agromoll/types';
+import { normalizePhone } from '@agromoll/types';
+import { tokenStore } from './token-store';
+import { logger } from './logger';
+import {
+  AuthResponseSchema,
+  BookingResponseSchema,
+  BookingsResponseSchema,
+  ListingResponseSchema,
+  ListingsResponseSchema,
+  RefreshResponseSchema,
+  RequestCodeResponseSchema,
+  UserResponseSchema,
+} from '@agromoll/validation';
+import type { ZodType } from 'zod';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 /** Таймаут запроса: рынок торопится, ждать дольше 8 секунд нельзя. */
 const REQUEST_TIMEOUT_MS = 8000;
 
+/** Событие «токены сгорели, разлогинь» — слушает auth-store. */
+export const AUTH_SIGN_OUT_EVENT = 'agromoll:auth-sign-out';
+
+export type ApiErrorCode =
+  | 'NETWORK'
+  | 'TIMEOUT'
+  | 'UNAUTHORIZED'
+  | 'INVALID_RESPONSE'
+  | 'RATE_LIMITED'
+  | 'SERVER'
+  | 'UNKNOWN';
+
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number | undefined,
+    readonly code: ApiErrorCode,
     readonly body: unknown,
   ) {
     super(message);
@@ -37,99 +79,254 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, userId: string, init?: RequestInit): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${API_URL}${path}`, {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Id': userId,
-        ...(init?.headers as Record<string, string> | undefined),
-      },
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      throw new ApiError(`API ответил ${res.status}`, res.status, body);
+/** Приводит любую ошибку к ApiError с понятным кодом. */
+export function toApiError(error: unknown): ApiError {
+  if (error instanceof ApiError) {
+    return error;
+  }
+  if (axios.isAxiosError(error)) {
+    const axiosError = error as AxiosError;
+    if (axiosError.response) {
+      const status = axiosError.response.status;
+      const code: ApiErrorCode =
+        status === 401 || status === 403
+          ? 'UNAUTHORIZED'
+          : status === 429
+            ? 'RATE_LIMITED'
+            : status >= 500
+              ? 'SERVER'
+              : 'UNKNOWN';
+      return new ApiError(`API ответил ${status}`, status, code, axiosError.response.data);
     }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
+    if (axiosError.code === 'ECONNABORTED') {
+      return new ApiError('Превышен таймаут запроса', undefined, 'TIMEOUT', undefined);
+    }
+    return new ApiError('Сеть недоступна', undefined, 'NETWORK', undefined);
+  }
+  return new ApiError(String(error), undefined, 'UNKNOWN', undefined);
+}
+
+/** Ошибка формата ответа: сервер ответил, но данные не соответствуют схеме. */
+export function isInvalidResponseError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'INVALID_RESPONSE';
+}
+
+/**
+ * Валидация ответа zod-схемой (подэтап C, ADR-006).
+ * Старый клиент + новый сервер, баги сериализации, MITM (частично) —
+ * рендерим только проверенные данные. Лишние поля не отвергаются
+ * (passthrough) — обратная совместимость.
+ */
+function validateResponse<T>(schema: ZodType<T>, data: unknown, context: string): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    // structured-лог с сырым ответом: без этого такой баг не отловить
+    logger.error('api', 'невалидный ответ API', {
+      context,
+      raw: data,
+      issues: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+    });
+    throw new ApiError(
+      `API вернул неверный формат (${context})`,
+      undefined,
+      'INVALID_RESPONSE',
+      data,
+    );
+  }
+  return result.data;
+}
+
+/** HTTP-клиент. */
+export const http = axios.create({
+  baseURL: API_URL,
+  timeout: REQUEST_TIMEOUT_MS,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+// ─── Interceptors: access-токен + авто-refresh при 401 ────────────────────
+
+http.interceptors.request.use(async (config) => {
+  const token = await tokenStore.getAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+/** Single-flight refresh: параллельные 401 ждут один общий refresh. */
+let refreshInFlight: Promise<string | null> | null = null;
+
+/** Пометка запроса «не авто-refresh» (сам /auth/refresh). */
+const SKIP_REFRESH_FLAG = 'agromollSkipAuthRefresh';
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = await tokenStore.getRefreshToken();
+  if (!refreshToken) {
+    return null;
+  }
+  try {
+    const response = await http.request<RefreshResponseDto>({
+      method: 'POST',
+      url: '/auth/refresh',
+      data: { refreshToken },
+      headers: { 'Content-Type': 'application/json' },
+      // не даём интерцептору уйти в рекурсию на 401 от самого refresh
+      [SKIP_REFRESH_FLAG]: true,
+    } as AxiosRequestConfig & Record<string, unknown>);
+    await tokenStore.setTokens(response.data.accessToken);
+    return response.data.accessToken;
+  } catch (error) {
+    logger.warn('api', 'refresh не удался — нужен повторный вход', {
+      error: toApiError(error).message,
+    });
+    await tokenStore.clear();
+    // Сообщаем auth-store: сессия сгорела.
+    emitSignOut();
+    return null;
+  }
+}
+
+function emitSignOut(): void {
+  // globalThis работает и в RN, и в web, и в jest.
+  (globalThis as { dispatchEvent?: (e: Event) => boolean }).dispatchEvent?.(
+    new Event(AUTH_SIGN_OUT_EVENT),
+  );
+}
+
+http.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const original = error.config as
+      | (InternalAxiosRequestConfig & { _retried?: boolean; [k: string]: unknown })
+      | undefined;
+
+    const skipRefresh = original?.[SKIP_REFRESH_FLAG] === true;
+    if (error.response?.status === 401 && original && !original._retried && !skipRefresh) {
+      original._retried = true;
+      refreshInFlight ??= refreshAccessToken().finally(() => {
+        refreshInFlight = null;
+      });
+      const fresh = await refreshInFlight;
+      if (fresh) {
+        original.headers.Authorization = `Bearer ${fresh}`;
+        return http.request(original);
+      }
+    }
+    throw error;
+  },
+);
+
+// ─── Обёртка запросов: любые ошибки → ApiError ────────────────────────────
+
+async function apiRequest<T>(config: AxiosRequestConfig): Promise<T> {
+  try {
+    const response = await http.request<T>(config);
+    return response.data;
+  } catch (error) {
+    throw toApiError(error);
   }
 }
 
 export const api = {
+  // ── Auth (v0.3.0) ────────────────────────────────────────────────────────
+
+  /** Шаг 1: запросить SMS-код. Телефон нормализуется к E.164. */
+  requestCode(rawPhone: string): Promise<{ expiresInSec: number }> {
+    const phone = normalizePhone(rawPhone);
+    if (!phone) {
+      return Promise.reject(new ApiError('Некорректный телефон', 400, 'UNKNOWN', undefined));
+    }
+    return apiRequest<{ expiresInSec: number }>({
+      method: 'POST',
+      url: '/auth/request-code',
+      data: { phone },
+    }).then((data) => validateResponse(RequestCodeResponseSchema, data, 'auth/request-code'));
+  },
+
+  /** Шаг 2: проверить код → токены + профиль. */
+  verify(phone: string, code: string): Promise<AuthResponseDto> {
+    const normalized = normalizePhone(phone);
+    if (!normalized) {
+      return Promise.reject(new ApiError('Некорректный телефон', 400, 'UNKNOWN', undefined));
+    }
+    return apiRequest<AuthResponseDto>({
+      method: 'POST',
+      url: '/auth/verify',
+      data: { phone: normalized, code },
+    }).then((data) => validateResponse(AuthResponseSchema, data, 'auth/verify'));
+  },
+
+  /** Обновить access-токен (используется интерцептором и bootstrap-ом). */
+  refresh(refreshToken: string): Promise<RefreshResponseDto> {
+    return apiRequest<RefreshResponseDto>({
+      method: 'POST',
+      url: '/auth/refresh',
+      data: { refreshToken },
+    }).then((data) => validateResponse(RefreshResponseSchema, data, 'auth/refresh'));
+  },
+
+  /** Мой профиль. */
+  me(): Promise<UserDto> {
+    return apiRequest<UserDto>({ method: 'GET', url: '/users/me' }).then((d) =>
+      validateResponse(UserResponseSchema, d, 'users/me'),
+    );
+  },
+
+  /** Сменить роль (сохраняется на сервере). */
+  updateRole(role: UserRole): Promise<UserDto> {
+    return apiRequest<UserDto>({
+      method: 'PATCH',
+      url: '/users/me/role',
+      data: { role },
+    }).then((d) => validateResponse(UserResponseSchema, d, 'users/me/role'));
+  },
+
+  // ── Чтения (v0.2.0, без X-User-Id) ───────────────────────────────────────
+
   /** Лента активных лотов. */
-  listings: (userId: string) => apiFetch<ListingDto[]>('/listings', userId),
+  listings(): Promise<ListingDto[]> {
+    return apiRequest<ListingDto[]>({ method: 'GET', url: '/listings' }).then((d) =>
+      validateResponse(ListingsResponseSchema, d, 'listings'),
+    );
+  },
 
   /** Карточка лота. */
-  listing: (userId: string, id: string) => apiFetch<ListingDto>(`/listings/${id}`, userId),
+  listing(id: string): Promise<ListingDto> {
+    return apiRequest<ListingDto>({ method: 'GET', url: `/listings/${id}` }).then((d) =>
+      validateResponse(ListingResponseSchema, d, 'listings/:id'),
+    );
+  },
 
   /** Витрина продавца — свои лоты. */
-  myListings: (userId: string) => apiFetch<ListingDto[]>('/listings/mine', userId),
-
-  /** Выставить лот (seller). */
-  createListing: (
-    userId: string,
-    body: {
-      title: string;
-      category: string;
-      unit: string;
-      pricePerUnit: number;
-      quantityAvailable: number;
-    },
-  ) =>
-    apiFetch<ListingDto>('/listings', userId, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  myListings(): Promise<ListingDto[]> {
+    return apiRequest<ListingDto[]>({ method: 'GET', url: '/listings/mine' }).then((d) =>
+      validateResponse(ListingsResponseSchema, d, 'listings/mine'),
+    );
+  },
 
   /** Мои брони (buyer — свои, seller — входящие). */
-  bookings: (userId: string) => apiFetch<BookingDto[]>('/bookings', userId),
+  bookings(): Promise<BookingDto[]> {
+    return apiRequest<BookingDto[]>({ method: 'GET', url: '/bookings' }).then((d) =>
+      validateResponse(BookingsResponseSchema, d, 'bookings'),
+    );
+  },
 
-  /** Создать бронь (buyer). */
-  createBooking: (userId: string, listingId: string, requestedQuantity: number) =>
-    apiFetch<BookingDto>('/bookings', userId, {
-      method: 'POST',
-      body: JSON.stringify({ listingId, requestedQuantity }),
-    }),
+  // ── Мутации ───────────────────────────────────────────────────────────────
+  // Мутации БРОНЕЙ (create/cancel/confirm/counter-offer/accept-counter)
+  // живут в офлайн-ядре: src/lib/outbox/* (X-Idempotency-Key, ADR-006).
 
-  /** Отменить бронь (любая сторона переговоров). */
-  cancelBooking: (userId: string, bookingId: string, reason?: string) =>
-    apiFetch<BookingDto>(`/bookings/${bookingId}/cancel`, userId, {
-      method: 'POST',
-      body: JSON.stringify(reason !== undefined ? { reason } : {}),
-    }),
-
-  /** Принять корректировку продавца (buyer). */
-  acceptCounter: (userId: string, bookingId: string) =>
-    apiFetch<BookingDto>(`/bookings/${bookingId}/accept-counter`, userId, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }),
-
-  /** Подтвердить бронь как есть (seller). */
-  confirmBooking: (userId: string, bookingId: string) =>
-    apiFetch<BookingDto>(`/bookings/${bookingId}/confirm`, userId, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }),
-
-  /** Предложить корректировку (seller). */
-  counterOffer: (
-    userId: string,
-    bookingId: string,
-    body: { offeredQuantity?: number; pickupTime?: string; note?: string },
-  ) =>
-    apiFetch<BookingDto>(`/bookings/${bookingId}/counter-offer`, userId, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  /** Выставить лот (seller). Не идемпотентно: офлайн-очереди не требует. */
+  createListing(body: {
+    title: string;
+    category: string;
+    unit: string;
+    pricePerUnit: number;
+    quantityAvailable: number;
+    lineNumber?: number;
+    isPerishable?: boolean;
+  }): Promise<ListingDto> {
+    return apiRequest<ListingDto>({ method: 'POST', url: '/listings', data: body }).then((d) =>
+      validateResponse(ListingResponseSchema, d, 'listings (POST)'),
+    );
+  },
 };

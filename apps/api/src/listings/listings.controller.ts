@@ -18,7 +18,7 @@ import {
   UpdateListingSchema,
 } from '@agromoll/validation';
 import type { CreateListingInput, UpdateListingInput } from '@agromoll/validation';
-import { CurrentUser, Roles, RolesGuard, UserGuard } from '../auth/user.guard';
+import { CurrentUser, Roles, RolesGuard, JwtAuthGuard } from '../auth/auth.guards';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ListingsService } from './listings.service';
@@ -32,7 +32,7 @@ export class ListingsController {
   constructor(private readonly listings: ListingsService) {}
 
   @Post()
-  @UseGuards(UserGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('seller')
   create(
     @CurrentUser() user: AuthenticatedUser,
@@ -57,7 +57,7 @@ export class ListingsController {
 
   /** Витрина продавца — свои лоты. */
   @Get('mine')
-  @UseGuards(UserGuard)
+  @UseGuards(JwtAuthGuard)
   findMine(@CurrentUser() user: AuthenticatedUser) {
     return this.listings.findMine(user.id);
   }
@@ -68,7 +68,7 @@ export class ListingsController {
   }
 
   @Patch(':id')
-  @UseGuards(UserGuard)
+  @UseGuards(JwtAuthGuard)
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,

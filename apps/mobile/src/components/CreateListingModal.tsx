@@ -21,7 +21,6 @@ import { api, ApiError } from '@/lib/api';
 
 export interface CreateListingModalProps {
   visible: boolean;
-  userId: string;
   demo: boolean;
   onClose: () => void;
   /** Лот создан — обновить витрину. */
@@ -35,7 +34,6 @@ export interface CreateListingModalProps {
  */
 export function CreateListingModal({
   visible,
-  userId,
   demo,
   onClose,
   onCreated,
@@ -78,7 +76,7 @@ export function CreateListingModal({
     }
     setSending(true);
     try {
-      await api.createListing(userId, {
+      await api.createListing({
         title: title.trim(),
         category,
         unit,

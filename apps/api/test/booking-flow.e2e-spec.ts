@@ -1,5 +1,5 @@
 /**
- * E2E подэтапа B (v0.2.0): полный флоу брони по HTTP.
+ * E2E подэтапа B (v0.2.0), обновлён до JWT (v0.3.0): полный флоу брони по HTTP.
  *
  * Требует DATABASE_URL и применённых миграций — запускается в CI
  * (service-контейнер postgis) командой `pnpm --filter @agromoll/api test:e2e`.
@@ -8,6 +8,9 @@
  * seller предлагает корректировку → buyer принимает (резерв перестраивается) →
  * подтверждённая бронь видна обеим сторонам. Плюс запрещённые переходы
  * (403/409), отмена, истечение TTL с возвратом резерва.
+ *
+ * Аутентификация: реальные JWT-токены через /auth/request-code + /auth/verify
+ * (см. auth.helper.ts).
  */
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -15,15 +18,17 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { BookingsService } from '../src/bookings/bookings.service';
+import { authHeader, registerAndLogin } from './auth.helper';
+import type { TestUser } from './auth.helper';
 
 describe('Booking flow (e2e, HTTP)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let bookingsService: BookingsService;
 
-  let sellerId: string;
-  let buyerId: string;
-  let driverId: string;
+  let seller: TestUser;
+  let buyer: TestUser;
+  let driver: TestUser;
   let listingId: string;
 
   beforeAll(async () => {
@@ -42,25 +47,15 @@ describe('Booking flow (e2e, HTTP)', () => {
 
   beforeEach(async () => {
     await cleanDatabase(prisma);
-    const seller = await prisma.user.create({
-      data: { role: 'seller', displayName: 'ФХ «Донская долина»' },
-    });
-    const buyer = await prisma.user.create({
-      data: { role: 'buyer', displayName: 'Ларёк «У Ашота»' },
-    });
-    const driver = await prisma.user.create({
-      data: { role: 'driver', displayName: 'Газель Next' },
-    });
-    sellerId = seller.id;
-    buyerId = buyer.id;
-    driverId = driver.id;
+    seller = await registerAndLogin(app, 'seller');
+    buyer = await registerAndLogin(app, 'buyer');
+    driver = await registerAndLogin(app, 'driver');
     listingId = '';
   });
 
   const sellerPost = (url: string) =>
-    request(app.getHttpServer()).post(url).set('X-User-Id', sellerId);
-  const buyerPost = (url: string) =>
-    request(app.getHttpServer()).post(url).set('X-User-Id', buyerId);
+    request(app.getHttpServer()).post(url).set(authHeader(seller));
+  const buyerPost = (url: string) => request(app.getHttpServer()).post(url).set(authHeader(buyer));
 
   it('полный флоу: создание брони → корректировка → подтверждение', async () => {
     // 1. Продавец выставляет лот
@@ -82,7 +77,10 @@ describe('Booking flow (e2e, HTTP)', () => {
     // 2. Покупатель видит лот в ленте
     const feed = await request(app.getHttpServer()).get('/listings').expect(200);
     expect(feed.body).toHaveLength(1);
-    expect(feed.body[0]).toMatchObject({ id: listingId, sellerName: 'ФХ «Донская долина»' });
+    expect(feed.body[0]).toMatchObject({
+      id: listingId,
+      sellerName: expect.stringMatching(/^Участник \+7\*\*\*\d{4}$/),
+    });
 
     // 3. Покупатель бронирует 20 кг
     const booking = await buyerPost('/bookings')
@@ -112,7 +110,7 @@ describe('Booking flow (e2e, HTTP)', () => {
     // 6. Обе стороны видят бронь в своих списках
     const buyerList = await request(app.getHttpServer())
       .get('/bookings')
-      .set('X-User-Id', buyerId)
+      .set(authHeader(buyer))
       .expect(200);
     expect(buyerList.body).toHaveLength(1);
     expect(buyerList.body[0]).toMatchObject({
@@ -124,13 +122,10 @@ describe('Booking flow (e2e, HTTP)', () => {
 
     const sellerInbox = await request(app.getHttpServer())
       .get('/bookings')
-      .set('X-User-Id', sellerId)
+      .set(authHeader(seller))
       .expect(200);
     expect(sellerInbox.body).toHaveLength(1);
-    expect(sellerInbox.body[0]).toMatchObject({
-      id: bookingId,
-      buyerName: 'Ларёк «У Ашота»',
-    });
+    expect(sellerInbox.body[0].buyerName).toMatch(/^Участник \+7\*\*\*/);
 
     // 7. Журнал: created → counter_offered → accepted_counter
     const events = await prisma.bookingEvent.findMany({
@@ -171,9 +166,16 @@ describe('Booking flow (e2e, HTTP)', () => {
     // seller не может создать бронь
     await sellerPost('/bookings').send({ listingId: listing.id, requestedQuantity: 5 }).expect(403);
 
-    // без X-User-Id — 401
+    // без токена — 401
     await request(app.getHttpServer())
       .post('/bookings')
+      .send({ listingId: listing.id, requestedQuantity: 5 })
+      .expect(401);
+
+    // с мусорным токеном — тоже 401
+    await request(app.getHttpServer())
+      .post('/bookings')
+      .set('Authorization', 'Bearer not-a-jwt')
       .send({ listingId: listing.id, requestedQuantity: 5 })
       .expect(401);
 
@@ -191,7 +193,7 @@ describe('Booking flow (e2e, HTTP)', () => {
     // чужой seller не может подтвердить (не владелец лота)
     await request(app.getHttpServer())
       .post(`/bookings/${bookingId}/confirm`)
-      .set('X-User-Id', driverId)
+      .set(authHeader(driver))
       .send({})
       .expect(403);
 
@@ -254,7 +256,7 @@ describe('Booking flow (e2e, HTTP)', () => {
     await seedListing(); // овощи, линия 12
     await prisma.listing.create({
       data: {
-        sellerId,
+        sellerId: seller.id,
         title: 'Яблоки гала',
         category: 'fruits',
         unit: 'kg',
@@ -266,7 +268,7 @@ describe('Booking flow (e2e, HTTP)', () => {
     });
     await prisma.listing.create({
       data: {
-        sellerId,
+        sellerId: seller.id,
         title: 'Архивный лот',
         category: 'vegetables',
         unit: 'kg',
@@ -301,19 +303,19 @@ describe('Booking flow (e2e, HTTP)', () => {
 
     await request(app.getHttpServer())
       .patch(`/listings/${listing.id}`)
-      .set('X-User-Id', sellerId)
+      .set(authHeader(seller))
       .send({ pricePerUnit: '90.00' })
       .expect(200);
 
     await request(app.getHttpServer())
       .patch(`/listings/${listing.id}`)
-      .set('X-User-Id', buyerId)
+      .set(authHeader(buyer))
       .send({ pricePerUnit: '1.00' })
       .expect(403);
 
     await request(app.getHttpServer())
       .patch(`/listings/${listing.id}`)
-      .set('X-User-Id', sellerId)
+      .set(authHeader(seller))
       .send({ title: 'x' }) // слишком короткое
       .expect(400);
   });
@@ -321,7 +323,7 @@ describe('Booking flow (e2e, HTTP)', () => {
   it('доставщик видит пустой список броней, а не 403', async () => {
     const res = await request(app.getHttpServer())
       .get('/bookings')
-      .set('X-User-Id', driverId)
+      .set(authHeader(driver))
       .expect(200);
     expect(res.body).toEqual([]);
   });
@@ -330,7 +332,7 @@ describe('Booking flow (e2e, HTTP)', () => {
   async function seedListing() {
     return prisma.listing.create({
       data: {
-        sellerId,
+        sellerId: seller.id,
         title: 'Помидоры розовые',
         category: 'vegetables',
         unit: 'kg',

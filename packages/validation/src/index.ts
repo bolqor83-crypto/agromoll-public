@@ -6,6 +6,7 @@ import {
   LISTING_STATUSES,
   LISTING_UNITS,
   USER_ROLES,
+  normalizePhone,
 } from '@agromoll/types';
 
 /**
@@ -92,6 +93,179 @@ export const CancelBookingSchema = z
   .strict();
 
 export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
+
+/**
+ * Телефон в любом российском написании: +7 (961) 123-45-67, 8 961 123 45 67…
+ * Нормализуется к E.164 (+7XXXXXXXXXX) через normalizePhone из @agromoll/types.
+ */
+export const PhoneSchema = z
+  .string()
+  .trim()
+  .min(10, 'Телефон слишком короткий')
+  .max(20, 'Телефон слишком длинный')
+  .transform((value, ctx) => {
+    const normalized = normalizePhone(value);
+    if (normalized === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Введите российский номер: +7 XXX XXX-XX-XX',
+      });
+      return z.NEVER;
+    }
+    return normalized;
+  });
+
+/** Запрос SMS-кода: POST /auth/request-code (v0.3.0). */
+export const RequestCodeSchema = z.object({
+  phone: PhoneSchema,
+});
+
+export type RequestCodeInput = z.infer<typeof RequestCodeSchema>;
+
+/**
+ * Проверка SMS-кода: POST /auth/verify.
+ * 6 цифр в проде; 4 — код-заглушка «0000» в dev (ADR-007).
+ */
+export const VerifyCodeSchema = z.object({
+  phone: PhoneSchema,
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,6}$/, 'Код — 4–6 цифр'),
+});
+
+export type VerifyCodeInput = z.infer<typeof VerifyCodeSchema>;
+
+/** Обновление access-токена: POST /auth/refresh. */
+export const RefreshTokenSchema = z.object({
+  refreshToken: z.string().min(1, 'Не передан refreshToken'),
+});
+
+export type RefreshTokenInput = z.infer<typeof RefreshTokenSchema>;
+
+/** Смена роли: PATCH /users/me/role (любая роль на выбор). */
+export const UpdateRoleSchema = z
+  .object({
+    role: UserRoleSchema,
+  })
+  .strict();
+
+export type UpdateRoleInput = z.infer<typeof UpdateRoleSchema>;
+
+// ─── Схемы ответов API (v0.3.0, подэтап C) ─────────────────────────────────
+//
+// Каждый ответ API валидируется на клиенте перед рендером: защита от
+// «старый клиент + новый сервер», багов сериализации и частично от MITM.
+// Схемы строгие к типам известных полей, но .passthrough() — лишние поля
+// сервера не ломают старый клиент (обратная совместимость).
+
+/** ISO-дата. */
+const IsoDateString = z.string().datetime({ offset: true });
+
+/** Ответ GET /listings/:id и POST /listings. */
+export const ListingResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    sellerId: z.string().min(1),
+    sellerName: z.string().optional(),
+    title: z.string().min(1),
+    category: ListingCategorySchema,
+    unit: ListingUnitSchema,
+    /** Decimal от Prisma приходит строкой — точность денег не теряется. */
+    pricePerUnit: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Цена ждём строкой вида «85.50»'),
+    quantityAvailable: z.number().int().nonnegative(),
+    quantityReserved: z.number().int().nonnegative(),
+    quantityAvailableForBooking: z.number().int(),
+    lineNumber: z.number().int().positive().nullable(),
+    isPerishable: z.boolean(),
+    status: ListingStatusSchema,
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+  })
+  .passthrough();
+
+export type ListingResponse = z.infer<typeof ListingResponseSchema>;
+
+/** Ответ GET /listings (лента, витрина). */
+export const ListingsResponseSchema = z.array(ListingResponseSchema);
+
+/** Ответ эндпоинтов броней (создание, отмена, подтверждение, корректировка). */
+export const BookingResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    listingId: z.string().min(1),
+    listingTitle: z.string().optional(),
+    listingUnit: ListingUnitSchema.optional(),
+    buyerId: z.string().min(1),
+    buyerName: z.string().optional(),
+    requestedQuantity: z.number().int().positive(),
+    confirmedQuantity: z.number().int().positive().nullable(),
+    status: BookingStatusSchema,
+    expiresAt: IsoDateString,
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+  })
+  .passthrough();
+
+export type BookingResponse = z.infer<typeof BookingResponseSchema>;
+
+/** Ответ GET /bookings (мои брони / входящие). */
+export const BookingsResponseSchema = z.array(BookingResponseSchema);
+
+/** Ответ GET /users/me и PATCH /users/me/role. */
+export const UserResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    role: UserRoleSchema,
+    displayName: z.string().min(1),
+    phone: z.string().nullable(),
+    phoneVerified: z.boolean(),
+    createdAt: IsoDateString,
+  })
+  .passthrough();
+
+export type UserResponse = z.infer<typeof UserResponseSchema>;
+
+/** Ответ POST /auth/verify: токены + профиль. */
+export const AuthResponseSchema = z
+  .object({
+    accessToken: z.string().min(1),
+    refreshToken: z.string().min(1),
+    user: UserResponseSchema,
+  })
+  .passthrough();
+
+export type AuthResponse = z.infer<typeof AuthResponseSchema>;
+
+/** Ответ POST /auth/refresh. */
+export const RefreshResponseSchema = z
+  .object({
+    accessToken: z.string().min(1),
+  })
+  .passthrough();
+
+export type RefreshResponse = z.infer<typeof RefreshResponseSchema>;
+
+/** Ответ POST /auth/request-code. */
+export const RequestCodeResponseSchema = z
+  .object({
+    expiresInSec: z.number().positive(),
+  })
+  .passthrough();
+
+/**
+ * Форма ошибки API (NestJS ExceptionFilter): message может быть строкой
+ * или массивом (ValidationPipe), code — наш доменный код.
+ */
+export const ErrorResponseSchema = z
+  .object({
+    statusCode: z.number().optional(),
+    message: z.union([z.string(), z.array(z.string())]).optional(),
+    code: z.string().optional(),
+  })
+  .passthrough();
+
+export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
 /** Переменные окружения API. */
 export const apiEnvSchema = z.object({

@@ -1,15 +1,75 @@
 import 'react-native-gesture-handler';
 import { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { View } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from '@agromoll/ui';
 import { logger } from '@/lib/logger';
 import { useThemeStore } from '@/store/theme';
+import { listenForcedSignOut, useAuthStore } from '@/store/auth';
+import { initOutboxBridge } from '@/store/outbox';
+import { ConflictDialog } from '@/components/ConflictDialog';
 
 function AppShell() {
   const { mode } = useTheme();
+  const router = useRouter();
+  const status = useAuthStore((s) => s.status);
+
+  // Сессия сгорела (refresh не удался в интерцепторе) — на вход.
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.replace('/auth');
+    }
+  }, [status, router]);
+
+  return (
+    <>
+      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
+      {/* Конфликт outbox ↔ сервер: решает человек, не молча (ADR-006) */}
+      <ConflictDialog />
+    </>
+  );
+}
+
+/** Заглушка на время проверки сессии (booting): тихий сплэш в цвете темы. */
+function BootSplash() {
+  const { colors } = useTheme();
+  return (
+    <View
+      style={{ flex: 1, backgroundColor: colors.background }}
+      accessibilityLabel="Загрузка приложения"
+    />
+  );
+}
+
+export default function RootLayout() {
+  // Тема живёт в zustand-сторе, а ThemeProvider из @agromoll/ui рисует её по токенам.
+  const setting = useThemeStore((s) => s.setting);
+  const setSetting = useThemeStore((s) => s.setSetting);
+  const status = useAuthStore((s) => s.status);
+  const bootstrap = useAuthStore((s) => s.bootstrap);
+
+  // Инициализация живёт ЗДЕСЬ, а не в AppShell: пока статус booting,
+  // рендерится BootSplash и эффекты AppShell не выполнялись бы — дедлок.
+  // При старте: refresh-токен есть → пробуем refresh и профиль; нет → вход.
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  // Интерцептор axios сказал «разлогинь» — слушаем один раз.
+  useEffect(() => listenForcedSignOut(), []);
+
+  // Офлайн-ядро: события очереди, сеть (NetInfo), передний план (AppState).
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    void initOutboxBridge().then((fn) => {
+      cleanup = fn;
+    });
+    return () => cleanup?.();
+  }, []);
 
   useEffect(() => {
     logger.info('app', 'приложение запущено', {
@@ -19,22 +79,9 @@ function AppShell() {
   }, []);
 
   return (
-    <>
-      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
-      <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
-    </>
-  );
-}
-
-export default function RootLayout() {
-  // Тема живёт в zustand-сторе, а ThemeProvider из @agromoll/ui рисует её по токенам.
-  const setting = useThemeStore((s) => s.setting);
-  const setSetting = useThemeStore((s) => s.setSetting);
-
-  return (
     <SafeAreaProvider>
       <ThemeProvider setting={setting} onSettingChange={setSetting}>
-        <AppShell />
+        {status === 'booting' ? <BootSplash /> : <AppShell />}
       </ThemeProvider>
     </SafeAreaProvider>
   );

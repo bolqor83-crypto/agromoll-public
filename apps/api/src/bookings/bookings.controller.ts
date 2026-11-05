@@ -22,9 +22,10 @@ import type {
 } from '@agromoll/validation';
 import type { ZodType } from 'zod';
 import type { BookingStatus } from '@agromoll/types';
-import { CurrentUser, Roles, RolesGuard, UserGuard } from '../auth/user.guard';
+import { CurrentUser, Roles, RolesGuard, JwtAuthGuard } from '../auth/auth.guards';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { Idempotent } from '../common/idempotency.interceptor';
 import { toBookingDto } from '../common/serialization';
 import { BookingsService } from './bookings.service';
 
@@ -35,13 +36,14 @@ import { BookingsService } from './bookings.service';
  * принадлежность конкретной брони — вторая (машина состояний в сервисе).
  */
 @Controller('bookings')
-@UseGuards(UserGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
 
   /** Создать запрос брони — только buyer. */
   @Post()
   @Roles('buyer')
+  @Idempotent('create_booking')
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(CreateBookingSchema)) body: CreateBookingInput,
@@ -73,6 +75,7 @@ export class BookingsController {
 
   /** Предложить корректировку — только seller лота. */
   @Post(':id/counter-offer')
+  @Idempotent('counter_offer_booking')
   @Roles('seller')
   async counterOffer(
     @Param('id', ParseUUIDPipe) id: string,
@@ -91,6 +94,7 @@ export class BookingsController {
 
   /** Принять корректировку — только buyer. */
   @Post(':id/accept-counter')
+  @Idempotent('accept_counter_booking')
   @Roles('buyer')
   async acceptCounter(
     @Param('id', ParseUUIDPipe) id: string,
@@ -102,6 +106,7 @@ export class BookingsController {
 
   /** Подтвердить запрос как есть — только seller лота. */
   @Post(':id/confirm')
+  @Idempotent('confirm_booking')
   @Roles('seller')
   async confirm(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
     const booking = await this.bookings.confirm({ bookingId: id, actorId: user.id });
@@ -110,6 +115,7 @@ export class BookingsController {
 
   /** Отменить — покупатель брони или продавец лота (проверка в сервисе). */
   @Post(':id/cancel')
+  @Idempotent('cancel_booking')
   async cancel(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
