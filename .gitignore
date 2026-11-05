@@ -1,0 +1,30 @@
+# Зависимости
+node_modules/
+.pnpm-store/
+
+# Сборка
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# Expo
+.expo/
+expo-env.d.ts
+apps/mobile/dist/
+
+# Окружение (секреты не коммитим)
+.env
+.env.*
+!.env.example
+
+# Тесты
+coverage/
+
+# Прочее
+.DS_Store
+*.log
+npm-debug.log*
+yarn-error.log*
+.idea/
+.vscode/
