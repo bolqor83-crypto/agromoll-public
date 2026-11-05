@@ -6,8 +6,10 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { IdempotencyInterceptor } from './common/idempotency.interceptor';
 import { BookingsModule } from './bookings/bookings.module';
+import { DebtsModule } from './debts/debts.module';
 import { HealthModule } from './health/health.module';
 import { ListingsModule } from './listings/listings.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 
@@ -38,6 +40,8 @@ const isProduction = process.env.NODE_ENV === 'production';
     UsersModule,
     ListingsModule,
     BookingsModule,
+    DebtsModule,
+    NotificationsModule,
   ],
   providers: [
     // Идемпотентность POST-мутаций (X-Idempotency-Key, ADR-006):

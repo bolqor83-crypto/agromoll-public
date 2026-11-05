@@ -24,8 +24,13 @@ import type { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 
 import type {
   AuthResponseDto,
   BookingDto,
+  CounterpartyDto,
+  DebtDto,
+  DebtsSummaryDto,
   ListingDto,
+  NotificationsListDto,
   RefreshResponseDto,
+  ReminderResultDto,
   UserDto,
   UserRole,
 } from '@agromoll/types';
@@ -35,9 +40,14 @@ import { logger } from './logger';
 import {
   AuthResponseSchema,
   BookingsResponseSchema,
+  CounterpartiesResponseSchema,
+  DebtsResponseSchema,
+  DebtsSummaryResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
+  NotificationsListResponseSchema,
   RefreshResponseSchema,
+  ReminderResponseSchema,
   RequestCodeResponseSchema,
   UserResponseSchema,
 } from '@agromoll/validation';
@@ -370,6 +380,53 @@ export const api = {
   bookings(): Promise<BookingDto[]> {
     return apiRequest<BookingDto[]>({ method: 'GET', url: '/bookings' }).then((d) =>
       validateResponse(BookingsResponseSchema, d, 'bookings'),
+    );
+  },
+
+  // ── Долги (v0.4.0, ADR-010) ──────────────────────────────────────────────
+  // Мутации (create/settle/dispute/resolve) — через офлайн-ядро
+  // src/lib/outbox/debt-mutations.ts; здесь чтения и напоминание.
+
+  /** Мои долги обеих сторон («мне должны» / «я должен»). */
+  debts(status?: string): Promise<DebtDto[]> {
+    return apiRequest<DebtDto[]>({
+      method: 'GET',
+      url: '/debts',
+      ...(status ? { params: { status } } : {}),
+    }).then((d) => validateResponse(DebtsResponseSchema, d, 'debts'));
+  },
+
+  /** Сводка для виджета: должны мне / должен я (+просроченные). */
+  debtsSummary(): Promise<DebtsSummaryDto> {
+    return apiRequest<DebtsSummaryDto>({ method: 'GET', url: '/debts/summary' }).then((d) =>
+      validateResponse(DebtsSummaryResponseSchema, d, 'debts/summary'),
+    );
+  },
+
+  /** Контрагенты для формы создания долга (с кем были сделки). */
+  debtCounterparties(): Promise<CounterpartyDto[]> {
+    return apiRequest<CounterpartyDto[]>({ method: 'GET', url: '/debts/counterparties' }).then(
+      (d) => validateResponse(CounterpartiesResponseSchema, d, 'debts/counterparties'),
+    );
+  },
+
+  /**
+   * Напомнить дебитору (только кредитор). Прямой вызов — напоминание
+   * осмысленно только онлайн; 429 (кулдаун 24 ч) пробрасывается
+   * как ApiError(RATE_LIMITED) с hint от сервера.
+   */
+  remindDebt(debtId: string): Promise<ReminderResultDto> {
+    return apiRequest<ReminderResultDto>({
+      method: 'POST',
+      url: `/debts/${debtId}/reminder`,
+      data: {},
+    }).then((d) => validateResponse(ReminderResponseSchema, d, 'debts/:id/reminder'));
+  },
+
+  /** Мои уведомления (in-app) + счётчик непрочитанных. */
+  notifications(): Promise<NotificationsListDto> {
+    return apiRequest<NotificationsListDto>({ method: 'GET', url: '/notifications/me' }).then(
+      (d) => validateResponse(NotificationsListResponseSchema, d, 'notifications/me'),
     );
   },
 

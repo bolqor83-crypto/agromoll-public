@@ -54,7 +54,10 @@ export type IdempotentOperationType =
   | 'counter_offer_booking'
   | 'accept_counter_booking'
   | 'create_debt'
-  | 'confirm_delivery';
+  | 'confirm_delivery'
+  | 'settle_debt'
+  | 'dispute_debt'
+  | 'resolve_debt';
 
 /** Пометить POST-эндпоинт идемпотентным. */
 export const Idempotent = (operationType: IdempotentOperationType): MethodDecorator =>

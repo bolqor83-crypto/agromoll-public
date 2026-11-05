@@ -1,4 +1,5 @@
-// АгроМолл — схема v0.3.0 «Аутентификация по телефону» + v0.3.1 «Сессии».
+// АгроМолл — схема v0.3.0 «Аутентификация по телефону» + v0.3.1 «Сессии»
+// + v0.4.0 «Долги» (подэтап A).
 //
 // Домен: продавец выставляет листинг (Listing), покупатель бронирует
 // количество (Booking), продавец может подтвердить или предложить
@@ -9,7 +10,10 @@
 // v0.3.1: Session — аудит-запись «семьи» refresh-токенов для ротации
 // с обнаружением повторного использования (ADR-008). Источник решений
 // об авторизации — Redis (см. session-store.ts), таблица — журнал.
-// Обоснование бронирования — docs/adr/ADR-004.
+// v0.4.0-A: Debt/DebtEvent — учёт долгов «продавец отпустил в долг»
+// (ADR-010). Платформа НЕ проводит деньги: запись — только договорённость
+// сторон. Notification — минимальные in-app уведомления (напоминание
+// должнику). Обоснование бронирования — docs/adr/ADR-004.
 
 generator client {
   provider = "prisma-client-js"
@@ -87,6 +91,9 @@ model User {
   /// по телефону + коду; колонка заложена на будущее (ADR-007).
   passwordHash    String?
   reputationScore Float    @default(0)
+  /// Токен FCM для push-уведомлений (v0.4.0). NULL — push недоступен,
+  /// уведомление доставляется только in-app (ADR-010).
+  fcmToken        String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -95,6 +102,10 @@ model User {
   bookingEvents    BookingEvent[] // действия пользователя в журнале броней
   outboxOperations OutboxOperation[] // идемпотентные операции (ADR-006)
   sessions         Session[] // сессии refresh-токенов (ADR-008)
+  debtsAsCreditor  Debt[] @relation("DebtCreditor") // долги, где я дал в долг
+  debtsAsDebtor    Debt[] @relation("DebtDebtor") // долги, где я должен
+  debtEvents       DebtEvent[] // действия пользователя в журнале долгов
+  notifications    Notification[] // in-app уведомления (v0.4.0)
 
   @@map("users")
 }
@@ -150,6 +161,8 @@ model Listing {
   updatedAt         DateTime        @updatedAt
 
   bookings Booking[]
+  /// Долги, привязанные к лоту (если товар отпущен в долг, ADR-010).
+  debts    Debt[]
 
   @@index([sellerId])
   @@index([status])
@@ -172,6 +185,8 @@ model Booking {
   updatedAt         DateTime      @updatedAt
 
   events BookingEvent[]
+  /// Долги, привязанные к брони (если товар отпущен в долг по брони, ADR-010).
+  debts Debt[]
 
   @@index([buyerId])
   @@index([listingId])
@@ -199,8 +214,8 @@ model BookingEvent {
 }
 
 /// Тип идемпотентной операции из мобильного outbox (ADR-006).
-/// create_debt и confirm_delivery — будущее ядро долгов/доставки,
-/// добавлены сразу, чтобы не менять enum дважды.
+/// create_debt/confirm_delivery добавлены в v0.3.0 на будущее;
+/// settle/dispute/resolve_debt — v0.4.0 (ADR-010).
 enum OutboxOperationType {
   create_booking
   cancel_booking
@@ -209,6 +224,9 @@ enum OutboxOperationType {
   accept_counter_booking
   create_debt
   confirm_delivery
+  settle_debt
+  dispute_debt
+  resolve_debt
 }
 
 /// Состояние операции на сервере (ADR-006).
@@ -241,4 +259,114 @@ model OutboxOperation {
 
   @@index([userId])
   @@map("outbox_operations")
+}
+
+/// Статус долга. Совпадает с DEBT_STATUSES из @agromoll/types.
+/// cancelled — зарезервирован на будущее (аннулирование по согласию
+/// сторон); в v0.4.0 перехода в cancelled ещё нет (ADR-010).
+enum DebtStatus {
+  active
+  settled
+  disputed
+  cancelled
+}
+
+/// Действие из журнала долга. Совпадает с DEBT_ACTIONS из @agromoll/types.
+enum DebtAction {
+  created
+  settled
+  disputed
+  cancelled
+  reminder_sent
+  resolve_requested
+  resolve_confirmed
+}
+
+/// Долг — записанная договорённость «товар отпущен в долг» (v0.4.0, ADR-010).
+///
+/// Платформа НЕ является платёжным агентом: строки — только учёт
+/// договорённости между двумя участниками рынка. Кредитор (creditor)
+/// создал запись, дебитор (debtor) должен вернуть сумму. Каждый переход
+/// статуса фиксируется в append-only журнале DebtEvent — из него в
+/// будущем считается «надёжность оплаты» (репутация v0.5.0).
+model Debt {
+  id         String @id @default(uuid())
+  /// Кто дал в долг (создал запись).
+  creditorId String
+  creditor   User   @relation("DebtCreditor", fields: [creditorId], references: [id])
+  /// Кто взял в долг.
+  debtorId   String
+  debtor     User   @relation("DebtDebtor", fields: [debtorId], references: [id])
+  amount     Decimal @db.Decimal(12, 2)
+  /// Валюта. В MVP только RUB — защита от опечаток при вводе.
+  currency   String  @default("RUB")
+  description String?
+  /// Долг по конкретному лоту (опционально).
+  listingId  String?
+  listing    Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  /// Долг по конкретной брони (опционально).
+  bookingId  String?
+  booking    Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  status     DebtStatus @default(active)
+  /// Обоюдное разрешение спора (ADR-010): кто из сторон ПЕРВЫМ нажал
+  /// «Согласен» в статусе disputed. Второе подтверждение другой стороной
+  /// закрывает спор — status → settled.
+  resolveRequestedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  /// Момент погашения (прямой settle или обоюдный resolve).
+  settledAt  DateTime?
+
+  events DebtEvent[]
+
+  @@index([debtorId, status])
+  @@index([creditorId, status])
+  @@index([createdAt])
+  @@map("debts")
+}
+
+/// Append-only журнал изменений долга. Строки только добавляются —
+/// из журнала считается «надёжность оплаты» (репутация v0.5.0, ADR-010).
+model DebtEvent {
+  id        String     @id @default(uuid())
+  debtId    String
+  debt      Debt       @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  /// Кто совершил действие. NULL — системные действия (будущее).
+  actorId   String?
+  actor     User?      @relation(fields: [actorId], references: [id])
+  action    DebtAction
+  /// Дополнительно: причина спора, текст напоминания и т.п.
+  payload   Json?
+  createdAt DateTime   @default(now())
+
+  @@index([debtId])
+  @@index([actorId])
+  @@map("debt_events")
+}
+
+/// Тип in-app уведомления. Совпадает с NOTIFICATION_TYPES из @agromoll/types.
+/// В v0.4.0 только напоминание о долге; подтверждение приёмки — v0.4.0-C.
+enum NotificationType {
+  debt_reminder
+}
+
+/// In-app уведомление (v0.4.0, ADR-010).
+///
+/// Минимальный NotificationsService (ADR-010): запись в БД + push через
+/// FCM, если у пользователя есть токен и настроен ключ сервера.
+/// Уведомления не удаляются — прочитанные помечаются readAt.
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  /// Контекст: id долга, сумма и т.п. — для перехода по тапу.
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt])
+  @@map("notifications")
 }

@@ -206,6 +206,123 @@ export function normalizePhone(input: string): string | null {
   return `+7${digits}`;
 }
 
+// ─── Долги (v0.4.0, ADR-010) ────────────────────────────────────────────────
+
+/** Статусы долга. Совпадают с enum DebtStatus в Prisma-схеме. */
+export const DEBT_STATUSES = ['active', 'settled', 'disputed', 'cancelled'] as const;
+
+export type DebtStatus = (typeof DEBT_STATUSES)[number];
+
+/** Человекочитаемые статусы долга для UI. */
+export const DEBT_STATUS_LABELS: Record<DebtStatus, string> = {
+  active: 'Активен',
+  settled: 'Погашен',
+  disputed: 'Спор',
+  cancelled: 'Аннулирован',
+};
+
+/** Действия журнала долга. Совпадают с enum DebtAction в Prisma-схеме. */
+export const DEBT_ACTIONS = [
+  'created',
+  'settled',
+  'disputed',
+  'cancelled',
+  'reminder_sent',
+  'resolve_requested',
+  'resolve_confirmed',
+] as const;
+
+export type DebtAction = (typeof DEBT_ACTIONS)[number];
+
+/**
+ * Порог просрочки долга: активный долг старше 30 дней считается
+ * просроченным — янтарный акцент в виджете и карточке (ADR-010).
+ */
+export const DEBT_OVERDUE_DAYS = 30;
+
+/**
+ * Долг (DTO уровня API). Платформа не проводит деньги: запись — только
+ * договорённость сторон («товар отпущен в долг», ADR-010).
+ */
+export interface DebtDto {
+  id: string;
+  creditorId: string;
+  creditorName?: string;
+  debtorId: string;
+  debtorName?: string;
+  /** Decimal от Prisma приходит строкой — точность денег не теряется. */
+  amount: string;
+  currency: string;
+  description: string | null;
+  listingId: string | null;
+  bookingId: string | null;
+  status: DebtStatus;
+  /** Активный долг старше DEBT_OVERDUE_DAYS дней. */
+  isOverdue: boolean;
+  /** Кулдаун напоминаний (24 ч) прошёл — кредитор может напомнить. */
+  canRemind: boolean;
+  /** ISO-момент следующего допустимого напоминания; null — можно сразу. */
+  nextReminderAt: string | null;
+  /** Кто из сторон первым подтвердил разрешение спора (обоюдное, ADR-010). */
+  resolveRequestedById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  settledAt: string | null;
+}
+
+/** Часть сводки по долгам: сумма (строкой, Decimal) и количество. */
+export interface DebtsSummaryPart {
+  total: string;
+  count: number;
+  overdueCount: number;
+}
+
+/** Ответ GET /debts/summary — виджет главного экрана. */
+export interface DebtsSummaryDto {
+  /** Мне должны (я кредитор, активные). */
+  owedToMe: DebtsSummaryPart;
+  /** Я должен (я дебитор, активные). */
+  iOwe: DebtsSummaryPart;
+}
+
+/** Контрагент для формы создания долга — с кем уже были сделки. */
+export interface CounterpartyDto {
+  id: string;
+  displayName: string;
+  /** ISO-дата последней сделки (брони). */
+  lastDealAt: string;
+}
+
+/** Ответ POST /debts/:id/reminder. */
+export interface ReminderResultDto {
+  sentAt: string;
+  nextReminderAt: string;
+}
+
+// ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
+
+/** Типы in-app уведомлений. Совпадают с enum NotificationType в Prisma-схеме. */
+export const NOTIFICATION_TYPES = ['debt_reminder'] as const;
+
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/** In-app уведомление (DTO уровня API). */
+export interface NotificationDto {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** Ответ GET /notifications/me. */
+export interface NotificationsListDto {
+  items: NotificationDto[];
+  unreadCount: number;
+}
+
 /**
  * Маскированный телефон для логов и UI: +7***1234
  * (код страны, три звёздочки, последние 4 цифры).

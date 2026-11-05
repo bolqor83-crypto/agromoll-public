@@ -17,7 +17,7 @@
  */
 import { create } from 'zustand';
 import { AppState } from 'react-native';
-import type { BookingStatus } from '@agromoll/types';
+import type { BookingStatus, DebtStatus } from '@agromoll/types';
 import { success, warning } from '@agromoll/ui';
 import type { OutboxEvent, OutboxRecord } from '@/lib/outbox/types';
 import { getOutbox } from '@/lib/outbox/outbox-instance';
@@ -38,6 +38,21 @@ export interface StatusOverride {
   clientUuid: string;
 }
 
+/** Псевдо-карточка долга, созданного офлайн (v0.4.0, до ответа сервера). */
+export interface PendingDebtCreate {
+  debtorId: string;
+  debtorName?: string;
+  amount: number;
+  description?: string;
+  createdAt: string;
+}
+
+/** Локальный override статуса существующего долга (v0.4.0). */
+export interface DebtStatusOverride {
+  status: DebtStatus;
+  clientUuid: string;
+}
+
 interface OutboxState {
   isOnline: boolean;
   syncing: boolean;
@@ -47,12 +62,18 @@ interface OutboxState {
   conflictedOperation: (OutboxRecord & { message: string }) | null;
   pendingCreates: Record<string, PendingCreate>;
   overrides: Record<string, StatusOverride>;
+  /** Долги (v0.4.0): оптимистичные состояния до подтверждения сервером. */
+  pendingDebtCreates: Record<string, PendingDebtCreate>;
+  debtOverrides: Record<string, DebtStatusOverride>;
 
   refreshQueue: () => Promise<void>;
   runSync: () => Promise<void>;
   addPendingCreate: (clientUuid: string, create: PendingCreate) => void;
   setOverride: (bookingId: string, status: BookingStatus, clientUuid: string) => void;
   applyServerBookingStatus: (booking: { id: string; status: BookingStatus }) => void;
+  addPendingDebtCreate: (clientUuid: string, create: PendingDebtCreate) => void;
+  setDebtOverride: (debtId: string, status: DebtStatus, clientUuid: string) => void;
+  applyServerDebtStatus: (debt: { id: string }) => void;
   resolveConflict: (resolution: 'accept-server' | 'discard-local') => Promise<void>;
   retryOperation: (clientUuid: string) => Promise<void>;
   handleOutboxEvent: (event: OutboxEvent) => void;
@@ -67,6 +88,8 @@ export const useOutboxStore = create<OutboxState>((set, get) => ({
   conflictedOperation: null,
   pendingCreates: {},
   overrides: {},
+  pendingDebtCreates: {},
+  debtOverrides: {},
 
   refreshQueue: async () => {
     try {
@@ -116,6 +139,32 @@ export const useOutboxStore = create<OutboxState>((set, get) => ({
     }));
   },
 
+  addPendingDebtCreate: (clientUuid, create) => {
+    set((s) => ({
+      pendingDebtCreates: { ...s.pendingDebtCreates, [clientUuid]: create },
+      pendingCount: s.pendingCount + 1,
+    }));
+  },
+
+  setDebtOverride: (debtId, status, clientUuid) => {
+    set((s) => ({
+      debtOverrides: { ...s.debtOverrides, [debtId]: { status, clientUuid } },
+      pendingCount: s.pendingCount + 1,
+    }));
+  },
+
+  /** Сервер подтвердил долг — убираем оптимистичный override. */
+  applyServerDebtStatus: (debt) => {
+    set((s) => {
+      if (!s.debtOverrides[debt.id]) {
+        return s;
+      }
+      const debtOverrides = { ...s.debtOverrides };
+      delete debtOverrides[debt.id];
+      return { ...s, debtOverrides };
+    });
+  },
+
   /** Серверная бронь подтверждена — убираем оптимистичный override. */
   applyServerBookingStatus: (booking) => {
     set((s) => {
@@ -141,16 +190,26 @@ export const useOutboxStore = create<OutboxState>((set, get) => ({
         // убрать конфликт и связанные оптимистичные состояния
         const pendingCreates = { ...s.pendingCreates };
         delete pendingCreates[conflicted.clientUuid];
+        const pendingDebtCreates = { ...s.pendingDebtCreates };
+        delete pendingDebtCreates[conflicted.clientUuid];
         const overrides: Record<string, StatusOverride> = {};
         for (const [bookingId, override] of Object.entries(s.overrides)) {
           if (override.clientUuid !== conflicted.clientUuid) {
             overrides[bookingId] = override;
           }
         }
+        const debtOverrides: Record<string, DebtStatusOverride> = {};
+        for (const [debtId, override] of Object.entries(s.debtOverrides)) {
+          if (override.clientUuid !== conflicted.clientUuid) {
+            debtOverrides[debtId] = override;
+          }
+        }
         return {
           conflictedOperation: null,
           pendingCreates,
+          pendingDebtCreates,
           overrides,
+          debtOverrides,
           version: resolution === 'accept-server' ? s.version + 1 : s.version,
         };
       });
@@ -172,13 +231,21 @@ export const useOutboxStore = create<OutboxState>((set, get) => ({
         set((s) => {
           const pendingCreates = { ...s.pendingCreates };
           delete pendingCreates[record.clientUuid];
+          const pendingDebtCreates = { ...s.pendingDebtCreates };
+          delete pendingDebtCreates[record.clientUuid];
           const overrides: Record<string, StatusOverride> = {};
           for (const [bookingId, override] of Object.entries(s.overrides)) {
             if (override.clientUuid !== record.clientUuid) {
               overrides[bookingId] = override;
             }
           }
-          return { pendingCreates, overrides, version: s.version + 1 };
+          const debtOverrides: Record<string, DebtStatusOverride> = {};
+          for (const [debtId, override] of Object.entries(s.debtOverrides)) {
+            if (override.clientUuid !== record.clientUuid) {
+              debtOverrides[debtId] = override;
+            }
+          }
+          return { pendingCreates, pendingDebtCreates, overrides, debtOverrides, version: s.version + 1 };
         });
         void get().refreshQueue();
         break;

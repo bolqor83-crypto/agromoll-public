@@ -1,6 +1,6 @@
 /**
- * Карта «тип операции → эндпоинт» (v0.3.0).
- * Совпадает с @Idempotent-разметкой на сервере (bookings.controller.ts).
+ * Карта «тип операции → эндпоинт» (v0.3.0; долги — v0.4.0).
+ * Совпадает с @Idempotent-разметкой на сервере (bookings/debts.controller.ts).
  */
 import type { OutboxOperationType } from './types';
 
@@ -27,6 +27,18 @@ export const IDEMPOTENCY_ENDPOINTS: Record<OutboxOperationType, OutboxEndpoint> 
     method: 'POST',
     url: (p) => `/bookings/${String(p.bookingId)}/accept-counter`,
   },
-  create_debt: { method: 'POST', url: '/debts' }, // будущее ядро долгов (v0.4+)
+  create_debt: { method: 'POST', url: '/debts' }, // v0.4.0 (ADR-010)
   confirm_delivery: { method: 'POST', url: '/deliveries/confirm' }, // будущее (v0.4+)
+  settle_debt: {
+    method: 'POST',
+    url: (p) => `/debts/${String(p.debtId)}/settle`,
+  },
+  dispute_debt: {
+    method: 'POST',
+    url: (p) => `/debts/${String(p.debtId)}/dispute`,
+  },
+  resolve_debt: {
+    method: 'POST',
+    url: (p) => `/debts/${String(p.debtId)}/resolve`,
+  },
 };

@@ -8,7 +8,9 @@ import {
   CancelBookingSchema,
   CounterOfferSchema,
   CreateBookingSchema,
+  CreateDebtSchema,
   CreateListingSchema,
+  DebtResponseSchema,
   ErrorResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
@@ -105,14 +107,84 @@ describe('@agromoll/validation', () => {
     expect(CounterOfferSchema.safeParse({ pickupTime: 'после 9:00' }).success).toBe(true);
   });
 
-  it('CancelBookingSchema — только необязательная причина', () => {
+  it('CancelBookingSchema — только необязательная причина; лишние ключи стрипаются', () => {
     expect(CancelBookingSchema.safeParse({}).success).toBe(true);
     expect(CancelBookingSchema.safeParse({ reason: 'не успел доехать' }).success).toBe(true);
-    expect(CancelBookingSchema.safeParse({ other: true }).success).toBe(false);
+    // Мобильный outbox шлёт весь payload операции: { bookingId, reason }.
+    // bookingId живёт в URL — сервер его просто выкидывает (не strict,
+    // v0.4.0: strict ломал отмену с реального клиента 400-й).
+    const withBookingId = CancelBookingSchema.safeParse({
+      bookingId: 'b-1',
+      reason: 'не успел доехать',
+    });
+    expect(withBookingId.success).toBe(true);
+    if (withBookingId.success) {
+      expect(withBookingId.data).toEqual({ reason: 'не успел доехать' });
+    }
+    // Слишком длинная причина — по-прежнему ошибка.
+    expect(CancelBookingSchema.safeParse({ reason: 'а'.repeat(501) }).success).toBe(false);
   });
 
   it('BookingStatusSchema отклоняет неизвестный статус', () => {
     expect(BookingStatusSchema.safeParse('pending').success).toBe(false);
+  });
+
+  describe('CreateDebtSchema (v0.4.0)', () => {
+    const debtorId = '5f8d3f3a-2b4e-4f6a-9c1d-222222222222';
+
+    it('принимает валидное тело и подставляет RUB по умолчанию', () => {
+      const parsed = CreateDebtSchema.safeParse({ debtorId, amount: 12500 });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.currency).toBe('RUB');
+        expect(parsed.data.amount).toBe(12500);
+      }
+    });
+
+    it('сумма — строкой тоже проходит (coerce), границы и копейки — нет', () => {
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: '4200.50' }).success).toBe(true);
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: 0 }).success).toBe(false);
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: -5 }).success).toBe(false);
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: 1_000_001 }).success).toBe(false);
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: 100.123 }).success).toBe(false);
+    });
+
+    it('валюта — только RUB; мусорные ключи — 400 (strict)', () => {
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: 100, currency: 'USD' }).success).toBe(
+        false,
+      );
+      expect(
+        CreateDebtSchema.safeParse({ debtorId, amount: 100, unknownField: 1 }).success,
+      ).toBe(false);
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: 100, listingId: 'не-uuid' }).success).toBe(
+        false,
+      );
+    });
+  });
+
+  it('DebtResponseSchema принимает валидный долг (v0.4.0)', () => {
+    const debt = {
+      id: 'debt-1',
+      creditorId: 'u-1',
+      creditorName: 'ФХ «Донская долина»',
+      debtorId: 'u-2',
+      debtorName: 'Ларёк «У Ашота»',
+      amount: '12500.00',
+      currency: 'RUB',
+      description: null,
+      listingId: null,
+      bookingId: null,
+      status: 'active',
+      isOverdue: false,
+      canRemind: true,
+      nextReminderAt: null,
+      resolveRequestedById: null,
+      createdAt: '2026-11-07T06:00:00.000Z',
+      updatedAt: '2026-11-07T06:00:00.000Z',
+      settledAt: null,
+    };
+    expect(DebtResponseSchema.safeParse(debt).success).toBe(true);
+    expect(DebtResponseSchema.safeParse({ ...debt, amount: 12500 }).success).toBe(false);
   });
 
   describe('схемы ответов API (v0.3.0)', () => {

@@ -2,9 +2,12 @@ import { z } from 'zod';
 import {
   BOOKING_ACTIONS,
   BOOKING_STATUSES,
+  DEBT_ACTIONS,
+  DEBT_STATUSES,
   LISTING_CATEGORIES,
   LISTING_STATUSES,
   LISTING_UNITS,
+  NOTIFICATION_TYPES,
   USER_ROLES,
   normalizePhone,
 } from '@agromoll/types';
@@ -85,12 +88,18 @@ export const CounterOfferSchema = z
 
 export type CounterOfferInput = z.infer<typeof CounterOfferSchema>;
 
-/** Отмена брони: POST /bookings/:id/cancel (любая сторона). */
-export const CancelBookingSchema = z
-  .object({
-    reason: z.string().trim().max(500).optional(),
-  })
-  .strict();
+/**
+ * Отмена брони: POST /bookings/:id/cancel (любая сторона).
+ *
+ * Схема НЕ strict: мобильный outbox шлёт в теле весь payload операции
+ * ({ bookingId, reason? }) — bookingId лишний на этом эндпоинте (id в URL),
+ * поэтому просто strip-ается. strict-режим здесь ломал бы отмену с реального
+ * клиента (400 «Unrecognized key: bookingId»), при этом e2e с «чистым»
+ * телом { reason } баг не ловил — тесты ходят напрямую, мимо outbox.
+ */
+export const CancelBookingSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
 
 export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
 
@@ -162,6 +171,55 @@ export const UpdateRoleSchema = z
   .strict();
 
 export type UpdateRoleInput = z.infer<typeof UpdateRoleSchema>;
+
+// ─── Долги (v0.4.0, ADR-010) ───────────────────────────────────────────────
+
+export const DebtStatusSchema = z.enum(DEBT_STATUSES);
+export const DebtActionSchema = z.enum(DEBT_ACTIONS);
+export const NotificationTypeSchema = z.enum(NOTIFICATION_TYPES);
+
+/** Максимальная сумма долга: защита от опечаток (ADR-010). */
+export const DEBT_MAX_AMOUNT = 1_000_000;
+
+/**
+ * Создание долга: POST /debts (кредитор, любая роль — дать в долг может
+ * каждый участник рынка, ADR-010).
+ */
+export const CreateDebtSchema = z
+  .object({
+    debtorId: z.string().uuid('Выберите контрагента'),
+    /** Сумма в рублях: > 0 и ≤ 1 000 000 (защита от опечаток). */
+    amount: z.coerce
+      .number()
+      .positive('Сумма должна быть положительной')
+      .max(DEBT_MAX_AMOUNT, 'Сумма не может превышать 1 000 000 ₽')
+      .refine((value) => Math.round(value * 100) === value * 100, {
+        message: 'Максимум две цифры после запятой (копейки)',
+      }),
+    /** В MVP только рубли — единая валюта рынка. */
+    currency: z
+      .enum(['RUB'], { errorMap: () => ({ message: 'Долги учитываются только в рублях' }) })
+      .optional()
+      .default('RUB'),
+    description: z.string().trim().max(500, 'Описание слишком длинное').optional(),
+    listingId: z.string().uuid().optional(),
+    bookingId: z.string().uuid().optional(),
+  })
+  .strict();
+
+export type CreateDebtInput = z.infer<typeof CreateDebtSchema>;
+
+/**
+ * Спор по долгу: POST /debts/:id/dispute (любая сторона).
+ * Причина опциональна — контекст для журнала DebtEvent.
+ * НЕ strict: outbox шлёт { debtId, reason? } — debtId strip-ается
+ * (id живёт в URL), см. примечание у CancelBookingSchema.
+ */
+export const DisputeDebtSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
+export type DisputeDebtInput = z.infer<typeof DisputeDebtSchema>;
 
 // ─── Схемы ответов API (v0.3.0, подэтап C) ─────────────────────────────────
 //
@@ -265,6 +323,95 @@ export const RequestCodeResponseSchema = z
   })
   .passthrough();
 
+/** Ответ эндпоинтов долгов (v0.4.0): Decimal — строкой. */
+export const DebtResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    creditorId: z.string().min(1),
+    creditorName: z.string().optional(),
+    debtorId: z.string().min(1),
+    debtorName: z.string().optional(),
+    amount: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Сумму ждём строкой вида «12500.00»'),
+    currency: z.string().min(1),
+    description: z.string().nullable(),
+    listingId: z.string().nullable(),
+    bookingId: z.string().nullable(),
+    status: DebtStatusSchema,
+    isOverdue: z.boolean(),
+    canRemind: z.boolean(),
+    nextReminderAt: IsoDateString.nullable(),
+    resolveRequestedById: z.string().nullable(),
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+    settledAt: IsoDateString.nullable(),
+  })
+  .passthrough();
+
+export type DebtResponse = z.infer<typeof DebtResponseSchema>;
+
+/** Ответ GET /debts (мои долги обеих сторон). */
+export const DebtsResponseSchema = z.array(DebtResponseSchema);
+
+/** Часть сводки: сумма строкой + счётчики. */
+const DebtsSummaryPartSchema = z.object({
+  total: z.string().regex(/^\d+(\.\d{1,2})?$/),
+  count: z.number().int().nonnegative(),
+  overdueCount: z.number().int().nonnegative(),
+});
+
+/** Ответ GET /debts/summary (виджет главного экрана). */
+export const DebtsSummaryResponseSchema = z
+  .object({
+    owedToMe: DebtsSummaryPartSchema,
+    iOwe: DebtsSummaryPartSchema,
+  })
+  .passthrough();
+
+export type DebtsSummaryResponse = z.infer<typeof DebtsSummaryResponseSchema>;
+
+/** Ответ GET /debts/counterparties (с кем были сделки). */
+export const CounterpartiesResponseSchema = z.array(
+  z
+    .object({
+      id: z.string().min(1),
+      displayName: z.string().min(1),
+      lastDealAt: IsoDateString,
+    })
+    .passthrough(),
+);
+
+/** Ответ POST /debts/:id/reminder. */
+export const ReminderResponseSchema = z
+  .object({
+    sentAt: IsoDateString,
+    nextReminderAt: IsoDateString,
+  })
+  .passthrough();
+
+export type ReminderResponse = z.infer<typeof ReminderResponseSchema>;
+
+/** Ответ GET /notifications/me (v0.4.0). */
+export const NotificationsListResponseSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          type: NotificationTypeSchema,
+          title: z.string().min(1),
+          body: z.string().min(1),
+          data: z.record(z.unknown()).nullable(),
+          readAt: IsoDateString.nullable(),
+          createdAt: IsoDateString,
+        })
+        .passthrough(),
+    ),
+    unreadCount: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+export type NotificationsListResponse = z.infer<typeof NotificationsListResponseSchema>;
+
 /**
  * Форма ошибки API (NestJS ExceptionFilter): message может быть строкой
  * или массивом (ValidationPipe), code — наш доменный код.
@@ -291,6 +438,13 @@ export const apiEnvSchema = z.object({
     .positive()
     .max(24 * 60)
     .default(30),
+  /** Кулдаун напоминаний о долге в часах (ADR-010). */
+  DEBT_REMINDER_COOLDOWN_HOURS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(24 * 7)
+    .default(24),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

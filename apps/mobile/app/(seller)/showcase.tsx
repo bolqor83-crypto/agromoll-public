@@ -15,6 +15,7 @@ import {
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { ScreenHeader } from '@/components';
+import { DebtSummaryWidget } from '@/components/DebtSummaryWidget';
 import { ListingCard } from '@/components/ListingCard';
 import { CreateListingModal } from '@/components/CreateListingModal';
 import { api, isInvalidResponseError } from '@/lib/api';
@@ -77,6 +78,10 @@ export default function ShowcaseScreen() {
           )
         }
       />
+      {/* Виджет долгов (v0.4.0): «Вам должны / Вы должны», янтарный при просрочке. */}
+      <View style={{ paddingHorizontal: spacing.lg }}>
+        <DebtSummaryWidget />
+      </View>
       {state.phase === 'loading' ? (
         <View style={{ gap: spacing.md }}>
           <SkeletonCard />
