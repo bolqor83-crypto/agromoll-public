@@ -28,7 +28,11 @@ import {
   NestInterceptor,
   SetMetadata,
 } from '@nestjs/common';
-import type { Reflector } from '@nestjs/core';
+// ВАЖНО: value-import, а не `import type` — Reflector участвует в DI
+// (constructor(reflector: Reflector)). Type-only import стирает класс
+// в рантайме, reflect-metadata видит design:type = Function, и Nest
+// падает на компиляции модуля: «argument Function at index [1]».
+import { Reflector } from '@nestjs/core';
 import type { Response } from 'express';
 import { catchError, from, mergeMap, of } from 'rxjs';
 import { Prisma } from '@prisma/client';

@@ -77,6 +77,11 @@ jobs:
         run: pnpm turbo run test
 
       - name: Test e2e (api, реальный Postgres + PostGIS + Redis)
+        # timeout — страховка от «утёкших» соединений (обрыв компиляции
+        # модуля до app.close() оставляет открытыми ioredis/Prisma —
+        # процесс jest тогда не выходит; forceExit в скрипте закрывает
+        # штатные прогоны, таймаут ловит всё остальное).
+        timeout-minutes: 15
         run: pnpm --filter @agromoll/api test:e2e
 
       - name: Валидация docker-compose
