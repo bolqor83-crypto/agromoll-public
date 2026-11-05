@@ -10,7 +10,9 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type { UserRole } from '@agromoll/types';
-import type { PrismaService } from '../prisma/prisma.service';
+// ВАЖНО: обычный import (не `import type`) — Nest-инъекция PrismaService
+// требует runtime-метаданных design:paramtypes.
+import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from './auth.types';
 
 /** Запрос с прикреплённым пользователем. */
