@@ -77,7 +77,10 @@ describe('Booking flow (e2e, HTTP)', () => {
     // 2. Покупатель видит лот в ленте
     const feed = await request(app.getHttpServer()).get('/listings').expect(200);
     expect(feed.body).toHaveLength(1);
-    expect(feed.body[0]).toMatchObject({ id: listingId, sellerName: 'Участник +7***' });
+    expect(feed.body[0]).toMatchObject({
+      id: listingId,
+      sellerName: expect.stringMatching(/^Участник \+7\*\*\*\d{4}$/),
+    });
 
     // 3. Покупатель бронирует 20 кг
     const booking = await buyerPost('/bookings')

@@ -11,6 +11,7 @@ import { ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AuthModule } from '../src/auth/auth.module';
 import { BookingsModule } from '../src/bookings/bookings.module';
 import { BookingsService } from '../src/bookings/bookings.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
@@ -26,7 +27,7 @@ describe('Booking reservation (e2e, сервисный уровень)', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, BookingsModule],
+      imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, BookingsModule],
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
