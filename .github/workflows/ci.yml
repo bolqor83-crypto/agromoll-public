@@ -12,10 +12,26 @@ concurrency:
 
 jobs:
   quality:
-    name: lint / typecheck / test / build
+    name: lint / typecheck / test / e2e / build
     runs-on: ubuntu-latest
     env:
       EXPO_NO_TELEMETRY: '1'
+      # e2e-тесты api работают с реальной БД (service-контейнер ниже).
+      DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: agromoll
+          POSTGRES_PASSWORD: agromoll
+          POSTGRES_DB: agromoll
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agromoll -d agromoll"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,6 +51,9 @@ jobs:
       - name: Prisma Client (db:generate)
         run: pnpm turbo run db:generate
 
+      - name: Миграции к БД service-контейнера (e2e)
+        run: pnpm --filter @agromoll/api exec prisma migrate deploy
+
       - name: Build
         run: pnpm turbo run build
 
@@ -44,8 +63,11 @@ jobs:
       - name: Typecheck
         run: pnpm turbo run typecheck
 
-      - name: Test
+      - name: Test (unit)
         run: pnpm turbo run test
+
+      - name: Test e2e (api, реальный Postgres + PostGIS)
+        run: pnpm --filter @agromoll/api test:e2e
 
       - name: Валидация docker-compose
         run: docker compose config -q
@@ -53,6 +75,8 @@ jobs:
   stack:
     name: docker compose (postgres + postgis + redis)
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,10 +96,20 @@ jobs:
       - name: Поднимаем стек и ждём healthcheck
         run: docker compose up -d --wait
 
-      - name: Применяем миграции (создание PostGIS + таблицы users)
+      - name: Применяем миграции (PostGIS + модель бронирования)
         run: pnpm --filter @agromoll/api exec prisma migrate deploy
-        env:
-          DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
+
+      - name: Миграции в точности соответствуют schema.prisma
+        run: |
+          DIFF=$(pnpm --filter @agromoll/api exec prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel apps/api/prisma/schema.prisma \
+            --script)
+          echo "$DIFF"
+          if echo "$DIFF" | grep -qE 'CREATE|ALTER|DROP'; then
+            echo "::error::Миграции не соответствуют schema.prisma — применён diff выше"
+            exit 1
+          fi
 
       - name: PostGIS установлен
         run: docker compose exec -T postgres psql -U agromoll -d agromoll -t -c "SELECT postgis_version();"

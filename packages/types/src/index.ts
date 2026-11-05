@@ -17,6 +17,126 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   driver: 'Доставщик',
 };
 
+/** Категории товаров. Совпадают с enum ListingCategory в Prisma-схеме. */
+export const LISTING_CATEGORIES = ['vegetables', 'fruits', 'grocery', 'snacks', 'other'] as const;
+
+export type ListingCategory = (typeof LISTING_CATEGORIES)[number];
+
+export const LISTING_CATEGORY_LABELS: Record<ListingCategory, string> = {
+  vegetables: 'Овощи',
+  fruits: 'Фрукты',
+  grocery: 'Бакалея',
+  snacks: 'Снеки',
+  other: 'Другое',
+};
+
+/** Единицы измерения товара. Совпадают с enum ListingUnit в Prisma-схеме. */
+export const LISTING_UNITS = ['kg', 'box', 'piece'] as const;
+
+export type ListingUnit = (typeof LISTING_UNITS)[number];
+
+export const LISTING_UNIT_LABELS: Record<ListingUnit, string> = {
+  kg: 'кг',
+  box: 'ящик',
+  piece: 'шт',
+};
+
+/** Статусы листинга. Совпадают с enum ListingStatus в Prisma-схеме. */
+export const LISTING_STATUSES = ['active', 'paused', 'sold_out', 'archived'] as const;
+
+export type ListingStatus = (typeof LISTING_STATUSES)[number];
+
+export const LISTING_STATUS_LABELS: Record<ListingStatus, string> = {
+  active: 'Активен',
+  paused: 'На паузе',
+  sold_out: 'Продано',
+  archived: 'В архиве',
+};
+
+/** Статусы брони. Совпадают с enum BookingStatus в Prisma-схеме. */
+export const BOOKING_STATUSES = [
+  'requested',
+  'counter_offered',
+  'confirmed',
+  'cancelled',
+  'expired',
+] as const;
+
+export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+
+/**
+ * Человекочитаемые статусы брони для UI.
+ * «Уточняется» — продавец предложил корректировку, ждём решения покупателя.
+ */
+export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
+  requested: 'Запрошено',
+  counter_offered: 'Уточняется',
+  confirmed: 'Подтверждено',
+  cancelled: 'Отменено',
+  expired: 'Истекло',
+};
+
+/** Действия журнала брони. Совпадают с enum BookingAction в Prisma-схеме. */
+export const BOOKING_ACTIONS = [
+  'created',
+  'counter_offered',
+  'accepted_counter',
+  'confirmed',
+  'cancelled',
+  'expired',
+] as const;
+
+export type BookingAction = (typeof BOOKING_ACTIONS)[number];
+
+/**
+ * Лот продавца (DTO уровня API, без служебных полей БД).
+ * Decimal из Prisma приходит строкой — сохраняем её как есть и парсим в UI.
+ */
+export interface ListingDto {
+  id: string;
+  sellerId: string;
+  sellerName?: string;
+  title: string;
+  category: ListingCategory;
+  unit: ListingUnit;
+  pricePerUnit: string;
+  quantityAvailable: number;
+  quantityReserved: number;
+  /** Свободно к бронированию = quantityAvailable − quantityReserved. */
+  quantityAvailableForBooking: number;
+  lineNumber: number | null;
+  isPerishable: boolean;
+  status: ListingStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Бронь покупателя (DTO уровня API). */
+export interface BookingDto {
+  id: string;
+  listingId: string;
+  listingTitle?: string;
+  listingUnit?: ListingUnit;
+  buyerId: string;
+  buyerName?: string;
+  requestedQuantity: number;
+  confirmedQuantity: number | null;
+  status: BookingStatus;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Событие append-only журнала брони (DTO уровня API). */
+export interface BookingEventDto {
+  id: string;
+  bookingId: string;
+  actorId: string | null;
+  action: BookingAction;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 /** Ответ healthcheck-эндпоинта API (`GET /health`). */
 export interface HealthResponse {
   status: 'ok' | 'error';
