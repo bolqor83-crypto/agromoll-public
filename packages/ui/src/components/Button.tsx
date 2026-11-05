@@ -1,110 +1,111 @@
-import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import type { DimensionValue } from 'react-native';
+/**
+ * Button — главная кнопка дизайн-системы.
+ *
+ * iOS-like: pill-форма, мягкая заливка, тактильный spring-отклик (200–300 мс).
+ * Минимальная высота — 48 px (размер md), основная — 56 px (lg).
+ */
+import { useCallback } from 'react';
+import type { ReactNode } from 'react';
+import { ActivityIndicator, Pressable } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-
-import { useTheme } from '../theme/ThemeContext';
-import { spacing } from '../tokens';
+import { useTheme } from '../theme';
+import { motion, radius, spacing, touchTarget } from '../tokens';
 import { Text } from './Text';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
-export type ButtonSize = 'lg' | 'md';
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export interface ButtonProps {
-  label: string;
+  title: string;
   onPress?: () => void;
-  variant?: ButtonVariant;
-  size?: ButtonSize;
+  /** primary — зелёная заливка; secondary — мягкая зелёная; ghost — прозрачная с рамкой. */
+  variant?: 'primary' | 'secondary' | 'ghost';
+  /** lg — 56 px (основное действие), md — 48 px (минимальная зона нажатия). */
+  size?: 'md' | 'lg';
   disabled?: boolean;
   loading?: boolean;
-  /** Занять всю ширину контейнера. По умолчанию true — очевидное действие на экране. */
-  block?: boolean;
-  testID?: string;
+  iconLeft?: ReactNode;
+  style?: StyleProp<ViewStyle>;
 }
 
-/** Spring-конфигурация нажатия: короткая (~200 мс) и «упругая», без отскока. */
-const PRESS_SPRING = { damping: 18, stiffness: 380, mass: 0.9 } as const;
-
-/**
- * Кнопка. Зоны нажатия: lg — 56 px, md — 48 px (минимум по дизайн-системе,
- * чтобы попадать пальцем в перчатке на бегу).
- */
 export function Button({
-  label,
+  title,
   onPress,
   variant = 'primary',
   size = 'lg',
   disabled = false,
   loading = false,
-  block = true,
-  testID,
+  iconLeft,
+  style,
 }: ButtonProps) {
-  const { colors, radius } = useTheme();
+  const { colors } = useTheme();
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
-  const height = size === 'lg' ? 56 : 48;
+  const handlePressIn = useCallback(() => {
+    scale.value = withSpring(0.97, motion.pressSpring);
+  }, [scale]);
 
-  const variantStyles = {
-    primary: { backgroundColor: colors.primary },
-    secondary: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border },
-    ghost: { backgroundColor: 'transparent' },
-  }[variant];
+  const handlePressOut = useCallback(() => {
+    scale.value = withSpring(1, motion.pressSpring);
+  }, [scale]);
 
-  const labelColor =
-    variant === 'primary' ? colors.onPrimary : variant === 'ghost' ? colors.primary : colors.text;
-
-  const handlePressIn = () => {
-    scale.value = withSpring(0.97, PRESS_SPRING);
-  };
-  const handlePressOut = () => {
-    scale.value = withSpring(1, PRESS_SPRING);
-  };
+  const height = size === 'lg' ? 56 : touchTarget.min;
+  const backgroundColor =
+    variant === 'primary'
+      ? colors.primary
+      : variant === 'secondary'
+        ? colors.primaryMuted
+        : 'transparent';
+  const labelColor: 'onPrimary' | 'primary' | 'text' =
+    variant === 'primary' ? 'onPrimary' : variant === 'secondary' ? 'primary' : 'text';
+  const indicatorColor =
+    variant === 'primary'
+      ? colors.onPrimary
+      : variant === 'secondary'
+        ? colors.primary
+        : colors.text;
 
   return (
-    <View style={{ width: (block ? '100%' : 'auto') as DimensionValue }}>
-      <Pressable
-        testID={testID}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        disabled={disabled || loading}
-        onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-      >
-        <Animated.View
-          style={[
-            styles.base,
-            {
-              height,
-              borderRadius: radius.md,
-              opacity: disabled ? 0.45 : 1,
-            },
-            variantStyles,
-            animatedStyle,
-          ]}
-        >
-          {loading ? (
-            <ActivityIndicator color={labelColor} />
-          ) : (
-            <Text variant="button" style={{ color: labelColor }}>
-              {label}
-            </Text>
-          )}
-        </Animated.View>
-      </Pressable>
-    </View>
+    <AnimatedPressable
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled, busy: loading }}
+      style={[
+        animatedStyle,
+        {
+          height,
+          borderRadius: radius.pill,
+          backgroundColor: disabled ? colors.border : backgroundColor,
+          borderWidth: variant === 'ghost' ? 1 : 0,
+          borderColor: colors.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          paddingHorizontal: spacing.xl,
+          opacity: disabled ? 0.6 : 1,
+        },
+        style,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={indicatorColor} />
+      ) : (
+        <>
+          {iconLeft}
+          <Text variant="button" color={labelColor}>
+            {title}
+          </Text>
+        </>
+      )}
+    </AnimatedPressable>
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
-  },
-});
