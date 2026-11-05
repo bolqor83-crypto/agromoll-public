@@ -1,12 +1,17 @@
 /**
- * Синглтон outbox: SQLite-хранилище + HTTP-транспорт (v0.3.0).
+ * Синглтон outbox: хранилище + HTTP-транспорт (v0.3.0).
  *
- * Инициализация ленивая: SQLite недоступен в jest-окружении, поэтому
- * в тестах сервис создаётся напрямую с in-memory хранилищем и мок-транспортом.
+ * Хранилище выбирается по платформе:
+ *  - iOS/Android — expo-sqlite (динамический импорт: у expo-sqlite в
+ *    SDK 52 нет web-реализации, статический импорт ломает web-экспорт);
+ *  - web — localStorage (платформа демо и разработки, см. ADR-006).
+ *
+ * В тестах сервис создаётся напрямую с in-memory хранилищем.
  */
+import { Platform } from 'react-native';
 import { OutboxService } from './outbox-service';
-import { createSqliteOutboxStorage } from './sqlite-storage';
 import { httpOutboxTransport } from './transport';
+import type { OutboxStorage } from './types';
 
 let instance: OutboxService | null = null;
 let initPromise: Promise<OutboxService> | null = null;
@@ -17,7 +22,14 @@ export function getOutbox(): Promise<OutboxService> {
     return Promise.resolve(instance);
   }
   initPromise ??= (async () => {
-    const storage = await createSqliteOutboxStorage();
+    let storage: OutboxStorage;
+    if (Platform.OS === 'web') {
+      const { createLocalStorageOutboxStorage } = await import('./local-storage');
+      storage = createLocalStorageOutboxStorage();
+    } else {
+      const { createSqliteOutboxStorage } = await import('./sqlite-storage');
+      storage = await createSqliteOutboxStorage();
+    }
     instance = new OutboxService(storage, httpOutboxTransport);
     return instance;
   })();

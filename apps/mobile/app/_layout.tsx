@@ -16,13 +16,6 @@ function AppShell() {
   const { mode } = useTheme();
   const router = useRouter();
   const status = useAuthStore((s) => s.status);
-  const bootstrap = useAuthStore((s) => s.bootstrap);
-
-  // При старте: refresh-токен есть → пробуем refresh и профиль;
-  // нет → экран входа. Гейт рисует заглушку, пока статус booting.
-  useEffect(() => {
-    void bootstrap();
-  }, [bootstrap]);
 
   // Сессия сгорела (refresh не удался в интерцепторе) — на вход.
   useEffect(() => {
@@ -30,25 +23,6 @@ function AppShell() {
       router.replace('/auth');
     }
   }, [status, router]);
-
-  // Интерцептор axios сказал «разлогинь» — слушаем один раз.
-  useEffect(() => listenForcedSignOut(), []);
-
-  // Офлайн-ядро: события очереди, сеть (NetInfo), передний план (AppState).
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    void initOutboxBridge().then((fn) => {
-      cleanup = fn;
-    });
-    return () => cleanup?.();
-  }, []);
-
-  useEffect(() => {
-    logger.info('app', 'приложение запущено', {
-      version: Constants.expoConfig?.version ?? 'unknown',
-      sdk: String(Constants.expoConfig?.sdkVersion ?? 'unknown'),
-    });
-  }, []);
 
   return (
     <>
@@ -76,6 +50,33 @@ export default function RootLayout() {
   const setting = useThemeStore((s) => s.setting);
   const setSetting = useThemeStore((s) => s.setSetting);
   const status = useAuthStore((s) => s.status);
+  const bootstrap = useAuthStore((s) => s.bootstrap);
+
+  // Инициализация живёт ЗДЕСЬ, а не в AppShell: пока статус booting,
+  // рендерится BootSplash и эффекты AppShell не выполнялись бы — дедлок.
+  // При старте: refresh-токен есть → пробуем refresh и профиль; нет → вход.
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  // Интерцептор axios сказал «разлогинь» — слушаем один раз.
+  useEffect(() => listenForcedSignOut(), []);
+
+  // Офлайн-ядро: события очереди, сеть (NetInfo), передний план (AppState).
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    void initOutboxBridge().then((fn) => {
+      cleanup = fn;
+    });
+    return () => cleanup?.();
+  }, []);
+
+  useEffect(() => {
+    logger.info('app', 'приложение запущено', {
+      version: Constants.expoConfig?.version ?? 'unknown',
+      sdk: String(Constants.expoConfig?.sdkVersion ?? 'unknown'),
+    });
+  }, []);
 
   return (
     <SafeAreaProvider>
