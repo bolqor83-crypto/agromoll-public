@@ -1,6 +1,6 @@
 {
   "name": "@agromoll/mobile",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "Мобильное приложение АгроМолл (Expo Router). Этап «фундамент»: экраны-заглушки.",
   "main": "expo-router/entry",
