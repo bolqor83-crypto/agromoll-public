@@ -57,7 +57,12 @@ export type IdempotentOperationType =
   | 'confirm_delivery'
   | 'settle_debt'
   | 'dispute_debt'
-  | 'resolve_debt';
+  | 'resolve_debt'
+  | 'create_delivery'
+  | 'assign_delivery'
+  | 'start_delivery'
+  | 'deliver_delivery'
+  | 'cancel_delivery';
 
 /** Пометить POST-эндпоинт идемпотентным. */
 export const Idempotent = (operationType: IdempotentOperationType): MethodDecorator =>

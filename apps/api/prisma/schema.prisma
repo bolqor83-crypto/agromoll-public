@@ -1,7 +1,8 @@
 // АгроМолл — схема v0.3.0 «Аутентификация по телефону» + v0.3.1 «Сессии»
 // + v0.4.0 «Долги» (подэтап A).
 // + v0.5.0 «Публичный рейтинг» (подэтап A, ADR-013)
-// + v0.5.0 «Геозоны» (подэтап B, ADR-014).
+// + v0.5.0 «Геозоны» (подэтап B, ADR-014)
+// + v0.5.0 «Доставка попутчиками» (подэтап C, ADR-015).
 //
 // Домен: продавец выставляет листинг (Listing), покупатель бронирует
 // количество (Booking), продавец может подтвердить или предложить
@@ -56,6 +57,31 @@ enum GeoVehicleType {
   van
   refrigerated
   flatbed
+}
+
+/// Статус запроса доставки (v0.5.0, ADR-015).
+/// open — ждёт водителя; assigned — водитель взял; in_transit — везёт;
+/// delivered — передано; cancelled/expired — терминальные.
+enum DeliveryStatus {
+  open
+  assigned
+  in_transit
+  delivered
+  cancelled
+  expired
+}
+
+/// Действие из журнала доставки (v0.5.0, ADR-015).
+/// blocked_by_289fz — попытка взять заказ заблокированной парой
+/// (запрос остаётся открытым для других водителей).
+enum DeliveryEventAction {
+  created
+  assigned
+  started
+  delivered
+  cancelled
+  expired
+  blocked_by_289fz
 }
 
 /// Роль участника рынка. Совпадает с USER_ROLES из @agromoll/types
@@ -176,6 +202,10 @@ model User {
   reputationEvents      ReputationEvent[] // журнал изменений рейтинга (аудит)
   // Геозоны (v0.5.0, ADR-014): точки/линии/коридоры пользователя.
   geoPoints             GeoPoint[]
+  // Доставка попутчиками (v0.5.0, ADR-015).
+  deliveriesAsBuyer     DeliveryRequest[]   @relation("DeliveryBuyer")
+  deliveriesAsDriver    DeliveryRequest[]   @relation("DeliveryDriver")
+  deliveryEvents        DeliveryEvent[]
 
   @@map("users")
 }
@@ -265,9 +295,11 @@ model Booking {
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
-  events BookingEvent[]
+  events           BookingEvent[]
   /// Долги, привязанные к брони (если товар отпущен в долг по брони, ADR-010).
-  debts  Debt[]
+  debts            Debt[]
+  /// Запросы доставки по брони (v0.5.0, ADR-015).
+  deliveryRequests DeliveryRequest[]
 
   @@index([buyerId])
   @@index([listingId])
@@ -308,6 +340,11 @@ enum OutboxOperationType {
   settle_debt
   dispute_debt
   resolve_debt
+  create_delivery
+  assign_delivery
+  start_delivery
+  deliver_delivery
+  cancel_delivery
 }
 
 /// Состояние операции на сервере (ADR-006).
@@ -602,6 +639,73 @@ model GeoPoint {
   createdAt      DateTime                              @default(now())
   updatedAt      DateTime                              @updatedAt
 
+  /// Запросы доставки, где точка — место забора (v0.5.0, ADR-015).
+  deliveryPickups  DeliveryRequest[] @relation("DeliveryPickup")
+  /// Запросы доставки, где точка — место доставки (v0.5.0, ADR-015).
+  deliveryDropoffs DeliveryRequest[] @relation("DeliveryDropoff")
+
   @@index([ownerId, kind])
   @@map("geo_points")
+}
+
+/// Запрос доставки попутчиком (v0.5.0, подэтап C, ADR-015).
+///
+/// Покупатель просит «подвезти от линии продавца к моей точке».
+/// Платформа НЕ показывает цену и НЕ является агентом: водитель и
+/// стороны договариваются сами (поля цены нет намеренно). Продавец
+/// для пары 289-ФЗ (driver+seller) = владелец точки забора
+/// (pickupPoint.owner) — смена начинается при взятии заказа.
+/// pickupCode/dropoffCode — UUID для QR-подтверждения передачи.
+model DeliveryRequest {
+  id               String         @id @default(uuid())
+  buyerId          String
+  buyer            User           @relation("DeliveryBuyer", fields: [buyerId], references: [id])
+  /// Доставка по конкретной брони (опционально).
+  bookingId        String?
+  booking          Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  /// Откуда забрать: линия продавца (владелец точки = продавец).
+  pickupPointId    String
+  pickupPoint      GeoPoint       @relation("DeliveryPickup", fields: [pickupPointId], references: [id])
+  /// Куда привезти: точка покупателя.
+  dropoffPointId   String
+  dropoffPoint     GeoPoint       @relation("DeliveryDropoff", fields: [dropoffPointId], references: [id])
+  weightKg         Decimal        @db.Decimal(8, 2)
+  description      String?
+  status           DeliveryStatus @default(open)
+  assignedDriverId String?
+  assignedDriver   User?          @relation("DeliveryDriver", fields: [assignedDriverId], references: [id])
+  assignedAt       DateTime?
+  deliveredAt      DateTime?
+  /// TTL запроса: по истечении крон переводит open → expired.
+  expiresAt        DateTime
+  /// QR-коды передачи (UUID, v0.5.0-C).
+  pickupCode       String
+  dropoffCode      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  events DeliveryEvent[]
+
+  @@index([buyerId, status])
+  @@index([assignedDriverId, status])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("delivery_requests")
+}
+
+/// Append-only журнал доставки (v0.5.0, ADR-015).
+/// Каждый переход статуса + попытки блокировки 289-ФЗ.
+model DeliveryEvent {
+  id         String              @id @default(uuid())
+  deliveryId String
+  delivery   DeliveryRequest     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  /// Кто совершил действие. NULL — системные (TTL-крон).
+  actorId    String?
+  actor      User?               @relation(fields: [actorId], references: [id])
+  action     DeliveryEventAction
+  payload    Json?
+  createdAt  DateTime            @default(now())
+
+  @@index([deliveryId])
+  @@map("delivery_events")
 }

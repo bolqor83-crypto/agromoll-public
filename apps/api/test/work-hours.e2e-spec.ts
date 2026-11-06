@@ -216,6 +216,9 @@ describe('Work hours 289-ФЗ (e2e, HTTP)', () => {
 });
 
 async function cleanDatabase(prisma: PrismaService): Promise<void> {
+  await prisma.deliveryEvent.deleteMany();
+  await prisma.deliveryRequest.deleteMany();
+  await prisma.geoPoint.deleteMany();
   await prisma.workSession.deleteMany();
   await prisma.monthlyPairTotal.deleteMany();
   await prisma.blockedPair.deleteMany();

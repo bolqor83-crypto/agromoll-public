@@ -27,6 +27,7 @@ import type {
   CounterpartyDto,
   DebtDto,
   DebtsSummaryDto,
+  DeliveryDto,
   GeoPointDto,
   ListingDto,
   MyReputationDto,
@@ -49,6 +50,8 @@ import {
   CounterpartiesResponseSchema,
   DebtsResponseSchema,
   DebtsSummaryResponseSchema,
+  DeliveriesResponseSchema,
+  DeliveryResponseSchema,
   GeoPointResponseSchema,
   GeoPointsResponseSchema,
   ListingResponseSchema,
@@ -544,6 +547,60 @@ export const api = {
     return apiRequest<GeoPointDto>({ method: 'DELETE', url: `/geo/points/${id}` }).then((d) =>
       validateResponse(GeoPointResponseSchema, d, 'geo/points/:id'),
     );
+  },
+
+  // ─── Доставка попутчиками (v0.5.0, ADR-015) ──────────────────────
+  // Создание — офлайн через outbox (createDeliveryMutation); взятие и
+  // шаги — только онлайн: сервер проверяет BlockedPair (289-ФЗ).
+
+  /** Радар: открытые заказы, попутные маршрутам водителя. */
+  deliveriesOpen(): Promise<DeliveryDto[]> {
+    return apiRequest<DeliveryDto[]>({ method: 'GET', url: '/deliveries/open' }).then((d) =>
+      validateResponse(DeliveriesResponseSchema, d, 'deliveries/open'),
+    );
+  },
+
+  /** Мои доставки: покупателю — созданные, водителю — взятые. */
+  deliveriesMine(): Promise<DeliveryDto[]> {
+    return apiRequest<DeliveryDto[]>({ method: 'GET', url: '/deliveries/me' }).then((d) =>
+      validateResponse(DeliveriesResponseSchema, d, 'deliveries/me'),
+    );
+  },
+
+  /** Взять заказ (только водитель; 409 DELIVERY_PAIR_BLOCKED — пауза 289-ФЗ). */
+  assignDelivery(deliveryId: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/assign`,
+      data: {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/assign'));
+  },
+
+  /** Выехал к точке забора. */
+  startDelivery(deliveryId: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/start`,
+      data: {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/start'));
+  },
+
+  /** Передача завершена (QR-подтверждение — на клиенте, ADR-015). */
+  deliverDelivery(deliveryId: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/deliver`,
+      data: {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/deliver'));
+  },
+
+  /** Отмена (после выезда — только водитель, с причиной). */
+  cancelDelivery(deliveryId: string, reason?: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/cancel`,
+      data: reason ? { reason } : {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/cancel'));
   },
 
   // ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ──────────────────────────────

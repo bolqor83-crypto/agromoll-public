@@ -230,6 +230,9 @@ describe('Public reputation (e2e, HTTP)', () => {
 async function cleanDatabase(prisma: PrismaService): Promise<void> {
   await prisma.reputationEvent.deleteMany();
   await prisma.reputationSnapshot.deleteMany();
+  await prisma.deliveryEvent.deleteMany();
+  await prisma.deliveryRequest.deleteMany();
+  await prisma.geoPoint.deleteMany();
   await prisma.workSession.deleteMany();
   await prisma.monthlyPairTotal.deleteMany();
   await prisma.blockedPair.deleteMany();

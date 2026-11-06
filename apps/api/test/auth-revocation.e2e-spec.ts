@@ -42,7 +42,10 @@ describe('Refresh token revocation (e2e, HTTP)', () => {
     await prisma.booking.deleteMany();
     await prisma.listing.deleteMany();
     // сессии каскадятся удалением пользователей (onDelete: Cascade)
-    await prisma.user.deleteMany();
+    await prisma.deliveryEvent.deleteMany();
+  await prisma.deliveryRequest.deleteMany();
+  await prisma.geoPoint.deleteMany();
+  await prisma.user.deleteMany();
     await app.close();
   });
 

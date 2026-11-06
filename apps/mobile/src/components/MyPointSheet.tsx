@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
 import * as Location from 'expo-location';
-import { Button, Card, Icon, Input, spacing, success, tap, Text, warning } from '@agromoll/ui';
+import { Button, Card, Icon, Input, spacing, success, Text, warning } from '@agromoll/ui';
 import type { GeoCoord, UserRole } from '@agromoll/types';
 import { MapCanvas } from '@/map';
 import { api, toApiError } from '@/lib/api';

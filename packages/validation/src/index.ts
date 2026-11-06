@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   BOOKING_ACTIONS,
+  DELIVERY_STATUSES,
   BOOKING_STATUSES,
   DEBT_ACTIONS,
   DEBT_STATUSES,
@@ -562,6 +563,88 @@ export const GeoNearbyQuerySchema = z
 
 export type GeoNearbyQuery = z.infer<typeof GeoNearbyQuerySchema>;
 
+// ─── Доставка попутчиками (v0.5.0, ADR-015) ─────────────────────────────────
+
+/** Статус доставки. */
+export const DeliveryStatusSchema = z.enum(DELIVERY_STATUSES);
+
+/** Точка маршрута в ответах API. */
+const DeliveryPointSchema = z
+  .object({
+    id: z.string().min(1),
+    ownerId: z.string().min(1),
+    ownerName: z.string().min(1),
+    label: z.string().nullable(),
+    address: z.string().nullable(),
+    latitude: z.number(),
+    longitude: z.number(),
+  })
+  .passthrough();
+
+/** Ответ эндпоинтов доставки. */
+export const DeliveryResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    buyerId: z.string().min(1),
+    buyerName: z.string().min(1),
+    bookingId: z.string().nullable(),
+    pickup: DeliveryPointSchema,
+    dropoff: DeliveryPointSchema,
+    weightKg: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Вес ждём строкой вида «12.50»'),
+    description: z.string().nullable(),
+    status: DeliveryStatusSchema,
+    assignedDriverId: z.string().nullable(),
+    assignedDriverName: z.string().nullable(),
+    assignedAt: IsoDateString.nullable(),
+    deliveredAt: IsoDateString.nullable(),
+    expiresAt: IsoDateString,
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+    pickupCode: z.string().nullable(),
+    dropoffCode: z.string().nullable(),
+    corridorDistanceMeters: z.number().nonnegative().nullable(),
+  })
+  .passthrough();
+
+export type DeliveryResponse = z.infer<typeof DeliveryResponseSchema>;
+
+/** Ответ GET /deliveries (лента радара / мои). */
+export const DeliveriesResponseSchema = z.array(DeliveryResponseSchema);
+
+/** Максимальный вес заказа: вместимость «Газели» с запасом (ADR-015). */
+export const DELIVERY_MAX_WEIGHT_KG = 20000;
+
+/** Тело POST /deliveries — покупатель просит подвезти (ADR-015). */
+export const CreateDeliverySchema = z
+  .object({
+    /** Откуда забрать: линия продавца (geo point id). */
+    pickupPointId: z.string().uuid('Выберите точку забора'),
+    /** Куда привезти: точка покупателя (geo point id). */
+    dropoffPointId: z.string().uuid('Выберите точку доставки'),
+    weightKg: z.coerce
+      .number()
+      .positive('Вес должен быть положительным')
+      .max(DELIVERY_MAX_WEIGHT_KG, 'Максимум 20 000 кг — это уже не попутная доставка')
+      .refine((value) => Math.round(value * 100) === value * 100, {
+        message: 'Максимум две цифры после запятой',
+      }),
+    description: z.string().trim().max(500).optional(),
+    /** Доставка по конкретной брони (опционально). */
+    bookingId: z.string().uuid().optional(),
+  })
+  .strict();
+
+export type CreateDeliveryInput = z.infer<typeof CreateDeliverySchema>;
+
+/** Тело POST /deliveries/:id/cancel — причина обязательна после старта. */
+export const CancelDeliverySchema = z
+  .object({
+    reason: z.string().trim().max(300).optional(),
+  })
+  .strict();
+
+export type CancelDeliveryInput = z.infer<typeof CancelDeliverySchema>;
+
 /** Ответ GET /debts (мои долги обеих сторон). */
 export const DebtsResponseSchema = z.array(DebtResponseSchema);
 
@@ -721,6 +804,8 @@ export const apiEnvSchema = z.object({
   RATING_PAIR_WINDOW_DAYS: z.coerce.number().int().positive().max(365).default(30),
   /** Радиус поиска «рядом» по умолчанию в метрах (ADR-014). */
   DEFAULT_GEO_RADIUS_METERS: z.coerce.number().int().min(10).max(5000).default(2000),
+  /** TTL открытого запроса доставки в минутах (ADR-015). */
+  DELIVERY_TTL_MINUTES: z.coerce.number().int().positive().max(24 * 60).default(60),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

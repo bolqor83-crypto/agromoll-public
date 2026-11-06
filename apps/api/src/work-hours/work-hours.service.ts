@@ -370,6 +370,44 @@ export class WorkHoursService {
     return created;
   }
 
+  /**
+   * Проверка серии 289-ФЗ для ОДНОЙ пары (v0.5.0-C, ADR-015):
+   * вызывается после закрытия смены при завершении/отмене доставки,
+   * чтобы блокировка создавалась сразу, не дожидаясь крона 03:00.
+   * Возвращает true, если блокировка создана.
+   */
+  async enforceSeriesForPair(driverId: string, sellerId: string): Promise<boolean> {
+    const month = currentMonth();
+    const current = await this.prisma.monthlyPairTotal.findUnique({
+      where: { driverId_sellerId_month: { driverId, sellerId, month } },
+      select: { monthCounted: true },
+    });
+    if (!current?.monthCounted) {
+      return false;
+    }
+    const months = await this.prisma.monthlyPairTotal.findMany({
+      where: { driverId, sellerId, monthCounted: true },
+      select: { month: true },
+    });
+    if (!isSeriesComplete(new Set(months.map((m) => m.month)), month, this.monthsSeries)) {
+      return false;
+    }
+    const existing = await this.prisma.blockedPair.findUnique({
+      where: { driverId_sellerId: { driverId, sellerId } },
+    });
+    if (existing) {
+      return false;
+    }
+    await this.prisma.blockedPair.create({
+      data: { driverId, sellerId, reason: WORK_PAIR_BLOCKED_MESSAGE },
+    });
+    this.logger.warn(
+      { driverId, sellerId, month, series: this.monthsSeries },
+      'work-hours:pair blocked after delivery (289-ФЗ, серия закрыта)',
+    );
+    return true;
+  }
+
   /** Есть ли у пользователя роль (роли переключаемые — смотрим текущую). */
   private async hasRole(userId: string, role: 'driver' | 'seller'): Promise<boolean> {
     const user = await this.prisma.user.findUnique({

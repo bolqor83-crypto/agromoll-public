@@ -449,6 +449,81 @@ export interface GeoPointDto {
   distanceMeters?: number;
 }
 
+// ─── Доставка попутчиками (v0.5.0, ADR-015) ─────────────────────────────────
+
+/** Статусы запроса доставки. Совпадают с enum DeliveryStatus в Prisma-схеме. */
+export const DELIVERY_STATUSES = [
+  'open',
+  'assigned',
+  'in_transit',
+  'delivered',
+  'cancelled',
+  'expired',
+] as const;
+
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
+  open: 'Ждёт водителя',
+  assigned: 'Водитель взял',
+  in_transit: 'В пути',
+  delivered: 'Доставлено',
+  cancelled: 'Отменено',
+  expired: 'Истекло',
+};
+
+/** Действия журнала доставки. Совпадают с enum DeliveryEventAction. */
+export const DELIVERY_EVENT_ACTIONS = [
+  'created',
+  'assigned',
+  'started',
+  'delivered',
+  'cancelled',
+  'expired',
+  'blocked_by_289fz',
+] as const;
+
+export type DeliveryEventActionType = (typeof DELIVERY_EVENT_ACTIONS)[number];
+
+/** Точка маршрута доставки с координатами (для карты и «Заберу отсюда»). */
+export interface DeliveryPointDto {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  label: string | null;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+/** Запрос доставки (DTO уровня API, v0.5.0-C, ADR-015).
+ *  Цены нет НАМЕРЕННО: платформа не агент (ADR-015). */
+export interface DeliveryDto {
+  id: string;
+  buyerId: string;
+  buyerName: string;
+  bookingId: string | null;
+  pickup: DeliveryPointDto;
+  dropoff: DeliveryPointDto;
+  /** Decimal от Prisma приходит строкой — точность не теряется. */
+  weightKg: string;
+  description: string | null;
+  status: DeliveryStatus;
+  assignedDriverId: string | null;
+  assignedDriverName: string | null;
+  assignedAt: string | null;
+  deliveredAt: string | null;
+  /** TTL запроса: открытым живёт DELIVERY_TTL_MINUTES (по умолчанию 60). */
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  /** QR-коды передачи: видны только покупателю и назначенному водителю. */
+  pickupCode: string | null;
+  dropoffCode: string | null;
+  /** Насколько точка забора/выгрузки рядом с маршрутом (для радара). */
+  corridorDistanceMeters: number | null;
+}
+
 // ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
 
 
