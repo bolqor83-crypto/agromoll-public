@@ -27,6 +27,7 @@ import type {
   CounterpartyDto,
   DebtDto,
   DebtsSummaryDto,
+  GeoPointDto,
   ListingDto,
   MyReputationDto,
   NotificationsListDto,
@@ -48,6 +49,8 @@ import {
   CounterpartiesResponseSchema,
   DebtsResponseSchema,
   DebtsSummaryResponseSchema,
+  GeoPointResponseSchema,
+  GeoPointsResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
   MyReputationResponseSchema,
@@ -453,6 +456,93 @@ export const api = {
   reputation(userId: string): Promise<ReputationDto> {
     return apiRequest<ReputationDto>({ method: 'GET', url: `/reputation/${userId}` }).then((d) =>
       validateResponse(ReputationResponseSchema, d, 'reputation/:userId'),
+    );
+  },
+
+  // ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────
+
+  /** Создать свою точку (buyer → buyer_point, seller → seller_line). */
+  createGeoPoint(input: {
+    kind: 'buyer_point' | 'seller_line';
+    latitude: number;
+    longitude: number;
+    address?: string;
+    label?: string;
+    radiusMeters?: number;
+  }): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'POST', url: '/geo/points', data: input }).then((d) =>
+      validateResponse(GeoPointResponseSchema, d, 'geo/points'),
+    );
+  },
+
+  /** Опубликовать маршрут доставщика (только driver). */
+  createGeoCorridor(input: {
+    corridorFrom: { lat: number; lng: number };
+    corridorTo: { lat: number; lng: number };
+    vehicleType?: 'car' | 'van' | 'refrigerated' | 'flatbed';
+    maxWeightKg?: number;
+    isRefrigerated?: boolean;
+    label?: string;
+  }): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'POST', url: '/geo/corridors', data: input }).then(
+      (d) => validateResponse(GeoPointResponseSchema, d, 'geo/corridors'),
+    );
+  },
+
+  /** Точки в радиусе (PostGIS ST_DWithin, ADR-014). */
+  geoPointsNearby(params: {
+    lat: number;
+    lng: number;
+    radiusMeters?: number;
+    kind?: 'buyer_point' | 'seller_line';
+  }): Promise<GeoPointDto[]> {
+    return apiRequest<GeoPointDto[]>({
+      method: 'GET',
+      url: '/geo/points/nearby',
+      params,
+    }).then((d) => validateResponse(GeoPointsResponseSchema, d, 'geo/points/nearby'));
+  },
+
+  /** Маршруты доставщиков, проходящие рядом с точкой. */
+  geoCorridorsNearby(params: {
+    lat: number;
+    lng: number;
+    radiusMeters?: number;
+  }): Promise<GeoPointDto[]> {
+    return apiRequest<GeoPointDto[]>({
+      method: 'GET',
+      url: '/geo/corridors/nearby',
+      params,
+    }).then((d) => validateResponse(GeoPointsResponseSchema, d, 'geo/corridors/nearby'));
+  },
+
+  /** Мои активные геозоны. */
+  geoPointsMine(): Promise<GeoPointDto[]> {
+    return apiRequest<GeoPointDto[]>({ method: 'GET', url: '/geo/points/mine' }).then((d) =>
+      validateResponse(GeoPointsResponseSchema, d, 'geo/points/mine'),
+    );
+  },
+
+  /** Обновить свою геозону. */
+  updateGeoPoint(
+    id: string,
+    input: {
+      latitude?: number;
+      longitude?: number;
+      address?: string;
+      label?: string;
+      radiusMeters?: number;
+    },
+  ): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'PATCH', url: `/geo/points/${id}`, data: input }).then(
+      (d) => validateResponse(GeoPointResponseSchema, d, 'geo/points/:id'),
+    );
+  },
+
+  /** Убрать свою геозону (деактивация, история остаётся). */
+  deactivateGeoPoint(id: string): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'DELETE', url: `/geo/points/${id}` }).then((d) =>
+      validateResponse(GeoPointResponseSchema, d, 'geo/points/:id'),
     );
   },
 

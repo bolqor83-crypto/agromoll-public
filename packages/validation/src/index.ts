@@ -8,6 +8,8 @@ import {
   LISTING_STATUSES,
   LISTING_UNITS,
   NOTIFICATION_TYPES,
+  GEO_POINT_KINDS,
+  GEO_VEHICLE_TYPES,
   QUALITY_FLAGS,
   REPUTATION_ACTIONS,
   USER_ROLES,
@@ -446,6 +448,120 @@ export const MyReputationResponseSchema = ReputationResponseSchema.extend({
 
 export type MyReputationResponse = z.infer<typeof MyReputationResponseSchema>;
 
+
+// ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────────────
+
+/** Вид геозоны. */
+export const GeoPointKindSchema = z.enum(GEO_POINT_KINDS);
+
+/** Тип транспорта коридора. */
+export const GeoVehicleTypeSchema = z.enum(GEO_VEHICLE_TYPES);
+
+/** Координата {lat, lng}. */
+export const GeoCoordSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  })
+  .strict();
+
+/** Радиус поиска: 10 м…5 км (спецификация v0.5.0-B). */
+export const GEO_RADIUS_METERS = z
+  .number()
+  .int('Радиус — целое число метров')
+  .min(10, 'Радиус не меньше 10 м')
+  .max(5000, 'Радиус не больше 5000 м');
+
+/** Ответ эндпоинтов геозон. */
+export const GeoPointResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    ownerId: z.string().min(1),
+    kind: GeoPointKindSchema,
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    address: z.string().nullable(),
+    label: z.string().nullable(),
+    radiusMeters: z.number().int().positive(),
+    isActive: z.boolean(),
+    corridorFrom: GeoCoordSchema.nullable(),
+    corridorTo: GeoCoordSchema.nullable(),
+    vehicleType: GeoVehicleTypeSchema,
+    maxWeightKg: z.number().int().positive().nullable(),
+    isRefrigerated: z.boolean(),
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+    distanceMeters: z.number().nonnegative().optional(),
+  })
+  .passthrough();
+
+export type GeoPointResponse = z.infer<typeof GeoPointResponseSchema>;
+
+/** Ответ GET /geo/points/nearby и GET /geo/points/mine. */
+export const GeoPointsResponseSchema = z.array(GeoPointResponseSchema);
+
+/** Тело POST /geo/points — точка покупателя или линия продавца. */
+export const CreateGeoPointSchema = z
+  .object({
+    kind: z.enum(['buyer_point', 'seller_line'], {
+      errorMap: () => ({ message: 'Здесь только buyer_point или seller_line; коридоры — POST /geo/corridors' }),
+    }),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    address: z.string().trim().max(300).optional(),
+    label: z.string().trim().max(100).optional(),
+    radiusMeters: GEO_RADIUS_METERS.optional().default(50),
+  })
+  .strict();
+
+export type CreateGeoPointInput = z.infer<typeof CreateGeoPointSchema>;
+
+/** Тело POST /geo/corridors — маршрут доставщика (ADR-014). */
+export const CreateGeoCorridorSchema = z
+  .object({
+    corridorFrom: GeoCoordSchema,
+    corridorTo: GeoCoordSchema,
+    vehicleType: GeoVehicleTypeSchema.optional().default('car'),
+    maxWeightKg: z.number().int().positive().max(20000).optional(),
+    isRefrigerated: z.boolean().optional().default(false),
+    address: z.string().trim().max(300).optional(),
+    label: z.string().trim().max(100).optional(),
+  })
+  .strict();
+
+export type CreateGeoCorridorInput = z.infer<typeof CreateGeoCorridorSchema>;
+
+/** Тело PATCH /geo/points/:id — только владелец, без смены вида. */
+export const UpdateGeoPointSchema = z
+  .object({
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    address: z.string().trim().max(300).optional(),
+    label: z.string().trim().max(100).optional(),
+    radiusMeters: GEO_RADIUS_METERS.optional(),
+  })
+  .strict();
+
+export type UpdateGeoPointInput = z.infer<typeof UpdateGeoPointSchema>;
+
+/** Query GET /geo/points/nearby и /geo/corridors/nearby: lat, lng, radiusMeters.
+ *  Параметры URL приходят строками — отсюда z.coerce. */
+export const GeoNearbyQuerySchema = z
+  .object({
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+    radiusMeters: z.coerce
+      .number()
+      .int('Радиус — целое число метров')
+      .min(10, 'Радиус не меньше 10 м')
+      .max(5000, 'Радиус не больше 5000 м')
+      .optional(),
+    kind: z.enum(['buyer_point', 'seller_line']).optional(),
+  })
+  .strict();
+
+export type GeoNearbyQuery = z.infer<typeof GeoNearbyQuerySchema>;
+
 /** Ответ GET /debts (мои долги обеих сторон). */
 export const DebtsResponseSchema = z.array(DebtResponseSchema);
 
@@ -603,6 +719,8 @@ export const apiEnvSchema = z.object({
   RATING_MAX_PAIR_DEALS: z.coerce.number().int().positive().max(10_000).default(10),
   /** Окно анти-накрутки в днях. */
   RATING_PAIR_WINDOW_DAYS: z.coerce.number().int().positive().max(365).default(30),
+  /** Радиус поиска «рядом» по умолчанию в метрах (ADR-014). */
+  DEFAULT_GEO_RADIUS_METERS: z.coerce.number().int().min(10).max(5000).default(2000),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

@@ -111,6 +111,24 @@ export default function RolePickerScreen() {
         <Icon name="chevron-forward-outline" size={20} color="muted" />
       </Card>
 
+      {/* Карта рынка — геозоны (v0.5.0, ADR-014). */}
+      <Card
+        onPress={() => {
+          selection();
+          router.push('/map');
+        }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm }}
+      >
+        <Icon name="map-outline" size={28} color="primary" />
+        <View style={{ flex: 1 }}>
+          <Text variant="title">Карта рынка</Text>
+          <Text variant="caption" color="secondary">
+            Кто рядом, линии продавцов, маршруты
+          </Text>
+        </View>
+        <Icon name="chevron-forward-outline" size={20} color="muted" />
+      </Card>
+
       <Text variant="caption" color="muted" align="center" style={{ marginTop: spacing.lg }}>
         Роль можно сменить в любой момент — кнопка «Сменить роль» на экранах.
       </Text>

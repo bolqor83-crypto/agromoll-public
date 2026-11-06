@@ -393,7 +393,64 @@ export interface MyReputationDto extends ReputationDto {
   events: ReputationEventDto[];
 }
 
+
+// ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────────────
+
+/** Виды геозон. Совпадают с enum GeoPointKind в Prisma-схеме. */
+export const GEO_POINT_KINDS = ['buyer_point', 'seller_line', 'delivery_corridor'] as const;
+
+export type GeoPointKind = (typeof GEO_POINT_KINDS)[number];
+
+export const GEO_POINT_KIND_LABELS: Record<GeoPointKind, string> = {
+  buyer_point: 'Точка покупателя',
+  seller_line: 'Линия продавца',
+  delivery_corridor: 'Коридор доставщика',
+};
+
+/** Тип транспорта коридора. Совпадает с enum GeoVehicleType в Prisma-схеме. */
+export const GEO_VEHICLE_TYPES = ['car', 'van', 'refrigerated', 'flatbed'] as const;
+
+export type GeoVehicleType = (typeof GEO_VEHICLE_TYPES)[number];
+
+export const GEO_VEHICLE_LABELS: Record<GeoVehicleType, string> = {
+  car: 'Легковая',
+  van: 'Фургон',
+  refrigerated: 'Рефрижератор',
+  flatbed: 'Бортовая',
+};
+
+/** Координата {lat, lng} — точки коридора и ответы nearby. */
+export interface GeoCoord {
+  lat: number;
+  lng: number;
+}
+
+/** Геозона (DTO уровня API, v0.5.0, ADR-014). */
+export interface GeoPointDto {
+  id: string;
+  ownerId: string;
+  kind: GeoPointKind;
+  latitude: number;
+  longitude: number;
+  address: string | null;
+  label: string | null;
+  radiusMeters: number;
+  isActive: boolean;
+  /** Коридор: старт {lat, lng} (для delivery_corridor, иначе null). */
+  corridorFrom: GeoCoord | null;
+  /** Коридор: финиш {lat, lng}. */
+  corridorTo: GeoCoord | null;
+  vehicleType: GeoVehicleType;
+  maxWeightKg: number | null;
+  isRefrigerated: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Расстояние в метрах от запрошенной точки (только в nearby-ответах). */
+  distanceMeters?: number;
+}
+
 // ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
+
 
 /** Типы in-app уведомлений. Совпадают с enum NotificationType в Prisma-схеме. */
 export const NOTIFICATION_TYPES = [

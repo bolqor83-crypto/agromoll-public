@@ -1,6 +1,7 @@
 // АгроМолл — схема v0.3.0 «Аутентификация по телефону» + v0.3.1 «Сессии»
 // + v0.4.0 «Долги» (подэтап A).
-// + v0.5.0 «Публичный рейтинг» (подэтап A, ADR-013).
+// + v0.5.0 «Публичный рейтинг» (подэтап A, ADR-013)
+// + v0.5.0 «Геозоны» (подэтап B, ADR-014).
 //
 // Домен: продавец выставляет листинг (Listing), покупатель бронирует
 // количество (Booking), продавец может подтвердить или предложить
@@ -37,6 +38,24 @@ enum ReputationAction {
   dispute_resolved
   auto_confirmed
   penalty_applied
+}
+
+/// Тип геозоны (v0.5.0, ADR-014).
+/// buyer_point — точка покупателя (куда везти товар);
+/// seller_line — линия/ряд продавца на рынке (откуда забирать);
+/// delivery_corridor — коридор доставщика (куда он едет и может подвезти).
+enum GeoPointKind {
+  buyer_point
+  seller_line
+  delivery_corridor
+}
+
+/// Тип транспорта коридора доставщика (v0.5.0, ADR-014).
+enum GeoVehicleType {
+  car
+  van
+  refrigerated
+  flatbed
 }
 
 /// Роль участника рынка. Совпадает с USER_ROLES из @agromoll/types
@@ -155,6 +174,8 @@ model User {
   // Публичный рейтинг (v0.5.0, ADR-013).
   reputation            ReputationSnapshot? // один актуальный снимок (уникальный userId)
   reputationEvents      ReputationEvent[] // журнал изменений рейтинга (аудит)
+  // Геозоны (v0.5.0, ADR-014): точки/линии/коридоры пользователя.
+  geoPoints             GeoPoint[]
 
   @@map("users")
 }
@@ -546,4 +567,41 @@ model ReputationEvent {
 
   @@index([userId, createdAt])
   @@map("reputation_events")
+}
+
+/// Геозона — точка на карте рынка (v0.5.0, подэтап B, ADR-014).
+///
+/// Единая модель для трёх видов: точки покупателей (куда везти),
+/// линии продавцов (ряды рынка, откуда забирать) и коридоров
+/// доставщиков (маршрут «еду туда — могу подвезти»). Координаты
+/// хранятся и как Float-поля (доступны через Prisma-клиент), и как
+/// PostGIS geography(Point, 4326) — синхронизируется триггером БД и
+/// обслуживает пространственные запросы ST_DWithin/ST_Distance
+/// с GIST-индексом (миграция 20261108100000_geo_points).
+model GeoPoint {
+  id             String                                @id @default(uuid())
+  ownerId        String
+  owner          User                                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  kind           GeoPointKind
+  latitude       Float
+  longitude      Float
+  /// PostGIS geography(Point, 4326). Пишется триггером БД из
+  /// (longitude, latitude); клиент работает только с lat/lng.
+  geog           Unsupported("geography(Point,4326)")?
+  address        String?
+  label          String?
+  radiusMeters   Int                                   @default(50)
+  isActive       Boolean                               @default(true)
+  /// Коридор (kind=delivery_corridor): точка старта {lat, lng}.
+  corridorFrom   Json?
+  /// Коридор: точка финиша {lat, lng}.
+  corridorTo     Json?
+  vehicleType    GeoVehicleType                        @default(car)
+  maxWeightKg    Int?
+  isRefrigerated Boolean                               @default(false)
+  createdAt      DateTime                              @default(now())
+  updatedAt      DateTime                              @updatedAt
+
+  @@index([ownerId, kind])
+  @@map("geo_points")
 }
