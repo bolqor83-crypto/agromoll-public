@@ -4,6 +4,13 @@ import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
+import { useFonts } from 'expo-font';
+// Deep-импорты (не barrel): в бандл едут только 4 нужных начертания,
+// а не все 30+ файлов пакета (barrel тянет весь набор ~6 МБ ассетов).
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from '@agromoll/ui';
 import { logger } from '@/lib/logger';
@@ -20,6 +27,19 @@ import { ConflictDialog } from '@/components/ConflictDialog';
  * Модульный флаг гарантирует одну запись за жизнь js-контекста.
  */
 let bootLogged = false;
+
+/**
+ * v0.6.2-B (ADR-028): фирменный шрифт Inter — 4 начертания.
+ * Имена в объекте = имена в токенах packages/ui (font.regular…bold).
+ * Пока шрифты не загружены — рисуем BootSplash (не зависит от шрифтов),
+ * чтобы текст не «перескакивал» после подмены системного шрифта.
+ */
+const INTER_FONTS = {
+  Inter_400Regular: Inter_400Regular as number,
+  Inter_500Medium: Inter_500Medium as number,
+  Inter_600SemiBold: Inter_600SemiBold as number,
+  Inter_700Bold: Inter_700Bold as number,
+} as const;
 
 function AppShell() {
   const { mode } = useTheme();
@@ -55,6 +75,9 @@ function BootSplash() {
 }
 
 export default function RootLayout() {
+  // v0.6.2-B: Inter грузим до первого экрана (ADR-028).
+  const [fontsLoaded] = useFonts(INTER_FONTS);
+
   // Тема живёт в zustand-сторе, а ThemeProvider из @agromoll/ui рисует её по токенам.
   const setting = useThemeStore((s) => s.setting);
   const setSetting = useThemeStore((s) => s.setSetting);
@@ -97,6 +120,17 @@ export default function RootLayout() {
       });
     }
   }, []);
+
+  // Шрифты ещё едут — тихий сплэш в цвете темы (без текста, чтобы не мигал).
+  if (!fontsLoaded) {
+    return (
+      <SafeAreaProvider>
+        <ThemeProvider setting={setting} onSettingChange={setSetting}>
+          <BootSplash />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>

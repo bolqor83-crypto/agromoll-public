@@ -26,7 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from '../theme';
-import { motion, radius, spacing, touchTarget } from '../tokens';
+import { font, motion, radius, spacing, touchTarget } from '../tokens';
 import { selection } from '../haptics';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
@@ -212,6 +212,7 @@ function TabBarItemButton({
       </Animated.View>
       <Animated.Text
         style={{
+          fontFamily: font.semibold,
           fontSize: 13,
           lineHeight: 16,
           fontWeight: '600',

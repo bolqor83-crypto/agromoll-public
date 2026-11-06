@@ -17,12 +17,16 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from '../theme';
-import { motion, radius, spacing } from '../tokens';
+import { font, motion, radius, spacing } from '../tokens';
+import { Icon } from './Icon';
+import type { IconName } from './Icon';
 
 export interface BadgeProps {
   label: string;
   /** success — зелёный, attention — мягкий янтарный, neutral — серо-тёплый. */
   variant?: 'success' | 'attention' | 'neutral';
+  /** Мелкая иконка слева (v0.6.2-B): бейдж = иконка + текст, pill-форма. */
+  icon?: IconName;
 }
 
 /** Прозрачность заливки янтарного бейджа (~18%), чтобы он оставался мягким. */
@@ -36,7 +40,7 @@ function variantScale(variant: BadgeProps['variant']): number {
   return variant === 'success' ? 1 : variant === 'attention' ? 2 : 0;
 }
 
-export function Badge({ label, variant = 'neutral' }: BadgeProps) {
+export function Badge({ label, variant = 'neutral', icon }: BadgeProps) {
   const { colors } = useTheme();
 
   // Цвет анимируем числом по шкале вариантов (0/1/2), а сам цвет достаёт
@@ -70,19 +74,24 @@ export function Badge({ label, variant = 'neutral' }: BadgeProps) {
         {
           borderRadius: radius.pill,
           paddingHorizontal: spacing.md,
-          paddingVertical: 3,
+          paddingVertical: 4,
           borderWidth: variant === 'neutral' ? 1 : 0,
           borderColor: colors.border,
           alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.xs,
         },
       ]}
     >
+      {icon ? <Icon name={icon} size={13} tint={fgColor} /> : null}
       {/* Текст — перекрёстный fade при смене: ключ меняется вместе с label. */}
       <Animated.Text
         key={label}
         entering={FadeIn.duration(COLOR_MORPH_MS)}
         exiting={FadeOut.duration(COLOR_MORPH_MS)}
         style={{
+          fontFamily: font.semibold,
           fontSize: 13,
           lineHeight: 18,
           fontWeight: '600',

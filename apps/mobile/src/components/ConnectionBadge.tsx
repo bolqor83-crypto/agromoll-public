@@ -66,6 +66,8 @@ export function ConnectionBadge() {
       accessibilityRole="button"
       accessibilityLabel={`Сеть: ${label}. Открыть очередь операций`}
       onPress={() => router.push('/queue')}
+      // v0.6.2-B: зона нажатия ≥48px (высота визуала 36 + hitSlop 6)
+      hitSlop={6}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -93,9 +95,7 @@ export function ConnectionBadge() {
         {label}
         {isSyncing && pendingCount > 0 ? ` (${pendingCount})` : ''}
       </Text>
-      {justSynced ? (
-        <SuccessCheck size="sm" onDone={() => setJustSynced(false)} />
-      ) : null}
+      {justSynced ? <SuccessCheck size="sm" onDone={() => setJustSynced(false)} /> : null}
     </Pressable>
   );
 }

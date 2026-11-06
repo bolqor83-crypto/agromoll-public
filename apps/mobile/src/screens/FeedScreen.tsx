@@ -84,9 +84,7 @@ export function FeedScreen() {
         // сервер ответил неожиданным форматом — демо-данные не показываем,
         // честный ErrorState с повтором (v0.6.1-D, ADR-026)
         setState((prev) =>
-          prev.phase === 'ready'
-            ? { ...prev, staleError: error }
-            : { phase: 'error', error },
+          prev.phase === 'ready' ? { ...prev, staleError: error } : { phase: 'error', error },
         );
         return;
       }
@@ -173,7 +171,7 @@ export function FeedScreen() {
           отключены. */}
       {demo ? (
         <View style={{ paddingBottom: spacing.sm }}>
-          <DemoBanner hint="Рядом со мной и Моя точка отключены." />
+          <DemoBanner hint="«Рядом» и «Моя точка» отключены." />
         </View>
       ) : null}
 
@@ -182,7 +180,9 @@ export function FeedScreen() {
         <DebtSummaryWidget />
       </View>
 
-      {/* Гео-панель (v0.5.0-B): «Рядом со мной» + «Моя точка» (ADR-014). */}
+      {/* Гео-панель (v0.5.0-B): «Рядом со мной» + «Моя точка» (ADR-014).
+          v0.6.2-B: кнопки — прямые дети ряда с flex:1 — при переносе
+          при длинной подписи («Рядом: 12») обе кнопки стретчатся до одной высоты. */}
       <View
         style={{
           flexDirection: 'row',
@@ -191,28 +191,27 @@ export function FeedScreen() {
           paddingBottom: spacing.sm,
         }}
       >
-        <View style={{ flex: 1 }}>
-          <Button
-            title={nearbySellers === null ? 'Рядом со мной' : `Рядом: ${nearbySellers.size}`}
-            variant={nearbySellers !== null ? 'primary' : 'secondary'}
-            size="md"
-            loading={geoBusy}
-            disabled={demo}
-            onPress={() => void toggleNearby()}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Button
-            title="Моя точка"
-            variant="secondary"
-            size="md"
-            disabled={demo}
-            onPress={() => {
-              tap();
-              setPointSheetOpen(true);
-            }}
-          />
-        </View>
+        <Button
+          style={{ flex: 1 }}
+          // v0.6.2-B: «Рядом» вместо «Рядом со мной» — одна строка в полкнопки
+          title={nearbySellers === null ? 'Рядом' : `Рядом: ${nearbySellers.size}`}
+          variant={nearbySellers !== null ? 'primary' : 'secondary'}
+          size="md"
+          loading={geoBusy}
+          disabled={demo}
+          onPress={() => void toggleNearby()}
+        />
+        <Button
+          style={{ flex: 1 }}
+          title="Моя точка"
+          variant="secondary"
+          size="md"
+          disabled={demo}
+          onPress={() => {
+            tap();
+            setPointSheetOpen(true);
+          }}
+        />
       </View>
       {state.phase === 'loading' ? (
         <View style={{ gap: spacing.md }}>
@@ -281,11 +280,7 @@ export function FeedScreen() {
         </PullToRefreshScrollView>
       )}
 
-      <MyPointSheet
-        visible={pointSheetOpen}
-        onClose={() => setPointSheetOpen(false)}
-        role={role}
-      />
+      <MyPointSheet visible={pointSheetOpen} onClose={() => setPointSheetOpen(false)} role={role} />
     </Screen>
   );
 }

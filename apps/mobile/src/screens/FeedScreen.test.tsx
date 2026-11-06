@@ -61,7 +61,7 @@ describe('Лента в демо-режиме — вариант B: баннер
     expect(screen.getByText(/API недоступен\. Данные не настоящие/)).toBeTruthy();
 
     // Кнопки, которым нужен сервер, отключены (a11y-состояние).
-    const nearby = screen.getByRole('button', { name: 'Рядом со мной' });
+    const nearby = screen.getByRole('button', { name: 'Рядом' });
     expect(nearby.props.accessibilityState?.disabled).toBe(true);
     const myPoint = screen.getByRole('button', { name: 'Моя точка' });
     expect(myPoint.props.accessibilityState?.disabled).toBe(true);

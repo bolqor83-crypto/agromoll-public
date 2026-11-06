@@ -202,18 +202,22 @@ export default function ListingDetailScreen() {
         style={{ gap: spacing.lg }}
       >
         <Card style={{ gap: spacing.md }}>
+          {/* v0.6.2-B (ADR-028): «фото» 4:3 (была фикс. высота 148) +
+              мягкий градиент снизу — когда появятся реальные фото,
+              текст поверх будет читаться (спека этапа). */}
           <Animated.View
             ref={photoRef}
             onLayout={measurePhoto}
             style={[
               photoStyle,
               {
-                height: 148,
+                aspectRatio: 4 / 3,
                 borderRadius: 16,
                 backgroundColor: colors.primaryMuted,
                 alignItems: 'center',
                 justifyContent: 'center',
                 opacity: photoHidden ? 0 : 1,
+                overflow: 'hidden',
               },
             ]}
           >
@@ -223,14 +227,14 @@ export default function ListingDetailScreen() {
           <View
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
           >
-            <Text variant="title" color="primary">
+            <Text variant="title" color="primary" numeric>
               {formatPrice(listing.pricePerUnit, listing.unit)}
             </Text>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               {listing.isPerishable ? (
-                <Badge label="Скоропорт" variant="attention" />
+                <Badge label="Скоропорт" variant="attention" icon="time-outline" />
               ) : (
-                <Badge label="Свежий" variant="success" />
+                <Badge label="Свежий" variant="success" icon="leaf-outline" />
               )}
               {listing.lineNumber !== null ? (
                 <Badge label={`Линия ${listing.lineNumber}`} variant="neutral" />

@@ -36,5 +36,5 @@ export function RatingBadge({ rating, short = false }: RatingBadgeProps) {
   const label = short
     ? rating.score.toFixed(1)
     : `${rating.score.toFixed(1)} · ${dealsLabel(rating.dealsCount)}`;
-  return <Badge label={label} variant={variant} />;
+  return <Badge label={label} variant={variant} icon="star-outline" />;
 }

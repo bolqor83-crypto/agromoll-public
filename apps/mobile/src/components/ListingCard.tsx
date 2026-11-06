@@ -42,12 +42,21 @@ export function ListingCard({ listing, onPress, sellerView = false, footer }: Li
     badges.push(<RatingBadge key="rating" rating={listing.sellerRating ?? null} />);
   }
   if (listing.isPerishable) {
-    badges.push(<Badge key="perishable" label="Скоропорт" variant="attention" />);
+    badges.push(
+      <Badge key="perishable" label="Скоропорт" variant="attention" icon="time-outline" />,
+    );
   } else if (listing.category === 'vegetables' || listing.category === 'fruits') {
-    badges.push(<Badge key="fresh" label="Свежий" variant="success" />);
+    badges.push(<Badge key="fresh" label="Свежий" variant="success" icon="leaf-outline" />);
   }
   if (listing.lineNumber !== null) {
-    badges.push(<Badge key="line" label={`Линия ${listing.lineNumber}`} variant="neutral" />);
+    badges.push(
+      <Badge
+        key="line"
+        label={`Линия ${listing.lineNumber}`}
+        variant="neutral"
+        icon="locate-outline"
+      />,
+    );
   }
   if (sellerView && listing.status !== 'active') {
     badges.push(
@@ -114,7 +123,9 @@ export function ListingCard({ listing, onPress, sellerView = false, footer }: Li
               marginTop: spacing.xs,
             }}
           >
-            <Text variant="body" weight="700" color="primary">
+            {/* v0.6.2-B: цена — табличные цифры (не прыгает при обновлении),
+                weight 700 — визуальный якорь карточки (аудит №9) */}
+            <Text variant="body" weight="700" color="primary" numeric>
               {formatPrice(listing.pricePerUnit, listing.unit)}
             </Text>
           </View>

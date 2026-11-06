@@ -43,6 +43,8 @@ export interface AnimatedNumberProps {
   variant?: TextProps['variant'];
   weight?: TextProps['weight'];
   color?: TextColor;
+  /** Табличные цифры — по умолчанию вкл (v0.6.2-B): счётчик дышит, но не прыгает. */
+  numeric?: boolean;
   testID?: string;
 }
 
@@ -53,6 +55,7 @@ export function AnimatedNumber({
   variant = 'body',
   weight,
   color,
+  numeric = true,
   testID = 'animated-number',
 }: AnimatedNumberProps) {
   const systemReduced = useReducedMotion();
@@ -102,7 +105,7 @@ export function AnimatedNumber({
   );
 
   return (
-    <Text variant={variant} weight={weight} color={color} testID={testID}>
+    <Text variant={variant} weight={weight} color={color} numeric={numeric} testID={testID}>
       {text}
     </Text>
   );
