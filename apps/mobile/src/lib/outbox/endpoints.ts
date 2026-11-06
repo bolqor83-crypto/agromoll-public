@@ -44,4 +44,5 @@ export const IDEMPOTENCY_ENDPOINTS: Record<OutboxOperationType, OutboxEndpoint> 
     method: 'POST',
     url: (p) => `/debts/${String(p.debtId)}/resolve`,
   },
+  create_delivery: { method: 'POST', url: '/deliveries' }, // v0.5.0 (ADR-015)
 };

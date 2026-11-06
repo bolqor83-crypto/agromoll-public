@@ -1,5 +1,8 @@
 // АгроМолл — схема v0.3.0 «Аутентификация по телефону» + v0.3.1 «Сессии»
 // + v0.4.0 «Долги» (подэтап A).
+// + v0.5.0 «Публичный рейтинг» (подэтап A, ADR-013)
+// + v0.5.0 «Геозоны» (подэтап B, ADR-014)
+// + v0.5.0 «Доставка попутчиками» (подэтап C, ADR-015).
 //
 // Домен: продавец выставляет листинг (Listing), покупатель бронирует
 // количество (Booking), продавец может подтвердить или предложить
@@ -22,6 +25,63 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+/// Действие из журнала репутации (v0.5.0, ADR-013).
+/// deal_confirmed — сделка/долг закрыты позитивно (delta = вес события);
+/// dispute_opened — спор (delta отрицательный);
+/// dispute_resolved — спор разрешён обоюдно (нейтрально, delta = 0);
+/// auto_confirmed — авто-подтверждение приёмки (вес меньше явного);
+/// penalty_applied — анти-накрутка: паре сделок назначен пониженный вес.
+enum ReputationAction {
+  deal_confirmed
+  dispute_opened
+  dispute_resolved
+  auto_confirmed
+  penalty_applied
+}
+
+/// Тип геозоны (v0.5.0, ADR-014).
+/// buyer_point — точка покупателя (куда везти товар);
+/// seller_line — линия/ряд продавца на рынке (откуда забирать);
+/// delivery_corridor — коридор доставщика (куда он едет и может подвезти).
+enum GeoPointKind {
+  buyer_point
+  seller_line
+  delivery_corridor
+}
+
+/// Тип транспорта коридора доставщика (v0.5.0, ADR-014).
+enum GeoVehicleType {
+  car
+  van
+  refrigerated
+  flatbed
+}
+
+/// Статус запроса доставки (v0.5.0, ADR-015).
+/// open — ждёт водителя; assigned — водитель взял; in_transit — везёт;
+/// delivered — передано; cancelled/expired — терминальные.
+enum DeliveryStatus {
+  open
+  assigned
+  in_transit
+  delivered
+  cancelled
+  expired
+}
+
+/// Действие из журнала доставки (v0.5.0, ADR-015).
+/// blocked_by_289fz — попытка взять заказ заблокированной парой
+/// (запрос остаётся открытым для других водителей).
+enum DeliveryEventAction {
+  created
+  assigned
+  started
+  delivered
+  cancelled
+  expired
+  blocked_by_289fz
 }
 
 /// Роль участника рынка. Совпадает с USER_ROLES из @agromoll/types
@@ -97,46 +157,55 @@ enum QualityFlag {
 }
 
 model User {
-  id              String   @id @default(uuid())
-  role            UserRole @default(buyer)
-  displayName     String
+  id                 String   @id @default(uuid())
+  role               UserRole @default(buyer)
+  displayName        String
   /// Телефон — основной идентификатор входа (v0.3.0, ADR-007).
   /// Nullable ради старых строк: новые пользователи создаются только
   /// через /auth/request-code, где телефон обязателен и уникален.
   /// В Postgres unique-индекс допускает несколько NULL.
-  phone           String?  @unique
+  phone              String?  @unique
   /// Прошёл ли подтверждение номера SMS-кодом.
-  phoneVerified   Boolean  @default(false)
+  phoneVerified      Boolean  @default(false)
   /// Пароль — опциональный запасной способ входа. В MVP вход только
   /// по телефону + коду; колонка заложена на будущее (ADR-007).
-  passwordHash    String?
-  reputationScore Float    @default(0)
+  passwordHash       String?
+  reputationScore    Float    @default(0)
   /// Токен FCM для push-уведомлений (v0.4.0). NULL — push недоступен,
   /// уведомление доставляется только in-app (ADR-010).
-  fcmToken        String?
+  fcmToken           String?
   /// Репутационные счётчики (v0.4.0-C, ADR-012): фундамент публичного
   /// рейтинга v0.5.0; источник правды — события, счётчики — быстрый view.
-  totalConfirmations Int   @default(0)
-  totalDisputes      Int   @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  totalConfirmations Int      @default(0)
+  totalDisputes      Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  listings         Listing[]
-  bookings         Booking[] // брони, созданные пользователем как покупатель
-  bookingEvents    BookingEvent[] // действия пользователя в журнале броней
-  outboxOperations OutboxOperation[] // идемпотентные операции (ADR-006)
-  sessions         Session[] // сессии refresh-токенов (ADR-008)
-  debtsAsCreditor  Debt[] @relation("DebtCreditor") // долги, где я дал в долг
-  debtsAsDebtor    Debt[] @relation("DebtDebtor") // долги, где я должен
-  debtEvents       DebtEvent[] // действия пользователя в журнале долгов
-  notifications    Notification[] // in-app уведомления (v0.4.0)
+  listings              Listing[]
+  bookings              Booking[] // брони, созданные пользователем как покупатель
+  bookingEvents         BookingEvent[] // действия пользователя в журнале броней
+  outboxOperations      OutboxOperation[] // идемпотентные операции (ADR-006)
+  sessions              Session[] // сессии refresh-токенов (ADR-008)
+  debtsAsCreditor       Debt[]              @relation("DebtCreditor") // долги, где я дал в долг
+  debtsAsDebtor         Debt[]              @relation("DebtDebtor") // долги, где я должен
+  debtEvents            DebtEvent[] // действия пользователя в журнале долгов
+  notifications         Notification[] // in-app уведомления (v0.4.0)
   // Учёт часов 289-ФЗ (v0.4.0, ADR-011): пары «водитель — продавец».
-  workSessionsAsDriver  WorkSession[] @relation("WorkSessionDriver")
-  workSessionsAsSeller  WorkSession[] @relation("WorkSessionSeller")
-  monthlyTotalsAsDriver MonthlyPairTotal[] @relation("MonthlyPairDriver")
-  monthlyTotalsAsSeller MonthlyPairTotal[] @relation("MonthlyPairSeller")
-  blockedPairsAsDriver  BlockedPair[] @relation("BlockedPairDriver")
-  blockedPairsAsSeller  BlockedPair[] @relation("BlockedPairSeller")
+  workSessionsAsDriver  WorkSession[]       @relation("WorkSessionDriver")
+  workSessionsAsSeller  WorkSession[]       @relation("WorkSessionSeller")
+  monthlyTotalsAsDriver MonthlyPairTotal[]  @relation("MonthlyPairDriver")
+  monthlyTotalsAsSeller MonthlyPairTotal[]  @relation("MonthlyPairSeller")
+  blockedPairsAsDriver  BlockedPair[]       @relation("BlockedPairDriver")
+  blockedPairsAsSeller  BlockedPair[]       @relation("BlockedPairSeller")
+  // Публичный рейтинг (v0.5.0, ADR-013).
+  reputation            ReputationSnapshot? // один актуальный снимок (уникальный userId)
+  reputationEvents      ReputationEvent[] // журнал изменений рейтинга (аудит)
+  // Геозоны (v0.5.0, ADR-014): точки/линии/коридоры пользователя.
+  geoPoints             GeoPoint[]
+  // Доставка попутчиками (v0.5.0, ADR-015).
+  deliveriesAsBuyer     DeliveryRequest[]   @relation("DeliveryBuyer")
+  deliveriesAsDriver    DeliveryRequest[]   @relation("DeliveryDriver")
+  deliveryEvents        DeliveryEvent[]
 
   @@map("users")
 }
@@ -149,23 +218,23 @@ model User {
 /// отзывается (revokedAt). Решения об авторизации принимает Redis
 /// (session-store.ts) — таблица нужна для аудита, поддержки и очистки.
 model Session {
-  id     String  @id @default(uuid())
-  userId String
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// UUID семьи: все ротации одного входа живут под одним familyId.
   familyId   String
   /// Актуальный jti refresh-токена (после последней ротации).
   currentJti String
   /// История ротаций — какие jti уже были использованы.
-  usedJtis   String[] @default([])
+  usedJtis   String[]  @default([])
   /// Момент отзыва семьи (logout / обнаружение повторного использования).
   revokedAt  DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   /// User-Agent устройства — для экрана «активные сессии» в будущем.
-  userAgent String?
+  userAgent  String?
   /// IP устройства на момент входа.
-  ip        String?
+  ip         String?
 
   @@unique([familyId])
   @@unique([currentJti])
@@ -202,33 +271,35 @@ model Listing {
 }
 
 model Booking {
-  id                String        @id @default(uuid())
-  listingId         String
-  listing           Listing       @relation(fields: [listingId], references: [id])
-  buyerId           String
-  buyer             User          @relation(fields: [buyerId], references: [id])
-  requestedQuantity Int
-  confirmedQuantity Int?
-  status            BookingStatus @default(requested)
+  id                  String        @id @default(uuid())
+  listingId           String
+  listing             Listing       @relation(fields: [listingId], references: [id])
+  buyerId             String
+  buyer               User          @relation(fields: [buyerId], references: [id])
+  requestedQuantity   Int
+  confirmedQuantity   Int?
+  status              BookingStatus @default(requested)
   /// TTL запроса: по истечении бронь гасится кроном, резерв возвращается листингу.
-  expiresAt         DateTime
+  expiresAt           DateTime
   /// Момент подтверждения брони продавцом (v0.4.0-C): якорь
   /// авто-подтверждения приёмки через BOOKING_AUTO_CONFIRM_HOURS.
-  confirmedAt       DateTime?
+  confirmedAt         DateTime?
   /// Момент подтверждения приёмки покупателем (confirm-delivery).
   deliveryConfirmedAt DateTime?
   /// Фактически полученное количество (≤ confirmedQuantity).
-  receivedQuantity  Int?
+  receivedQuantity    Int?
   /// Комментарий качества при приёмке (опционально).
-  qualityNotes      String?
+  qualityNotes        String?
   /// Оценка качества: ok / minor_issue / major_issue (ADR-012).
-  qualityFlag       QualityFlag   @default(ok)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  qualityFlag         QualityFlag   @default(ok)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
-  events BookingEvent[]
+  events           BookingEvent[]
   /// Долги, привязанные к брони (если товар отпущен в долг по брони, ADR-010).
-  debts Debt[]
+  debts            Debt[]
+  /// Запросы доставки по брони (v0.5.0, ADR-015).
+  deliveryRequests DeliveryRequest[]
 
   @@index([buyerId])
   @@index([listingId])
@@ -269,6 +340,11 @@ enum OutboxOperationType {
   settle_debt
   dispute_debt
   resolve_debt
+  create_delivery
+  assign_delivery
+  start_delivery
+  deliver_delivery
+  cancel_delivery
 }
 
 /// Состояние операции на сервере (ADR-006).
@@ -332,32 +408,32 @@ enum DebtAction {
 /// статуса фиксируется в append-only журнале DebtEvent — из него в
 /// будущем считается «надёжность оплаты» (репутация v0.5.0).
 model Debt {
-  id         String @id @default(uuid())
+  id                 String     @id @default(uuid())
   /// Кто дал в долг (создал запись).
-  creditorId String
-  creditor   User   @relation("DebtCreditor", fields: [creditorId], references: [id])
+  creditorId         String
+  creditor           User       @relation("DebtCreditor", fields: [creditorId], references: [id])
   /// Кто взял в долг.
-  debtorId   String
-  debtor     User   @relation("DebtDebtor", fields: [debtorId], references: [id])
-  amount     Decimal @db.Decimal(12, 2)
+  debtorId           String
+  debtor             User       @relation("DebtDebtor", fields: [debtorId], references: [id])
+  amount             Decimal    @db.Decimal(12, 2)
   /// Валюта. В MVP только RUB — защита от опечаток при вводе.
-  currency   String  @default("RUB")
-  description String?
+  currency           String     @default("RUB")
+  description        String?
   /// Долг по конкретному лоту (опционально).
-  listingId  String?
-  listing    Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  listingId          String?
+  listing            Listing?   @relation(fields: [listingId], references: [id], onDelete: SetNull)
   /// Долг по конкретной брони (опционально).
-  bookingId  String?
-  booking    Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  status     DebtStatus @default(active)
+  bookingId          String?
+  booking            Booking?   @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  status             DebtStatus @default(active)
   /// Обоюдное разрешение спора (ADR-010): кто из сторон ПЕРВЫМ нажал
   /// «Согласен» в статусе disputed. Второе подтверждение другой стороной
   /// закрывает спор — status → settled.
   resolveRequestedBy String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
   /// Момент погашения (прямой settle или обоюдный resolve).
-  settledAt  DateTime?
+  settledAt          DateTime?
 
   events DebtEvent[]
 
@@ -422,19 +498,19 @@ model Notification {
 /// признак трудовых отношений, а не самозанятости. Платформа считает
 /// часы и требует паузу. Это НЕ биллинг и НЕ зарплата — только часы.
 model WorkSession {
-  id       String   @id @default(uuid())
-  driverId String
-  driver   User     @relation("WorkSessionDriver", fields: [driverId], references: [id])
-  sellerId String
-  seller   User     @relation("WorkSessionSeller", fields: [sellerId], references: [id])
-  startedAt DateTime @default(now())
+  id              String    @id @default(uuid())
+  driverId        String
+  driver          User      @relation("WorkSessionDriver", fields: [driverId], references: [id])
+  sellerId        String
+  seller          User      @relation("WorkSessionSeller", fields: [sellerId], references: [id])
+  startedAt       DateTime  @default(now())
   /// Момент закрытия (подтверждение приёмки, отмена или ручное завершение).
-  endedAt   DateTime?
+  endedAt         DateTime?
   /// durationMinutes = endedAt − startedAt; NULL, пока сессия открыта.
   durationMinutes Int?
   /// Месяц старта «YYYY-MM» — денормализация для агрегации по парам.
-  month    String
-  createdAt DateTime @default(now())
+  month           String
+  createdAt       DateTime  @default(now())
 
   @@index([driverId, sellerId, month])
   @@index([month])
@@ -447,16 +523,16 @@ model WorkSession {
 /// monthCounted — засчитан ли месяц в «опасную» серию (≥ лимита часов);
 /// при <60 ч в месяце серия сбрасывается (пересчёта истории нет).
 model MonthlyPairTotal {
-  id        String   @id @default(uuid())
-  driverId  String
-  driver    User     @relation("MonthlyPairDriver", fields: [driverId], references: [id])
-  sellerId  String
-  seller    User     @relation("MonthlyPairSeller", fields: [sellerId], references: [id])
-  month     String
-  totalMinutes Int   @default(0)
+  id           String   @id @default(uuid())
+  driverId     String
+  driver       User     @relation("MonthlyPairDriver", fields: [driverId], references: [id])
+  sellerId     String
+  seller       User     @relation("MonthlyPairSeller", fields: [sellerId], references: [id])
+  month        String
+  totalMinutes Int      @default(0)
   /// ≥ WORK_HOURS_MONTHLY_LIMIT часов в этом месяце.
-  monthCounted Boolean @default(false)
-  updatedAt DateTime @updatedAt
+  monthCounted Boolean  @default(false)
+  updatedAt    DateTime @updatedAt
 
   @@unique([driverId, sellerId, month])
   @@index([month])
@@ -469,18 +545,167 @@ model MonthlyPairTotal {
 /// 289-ФЗ требует паузу — новые сессии пары отклоняются (409).
 /// Уникальный ключ — одна активная блокировка на пару.
 model BlockedPair {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   driverId  String
-  driver    User     @relation("BlockedPairDriver", fields: [driverId], references: [id])
+  driver    User      @relation("BlockedPairDriver", fields: [driverId], references: [id])
   sellerId  String
-  seller    User     @relation("BlockedPairSeller", fields: [sellerId], references: [id])
-  blockedAt DateTime @default(now())
+  seller    User      @relation("BlockedPairSeller", fields: [sellerId], references: [id])
+  blockedAt DateTime  @default(now())
   /// Причина — текст для мягкого экрана паузы в приложении.
   reason    String
   /// NULL — бессрочно (MVP: снятие блокировки — вручную поддержкой).
   unblockAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@unique([driverId, sellerId])
   @@map("blocked_pairs")
+}
+
+/// Актуальный снимок рейтинга пользователя (v0.5.0, ADR-013).
+///
+/// Материализованное представление журналов BookingEvent + DebtEvent:
+/// пересчитывается триггерами (confirm-delivery, авто-подтверждение,
+/// settle/dispute/resolve долга). score NULL — данных меньше
+/// RATING_MIN_DEALS: новичков не наказываем отсутствием рейтинга,
+/// API возвращает reason "min_deals_not_reached".
+model ReputationSnapshot {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 0–5, округление до 0.1. NULL — порог минимальных данных не достигнут.
+  score              Float?
+  dealsCount         Int      @default(0)
+  disputesCount      Int      @default(0)
+  autoConfirmedCount Int      @default(0)
+  lastCalculatedAt   DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("reputation_snapshots")
+}
+
+/// Append-only журнал изменений рейтинга (v0.5.0, ADR-013).
+///
+/// Аудит «что случилось с рейтингом»: каждая строка — доменное событие
+/// (сделка подтверждена, спор открыт, анти-накрутка сработала).
+/// Источник правды для score — BookingEvent + DebtEvent (пересчёт
+/// идемпотентен), этот журнал — человекочитаемая история для экрана
+/// «Мой рейтинг». Строки не обновляются и не удаляются.
+model ReputationEvent {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    ReputationAction
+  /// Вес события для рейтинга: +1.0 / +0.5 / +0.3 / −1.0 / 0 (нейтрально).
+  delta     Float
+  /// Контекст: «ok», «minor_issue», «debt_settled», «pair_deals_capped»…
+  reason    String?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@map("reputation_events")
+}
+
+/// Геозона — точка на карте рынка (v0.5.0, подэтап B, ADR-014).
+///
+/// Единая модель для трёх видов: точки покупателей (куда везти),
+/// линии продавцов (ряды рынка, откуда забирать) и коридоров
+/// доставщиков (маршрут «еду туда — могу подвезти»). Координаты
+/// хранятся и как Float-поля (доступны через Prisma-клиент), и как
+/// PostGIS geography(Point, 4326) — синхронизируется триггером БД и
+/// обслуживает пространственные запросы ST_DWithin/ST_Distance
+/// с GIST-индексом (миграция 20261108100000_geo_points).
+model GeoPoint {
+  id             String                                @id @default(uuid())
+  ownerId        String
+  owner          User                                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  kind           GeoPointKind
+  latitude       Float
+  longitude      Float
+  /// PostGIS geography(Point, 4326). Пишется триггером БД из
+  /// (longitude, latitude); клиент работает только с lat/lng.
+  geog           Unsupported("geography(Point,4326)")?
+  address        String?
+  label          String?
+  radiusMeters   Int                                   @default(50)
+  isActive       Boolean                               @default(true)
+  /// Коридор (kind=delivery_corridor): точка старта {lat, lng}.
+  corridorFrom   Json?
+  /// Коридор: точка финиша {lat, lng}.
+  corridorTo     Json?
+  vehicleType    GeoVehicleType                        @default(car)
+  maxWeightKg    Int?
+  isRefrigerated Boolean                               @default(false)
+  createdAt      DateTime                              @default(now())
+  updatedAt      DateTime                              @updatedAt
+
+  /// Запросы доставки, где точка — место забора (v0.5.0, ADR-015).
+  deliveryPickups  DeliveryRequest[] @relation("DeliveryPickup")
+  /// Запросы доставки, где точка — место доставки (v0.5.0, ADR-015).
+  deliveryDropoffs DeliveryRequest[] @relation("DeliveryDropoff")
+
+  @@index([ownerId, kind])
+  @@map("geo_points")
+}
+
+/// Запрос доставки попутчиком (v0.5.0, подэтап C, ADR-015).
+///
+/// Покупатель просит «подвезти от линии продавца к моей точке».
+/// Платформа НЕ показывает цену и НЕ является агентом: водитель и
+/// стороны договариваются сами (поля цены нет намеренно). Продавец
+/// для пары 289-ФЗ (driver+seller) = владелец точки забора
+/// (pickupPoint.owner) — смена начинается при взятии заказа.
+/// pickupCode/dropoffCode — UUID для QR-подтверждения передачи.
+model DeliveryRequest {
+  id               String         @id @default(uuid())
+  buyerId          String
+  buyer            User           @relation("DeliveryBuyer", fields: [buyerId], references: [id])
+  /// Доставка по конкретной брони (опционально).
+  bookingId        String?
+  booking          Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  /// Откуда забрать: линия продавца (владелец точки = продавец).
+  pickupPointId    String
+  pickupPoint      GeoPoint       @relation("DeliveryPickup", fields: [pickupPointId], references: [id])
+  /// Куда привезти: точка покупателя.
+  dropoffPointId   String
+  dropoffPoint     GeoPoint       @relation("DeliveryDropoff", fields: [dropoffPointId], references: [id])
+  weightKg         Decimal        @db.Decimal(8, 2)
+  description      String?
+  status           DeliveryStatus @default(open)
+  assignedDriverId String?
+  assignedDriver   User?          @relation("DeliveryDriver", fields: [assignedDriverId], references: [id])
+  assignedAt       DateTime?
+  deliveredAt      DateTime?
+  /// TTL запроса: по истечении крон переводит open → expired.
+  expiresAt        DateTime
+  /// QR-коды передачи (UUID, v0.5.0-C).
+  pickupCode       String
+  dropoffCode      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  events DeliveryEvent[]
+
+  @@index([buyerId, status])
+  @@index([assignedDriverId, status])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("delivery_requests")
+}
+
+/// Append-only журнал доставки (v0.5.0, ADR-015).
+/// Каждый переход статуса + попытки блокировки 289-ФЗ.
+model DeliveryEvent {
+  id         String              @id @default(uuid())
+  deliveryId String
+  delivery   DeliveryRequest     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  /// Кто совершил действие. NULL — системные (TTL-крон).
+  actorId    String?
+  actor      User?               @relation(fields: [actorId], references: [id])
+  action     DeliveryEventAction
+  payload    Json?
+  createdAt  DateTime            @default(now())
+
+  @@index([deliveryId])
+  @@map("delivery_events")
 }

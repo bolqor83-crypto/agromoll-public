@@ -57,16 +57,36 @@ import type {
 import { DEBT_OVERDUE_DAYS } from './debts.constants';
 import { DEBT_REMINDER_COOLDOWN_HOURS } from './debts.constants';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ReputationService } from '../reputation/reputation.service';
 
 type TransactionClient = Prisma.TransactionClient;
 
 /** Загрузка долга с именами сторон — для карточек и уведомлений. */
 const DEBT_VIEW_INCLUDE = {
-  creditor: { select: { id: true, displayName: true } },
-  debtor: { select: { id: true, displayName: true } },
+  creditor: {
+    select: {
+      id: true,
+      displayName: true,
+      reputation: { select: { score: true, dealsCount: true } },
+    },
+  },
+  debtor: {
+    select: {
+      id: true,
+      displayName: true,
+      reputation: { select: { score: true, dealsCount: true } },
+    },
+  },
 } as const satisfies Prisma.DebtInclude;
 
 type DebtWithParties = Prisma.DebtGetPayload<{ include: typeof DEBT_VIEW_INCLUDE }>;
+
+/** Снимок рейтинга → сводка для бейджа (ADR-013). NULL-скоры не показываем. */
+function toRatingSummary(
+  snapshot: { score: number | null; dealsCount: number } | null,
+): { score: number; dealsCount: number } | null {
+  return snapshot && snapshot.score !== null ? { score: snapshot.score, dealsCount: snapshot.dealsCount } : null;
+}
 
 export interface CreateDebtParams {
   /** Кто дал в долг — текущий пользователь (кредитор). */
@@ -111,6 +131,7 @@ export class DebtsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly reputation: ReputationService,
     @Inject(DEBT_REMINDER_COOLDOWN_HOURS) private readonly defaultCooldownHours: number,
   ) {}
 
@@ -335,6 +356,9 @@ export class DebtsService {
       body: `Долг ${debt.amount.toString()} ₽ отмечен погашенным. Запись в журнале обновлена.`,
       data: { debtId: debt.id },
     });
+
+    // Триггер ADR-013: погашение — плюс к надёжности дебитора.
+    await this.reputation.safeOnDebtChanged(debtId);
     return this.toDto(debt, null);
   }
 
@@ -373,6 +397,9 @@ export class DebtsService {
       body: `По долгу ${debt.amount.toString()} ₽ открыт спор. Откройте карточку, чтобы разрешить его вместе.`,
       data: { debtId: debt.id },
     });
+
+    // Триггер ADR-013: спор по долгу — минус к надёжности дебитора.
+    await this.reputation.safeOnDebtChanged(debtId);
     return this.toDto(debt, null);
   }
 
@@ -446,6 +473,9 @@ export class DebtsService {
         data: { debtId: debt.id },
       });
     }
+
+    // Триггер ADR-013: обоюдное разрешение — нейтральное событие рейтинга.
+    await this.reputation.safeOnDebtChanged(debtId);
     return this.toDto(debt, null);
   }
 
@@ -551,8 +581,10 @@ export class DebtsService {
       id: debt.id,
       creditorId: debt.creditorId,
       creditorName: debt.creditor.displayName,
+      creditorRating: toRatingSummary(debt.creditor.reputation),
       debtorId: debt.debtorId,
       debtorName: debt.debtor.displayName,
+      debtorRating: toRatingSummary(debt.debtor.reputation),
       amount: debt.amount.toString(),
       currency: debt.currency,
       description: debt.description,

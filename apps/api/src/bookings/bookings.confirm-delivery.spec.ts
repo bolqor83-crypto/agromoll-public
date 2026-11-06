@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
+import { ReputationService } from '../reputation/reputation.service';
 
 const BUYER = 'buyer-1';
 const SELLER = 'seller-1';
@@ -94,6 +95,7 @@ async function createService(
       { provide: BOOKING_AUTO_CONFIRM_HOURS, useValue: autoConfirmHours },
       { provide: NotificationsService, useValue: notifications },
       { provide: WorkHoursService, useValue: { endSession: jest.fn() } },
+      { provide: ReputationService, useValue: { safeOnBookingDelivery: jest.fn() } },
       BookingsService,
     ],
   }).compile();
@@ -233,6 +235,7 @@ describe('BookingsService.confirmDelivery (unit, v0.4.0-C)', () => {
         { provide: BOOKING_AUTO_CONFIRM_HOURS, useValue: 24 },
         { provide: NotificationsService, useValue: notifications },
         { provide: WorkHoursService, useValue: workHours },
+        { provide: ReputationService, useValue: { safeOnBookingDelivery: jest.fn() } },
         BookingsService,
       ],
     }).compile();

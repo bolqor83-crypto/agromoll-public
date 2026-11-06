@@ -31,13 +31,26 @@ import { BOOKING_TTL_MINUTES } from './bookings.constants';
 import { BOOKING_AUTO_CONFIRM_HOURS } from './bookings.constants';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
+import { ReputationService } from '../reputation/reputation.service';
 
 type TransactionClient = Prisma.TransactionClient;
 
-/** Include для списков броней: название/единица лота и имя покупателя. */
+/** Include для списков броней: название/единица лота, имя покупателя
+ *  и рейтинги сторон для бейджа контрагента (ADR-013). */
 const BOOKING_LIST_VIEW_INCLUDE = {
-  listing: { select: { title: true, unit: true } },
-  buyer: { select: { displayName: true } },
+  listing: {
+    select: {
+      title: true,
+      unit: true,
+      seller: { select: { reputation: { select: { score: true, dealsCount: true } } } },
+    },
+  },
+  buyer: {
+    select: {
+      displayName: true,
+      reputation: { select: { score: true, dealsCount: true } },
+    },
+  },
 } as const satisfies Prisma.BookingInclude;
 
 /** Загрузка брони вместе с лотами — для проверок ролей и остатков. */
@@ -124,6 +137,7 @@ export class BookingsService {
     @Inject(BOOKING_AUTO_CONFIRM_HOURS) private readonly autoConfirmHours: number,
     private readonly notifications: NotificationsService,
     private readonly workHours: WorkHoursService,
+    private readonly reputation: ReputationService,
   ) {}
 
   /** Покупатель запрашивает бронь. Резервирует количество атомарно. */
@@ -460,6 +474,10 @@ export class BookingsService {
     // продавца — смену закрыть (сценарий самовывоза водителем).
     await this.closeRelatedWorkSession(bookingId);
 
+    // Триггер ADR-013: пересчёт рейтинга обеих сторон. Не блокирует
+    // сделку — сбой пересчёта логируется и догоняется следующим событием.
+    await this.reputation.safeOnBookingDelivery(bookingId);
+
     return booking;
   }
 
@@ -504,7 +522,12 @@ export class BookingsService {
           this.logTransition(id, null, 'confirmed', 'completed');
           return true;
         });
-        if (done) confirmed++;
+        if (done) {
+          confirmed++;
+          // Пересчёт рейтинга после авто-подтверждения (ADR-013),
+          // не блокирует закрытие брони.
+          await this.reputation.safeOnBookingDelivery(id);
+        }
       } catch (error) {
         this.logger.error({ bookingId: id, err: error }, 'auto-confirm: не удалось закрыть бронь');
       }

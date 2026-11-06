@@ -127,6 +127,9 @@ export interface ListingDto {
   id: string;
   sellerId: string;
   sellerName?: string;
+  /** Рейтинг продавца для бейджа на карточке (v0.5.0, ADR-013).
+   *  null — рейтинга нет (порог минимальных сделок не достигнут). */
+  sellerRating?: RatingSummaryDto | null;
   title: string;
   category: ListingCategory;
   unit: ListingUnit;
@@ -150,6 +153,9 @@ export interface BookingDto {
   listingUnit?: ListingUnit;
   buyerId: string;
   buyerName?: string;
+  /** Рейтинги сторон для бейджа контрагента (v0.5.0, ADR-013). */
+  sellerRating?: RatingSummaryDto | null;
+  buyerRating?: RatingSummaryDto | null;
   requestedQuantity: number;
   confirmedQuantity: number | null;
   status: BookingStatus;
@@ -282,6 +288,9 @@ export interface DebtDto {
   creditorName?: string;
   debtorId: string;
   debtorName?: string;
+  /** Рейтинги сторон для бейджа контрагента (v0.5.0, ADR-013). */
+  creditorRating?: RatingSummaryDto | null;
+  debtorRating?: RatingSummaryDto | null;
   /** Decimal от Prisma приходит строкой — точность денег не теряется. */
   amount: string;
   currency: string;
@@ -331,7 +340,192 @@ export interface ReminderResultDto {
   nextReminderAt: string;
 }
 
+// ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────────────
+
+/** Сводка рейтинга для бейджа на карточках («4.7 · 42 сделки»). */
+export interface RatingSummaryDto {
+  /** 0–5, округление до 0.1. */
+  score: number;
+  dealsCount: number;
+}
+
+/** Действия журнала рейтинга. Совпадают с enum ReputationAction в Prisma-схеме. */
+export const REPUTATION_ACTIONS = [
+  'deal_confirmed',
+  'dispute_opened',
+  'dispute_resolved',
+  'auto_confirmed',
+  'penalty_applied',
+] as const;
+
+export type ReputationActionType = (typeof REPUTATION_ACTIONS)[number];
+
+/** Строка журнала рейтинга (DTO уровня API). */
+export interface ReputationEventDto {
+  id: string;
+  action: ReputationActionType;
+  /** Вес события: +1.0 / +0.5 / +0.3 / −1.0 / 0. */
+  delta: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** Ответ GET /reputation/:userId — публичный профиль рейтинга. */
+export interface ReputationDto {
+  userId: string;
+  /** 0–5 или null — данных меньше RATING_MIN_DEALS. */
+  score: number | null;
+  /** Присутствует только при score=null. */
+  reason?: 'min_deals_not_reached';
+  dealsCount: number;
+  disputesCount: number;
+  autoConfirmedCount: number;
+  /** ISO-момент последнего пересчёта; null — снимка ещё нет. */
+  lastCalculatedAt: string | null;
+}
+
+/** Ответ GET /reputation/me — мой рейтинг + история событий. */
+export interface MyReputationDto extends ReputationDto {
+  /** Сколько взвешенных событий не хватает до появления рейтинга
+   *  (0 — рейтинг уже посчитан). Для подсказки «Сделайте ещё N сделок». */
+  dealsToRating: number;
+  /** Последние 20 событий журнала (таймлайн «Мой рейтинг»). */
+  events: ReputationEventDto[];
+}
+
+
+// ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────────────
+
+/** Виды геозон. Совпадают с enum GeoPointKind в Prisma-схеме. */
+export const GEO_POINT_KINDS = ['buyer_point', 'seller_line', 'delivery_corridor'] as const;
+
+export type GeoPointKind = (typeof GEO_POINT_KINDS)[number];
+
+export const GEO_POINT_KIND_LABELS: Record<GeoPointKind, string> = {
+  buyer_point: 'Точка покупателя',
+  seller_line: 'Линия продавца',
+  delivery_corridor: 'Коридор доставщика',
+};
+
+/** Тип транспорта коридора. Совпадает с enum GeoVehicleType в Prisma-схеме. */
+export const GEO_VEHICLE_TYPES = ['car', 'van', 'refrigerated', 'flatbed'] as const;
+
+export type GeoVehicleType = (typeof GEO_VEHICLE_TYPES)[number];
+
+export const GEO_VEHICLE_LABELS: Record<GeoVehicleType, string> = {
+  car: 'Легковая',
+  van: 'Фургон',
+  refrigerated: 'Рефрижератор',
+  flatbed: 'Бортовая',
+};
+
+/** Координата {lat, lng} — точки коридора и ответы nearby. */
+export interface GeoCoord {
+  lat: number;
+  lng: number;
+}
+
+/** Геозона (DTO уровня API, v0.5.0, ADR-014). */
+export interface GeoPointDto {
+  id: string;
+  ownerId: string;
+  kind: GeoPointKind;
+  latitude: number;
+  longitude: number;
+  address: string | null;
+  label: string | null;
+  radiusMeters: number;
+  isActive: boolean;
+  /** Коридор: старт {lat, lng} (для delivery_corridor, иначе null). */
+  corridorFrom: GeoCoord | null;
+  /** Коридор: финиш {lat, lng}. */
+  corridorTo: GeoCoord | null;
+  vehicleType: GeoVehicleType;
+  maxWeightKg: number | null;
+  isRefrigerated: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Расстояние в метрах от запрошенной точки (только в nearby-ответах). */
+  distanceMeters?: number;
+}
+
+// ─── Доставка попутчиками (v0.5.0, ADR-015) ─────────────────────────────────
+
+/** Статусы запроса доставки. Совпадают с enum DeliveryStatus в Prisma-схеме. */
+export const DELIVERY_STATUSES = [
+  'open',
+  'assigned',
+  'in_transit',
+  'delivered',
+  'cancelled',
+  'expired',
+] as const;
+
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
+  open: 'Ждёт водителя',
+  assigned: 'Водитель взял',
+  in_transit: 'В пути',
+  delivered: 'Доставлено',
+  cancelled: 'Отменено',
+  expired: 'Истекло',
+};
+
+/** Действия журнала доставки. Совпадают с enum DeliveryEventAction. */
+export const DELIVERY_EVENT_ACTIONS = [
+  'created',
+  'assigned',
+  'started',
+  'delivered',
+  'cancelled',
+  'expired',
+  'blocked_by_289fz',
+] as const;
+
+export type DeliveryEventActionType = (typeof DELIVERY_EVENT_ACTIONS)[number];
+
+/** Точка маршрута доставки с координатами (для карты и «Заберу отсюда»). */
+export interface DeliveryPointDto {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  label: string | null;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+/** Запрос доставки (DTO уровня API, v0.5.0-C, ADR-015).
+ *  Цены нет НАМЕРЕННО: платформа не агент (ADR-015). */
+export interface DeliveryDto {
+  id: string;
+  buyerId: string;
+  buyerName: string;
+  bookingId: string | null;
+  pickup: DeliveryPointDto;
+  dropoff: DeliveryPointDto;
+  /** Decimal от Prisma приходит строкой — точность не теряется. */
+  weightKg: string;
+  description: string | null;
+  status: DeliveryStatus;
+  assignedDriverId: string | null;
+  assignedDriverName: string | null;
+  assignedAt: string | null;
+  deliveredAt: string | null;
+  /** TTL запроса: открытым живёт DELIVERY_TTL_MINUTES (по умолчанию 60). */
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  /** QR-коды передачи: видны только покупателю и назначенному водителю. */
+  pickupCode: string | null;
+  dropoffCode: string | null;
+  /** Насколько точка забора/выгрузки рядом с маршрутом (для радара). */
+  corridorDistanceMeters: number | null;
+}
+
 // ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
+
 
 /** Типы in-app уведомлений. Совпадают с enum NotificationType в Prisma-схеме. */
 export const NOTIFICATION_TYPES = [

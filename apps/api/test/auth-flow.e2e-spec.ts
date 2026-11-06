@@ -35,7 +35,10 @@ describe('Auth flow (e2e, HTTP)', () => {
     await prisma.bookingEvent.deleteMany();
     await prisma.booking.deleteMany();
     await prisma.listing.deleteMany();
-    await prisma.user.deleteMany();
+    await prisma.deliveryEvent.deleteMany();
+  await prisma.deliveryRequest.deleteMany();
+  await prisma.geoPoint.deleteMany();
+  await prisma.user.deleteMany();
     await app.close();
   });
 

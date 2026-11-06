@@ -12,6 +12,7 @@ import {
 import { BookingsService } from './bookings.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WorkHoursModule } from '../work-hours/work-hours.module';
+import { ReputationModule } from '../reputation/reputation.module';
 
 /**
  * Модуль броней v0.2.0 + v0.4.0-C (приёмка, ADR-012).
@@ -24,7 +25,7 @@ import { WorkHoursModule } from '../work-hours/work-hours.module';
  *   BOOKING_AUTO_CONFIRM_HOURS).
  */
 @Module({
-  imports: [NotificationsModule, WorkHoursModule],
+  imports: [NotificationsModule, WorkHoursModule, ReputationModule],
   controllers: [BookingsController],
   providers: [
     BookingsService,

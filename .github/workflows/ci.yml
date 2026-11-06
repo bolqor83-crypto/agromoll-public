@@ -124,7 +124,9 @@ jobs:
           echo "$DIFF"
           # PostGIS-таблицы (spatial_ref_sys и пр.) живут в схеме public,
           # но не входят в datamodel — это ожидаемо, исключаем из проверки.
-          DIFF_FILTERED=$(echo "$DIFF" | grep -viE 'spatial_ref_sys|geometry_columns|geography_columns|raster_columns|raster_overviews' || true)
+          # geo_points_geog_gist_idx — GIST-индекс PostGIS (ADR-014):
+          # Prisma не описывает GIST, индекс живёт только в миграции.
+          DIFF_FILTERED=$(echo "$DIFF" | grep -viE 'spatial_ref_sys|geometry_columns|geography_columns|raster_columns|raster_overviews|geo_points_geog_gist_idx' || true)
           if echo "$DIFF_FILTERED" | grep -qE 'CREATE|ALTER|DROP'; then
             echo "::error::Миграции не соответствуют schema.prisma — применён diff выше"
             exit 1

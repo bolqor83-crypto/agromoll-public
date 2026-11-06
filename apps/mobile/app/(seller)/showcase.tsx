@@ -3,6 +3,7 @@ import { Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Badge,
+  Button,
   EmptyState,
   Icon,
   PullToRefreshScrollView,
@@ -18,6 +19,7 @@ import { ScreenHeader } from '@/components';
 import { DebtSummaryWidget } from '@/components/DebtSummaryWidget';
 import { ListingCard } from '@/components/ListingCard';
 import { CreateListingModal } from '@/components/CreateListingModal';
+import { MyPointSheet } from '@/components/MyPointSheet';
 import { api, isInvalidResponseError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { DEMO_LISTINGS } from '@/lib/demo-data';
@@ -39,6 +41,7 @@ export default function ShowcaseScreen() {
   const [state, setState] = useState<ShowcaseState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [pointSheetOpen, setPointSheetOpen] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -119,6 +122,19 @@ export default function ShowcaseScreen() {
         </PullToRefreshScrollView>
       )}
 
+      {/* Моя линия на рынке (v0.5.0-B, ADR-014): где вас искать покупателям. */}
+      <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
+        <Button
+          title="Моя линия на карте"
+          variant="secondary"
+          size="md"
+          onPress={() => {
+            tap();
+            setPointSheetOpen(true);
+          }}
+        />
+      </View>
+
       {/* FAB «+ Выставить лот» — 56 px, над панелью вкладок */}
       <Pressable
         accessibilityRole="button"
@@ -156,6 +172,12 @@ export default function ShowcaseScreen() {
           setModalOpen(false);
           void load();
         }}
+      />
+
+      <MyPointSheet
+        visible={pointSheetOpen}
+        onClose={() => setPointSheetOpen(false)}
+        role="seller"
       />
     </Screen>
   );

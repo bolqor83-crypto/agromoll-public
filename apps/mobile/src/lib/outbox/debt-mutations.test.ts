@@ -21,7 +21,7 @@ describe('Долговые операции outbox (v0.4.0)', () => {
       expect(OUTBOX_OPERATION_TYPES).toContain(operation);
     }
     // Порядок не важен, состав — да: лишних/недостающих нет.
-    expect(OUTBOX_OPERATION_TYPES).toHaveLength(10);
+    expect(OUTBOX_OPERATION_TYPES).toHaveLength(11); // +create_delivery (v0.5.0, ADR-015)
   });
 
   it('карта эндпоинтов строит URL из payload для каждой долговой операции', () => {

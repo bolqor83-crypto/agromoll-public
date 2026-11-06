@@ -27,10 +27,14 @@ import type {
   CounterpartyDto,
   DebtDto,
   DebtsSummaryDto,
+  DeliveryDto,
+  GeoPointDto,
   ListingDto,
+  MyReputationDto,
   NotificationsListDto,
   RefreshResponseDto,
   ReminderResultDto,
+  ReputationDto,
   UserDto,
   UserRole,
   WorkHoursCheckDto,
@@ -46,11 +50,17 @@ import {
   CounterpartiesResponseSchema,
   DebtsResponseSchema,
   DebtsSummaryResponseSchema,
+  DeliveriesResponseSchema,
+  DeliveryResponseSchema,
+  GeoPointResponseSchema,
+  GeoPointsResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
+  MyReputationResponseSchema,
   NotificationsListResponseSchema,
   RefreshResponseSchema,
   ReminderResponseSchema,
+  ReputationResponseSchema,
   RequestCodeResponseSchema,
   UserResponseSchema,
   WorkHoursCheckResponseSchema,
@@ -434,6 +444,163 @@ export const api = {
     return apiRequest<NotificationsListDto>({ method: 'GET', url: '/notifications/me' }).then(
       (d) => validateResponse(NotificationsListResponseSchema, d, 'notifications/me'),
     );
+  },
+
+  // ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────
+
+  /** Мой рейтинг: score, счётчики, прогресс, последние события. */
+  myReputation(): Promise<MyReputationDto> {
+    return apiRequest<MyReputationDto>({ method: 'GET', url: '/reputation/me' }).then((d) =>
+      validateResponse(MyReputationResponseSchema, d, 'reputation/me'),
+    );
+  },
+
+  /** Публичный рейтинг пользователя (бейдж контрагента). */
+  reputation(userId: string): Promise<ReputationDto> {
+    return apiRequest<ReputationDto>({ method: 'GET', url: `/reputation/${userId}` }).then((d) =>
+      validateResponse(ReputationResponseSchema, d, 'reputation/:userId'),
+    );
+  },
+
+  // ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────
+
+  /** Создать свою точку (buyer → buyer_point, seller → seller_line). */
+  createGeoPoint(input: {
+    kind: 'buyer_point' | 'seller_line';
+    latitude: number;
+    longitude: number;
+    address?: string;
+    label?: string;
+    radiusMeters?: number;
+  }): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'POST', url: '/geo/points', data: input }).then((d) =>
+      validateResponse(GeoPointResponseSchema, d, 'geo/points'),
+    );
+  },
+
+  /** Опубликовать маршрут доставщика (только driver). */
+  createGeoCorridor(input: {
+    corridorFrom: { lat: number; lng: number };
+    corridorTo: { lat: number; lng: number };
+    vehicleType?: 'car' | 'van' | 'refrigerated' | 'flatbed';
+    maxWeightKg?: number;
+    isRefrigerated?: boolean;
+    label?: string;
+  }): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'POST', url: '/geo/corridors', data: input }).then(
+      (d) => validateResponse(GeoPointResponseSchema, d, 'geo/corridors'),
+    );
+  },
+
+  /** Точки в радиусе (PostGIS ST_DWithin, ADR-014). */
+  geoPointsNearby(params: {
+    lat: number;
+    lng: number;
+    radiusMeters?: number;
+    kind?: 'buyer_point' | 'seller_line';
+  }): Promise<GeoPointDto[]> {
+    return apiRequest<GeoPointDto[]>({
+      method: 'GET',
+      url: '/geo/points/nearby',
+      params,
+    }).then((d) => validateResponse(GeoPointsResponseSchema, d, 'geo/points/nearby'));
+  },
+
+  /** Маршруты доставщиков, проходящие рядом с точкой. */
+  geoCorridorsNearby(params: {
+    lat: number;
+    lng: number;
+    radiusMeters?: number;
+  }): Promise<GeoPointDto[]> {
+    return apiRequest<GeoPointDto[]>({
+      method: 'GET',
+      url: '/geo/corridors/nearby',
+      params,
+    }).then((d) => validateResponse(GeoPointsResponseSchema, d, 'geo/corridors/nearby'));
+  },
+
+  /** Мои активные геозоны. */
+  geoPointsMine(): Promise<GeoPointDto[]> {
+    return apiRequest<GeoPointDto[]>({ method: 'GET', url: '/geo/points/mine' }).then((d) =>
+      validateResponse(GeoPointsResponseSchema, d, 'geo/points/mine'),
+    );
+  },
+
+  /** Обновить свою геозону. */
+  updateGeoPoint(
+    id: string,
+    input: {
+      latitude?: number;
+      longitude?: number;
+      address?: string;
+      label?: string;
+      radiusMeters?: number;
+    },
+  ): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'PATCH', url: `/geo/points/${id}`, data: input }).then(
+      (d) => validateResponse(GeoPointResponseSchema, d, 'geo/points/:id'),
+    );
+  },
+
+  /** Убрать свою геозону (деактивация, история остаётся). */
+  deactivateGeoPoint(id: string): Promise<GeoPointDto> {
+    return apiRequest<GeoPointDto>({ method: 'DELETE', url: `/geo/points/${id}` }).then((d) =>
+      validateResponse(GeoPointResponseSchema, d, 'geo/points/:id'),
+    );
+  },
+
+  // ─── Доставка попутчиками (v0.5.0, ADR-015) ──────────────────────
+  // Создание — офлайн через outbox (createDeliveryMutation); взятие и
+  // шаги — только онлайн: сервер проверяет BlockedPair (289-ФЗ).
+
+  /** Радар: открытые заказы, попутные маршрутам водителя. */
+  deliveriesOpen(): Promise<DeliveryDto[]> {
+    return apiRequest<DeliveryDto[]>({ method: 'GET', url: '/deliveries/open' }).then((d) =>
+      validateResponse(DeliveriesResponseSchema, d, 'deliveries/open'),
+    );
+  },
+
+  /** Мои доставки: покупателю — созданные, водителю — взятые. */
+  deliveriesMine(): Promise<DeliveryDto[]> {
+    return apiRequest<DeliveryDto[]>({ method: 'GET', url: '/deliveries/me' }).then((d) =>
+      validateResponse(DeliveriesResponseSchema, d, 'deliveries/me'),
+    );
+  },
+
+  /** Взять заказ (только водитель; 409 DELIVERY_PAIR_BLOCKED — пауза 289-ФЗ). */
+  assignDelivery(deliveryId: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/assign`,
+      data: {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/assign'));
+  },
+
+  /** Выехал к точке забора. */
+  startDelivery(deliveryId: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/start`,
+      data: {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/start'));
+  },
+
+  /** Передача завершена (QR-подтверждение — на клиенте, ADR-015). */
+  deliverDelivery(deliveryId: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/deliver`,
+      data: {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/deliver'));
+  },
+
+  /** Отмена (после выезда — только водитель, с причиной). */
+  cancelDelivery(deliveryId: string, reason?: string): Promise<DeliveryDto> {
+    return apiRequest<DeliveryDto>({
+      method: 'POST',
+      url: `/deliveries/${deliveryId}/cancel`,
+      data: reason ? { reason } : {},
+    }).then((d) => validateResponse(DeliveryResponseSchema, d, 'deliveries/cancel'));
   },
 
   // ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ──────────────────────────────

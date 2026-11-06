@@ -13,6 +13,7 @@ import { BookingsService } from './bookings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
+import { ReputationService } from '../reputation/reputation.service';
 
 /** Минимальный листинг для тестов. */
 function makeListing(overrides: Partial<Listing> = {}): Listing {
@@ -107,6 +108,7 @@ async function createService(prisma: PrismaService, ttlMinutes = 30): Promise<Bo
       { provide: BOOKING_AUTO_CONFIRM_HOURS, useValue: 24 },
       { provide: NotificationsService, useValue: { send: jest.fn() } },
       { provide: WorkHoursService, useValue: { endSession: jest.fn() } },
+      { provide: ReputationService, useValue: { safeOnBookingDelivery: jest.fn() } },
       BookingsService,
     ],
   }).compile();

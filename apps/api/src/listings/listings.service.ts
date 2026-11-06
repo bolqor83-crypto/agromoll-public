@@ -22,9 +22,14 @@ export interface ListingFilters {
   lineNumber?: number;
 }
 
-/** Include продавца для карточек ленты. */
+/** Include продавца для карточек ленты + рейтинг для бейджа (ADR-013). */
 const SELLER_INCLUDE = {
-  seller: { select: { displayName: true } },
+  seller: {
+    select: {
+      displayName: true,
+      reputation: { select: { score: true, dealsCount: true } },
+    },
+  },
 } as const satisfies Prisma.ListingInclude;
 
 @Injectable()

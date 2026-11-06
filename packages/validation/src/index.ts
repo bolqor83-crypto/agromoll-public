@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   BOOKING_ACTIONS,
+  DELIVERY_STATUSES,
   BOOKING_STATUSES,
   DEBT_ACTIONS,
   DEBT_STATUSES,
@@ -8,7 +9,10 @@ import {
   LISTING_STATUSES,
   LISTING_UNITS,
   NOTIFICATION_TYPES,
+  GEO_POINT_KINDS,
+  GEO_VEHICLE_TYPES,
   QUALITY_FLAGS,
+  REPUTATION_ACTIONS,
   USER_ROLES,
   normalizePhone,
 } from '@agromoll/types';
@@ -263,12 +267,24 @@ export type StartWorkSessionInput = z.infer<typeof StartWorkSessionSchema>;
 /** ISO-дата. */
 const IsoDateString = z.string().datetime({ offset: true });
 
+/** Сводка рейтинга для бейджа на карточках (v0.5.0, ADR-013).
+ *  null/отсутствует — рейтинга нет (порог не достигнут или старый сервер). */
+export const RatingSummarySchema = z
+  .object({
+    score: z.number().min(0).max(5),
+    dealsCount: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+export type RatingSummary = z.infer<typeof RatingSummarySchema>;
+
 /** Ответ GET /listings/:id и POST /listings. */
 export const ListingResponseSchema = z
   .object({
     id: z.string().min(1),
     sellerId: z.string().min(1),
     sellerName: z.string().optional(),
+    sellerRating: RatingSummarySchema.nullable().optional(),
     title: z.string().min(1),
     category: ListingCategorySchema,
     unit: ListingUnitSchema,
@@ -299,6 +315,8 @@ export const BookingResponseSchema = z
     listingUnit: ListingUnitSchema.optional(),
     buyerId: z.string().min(1),
     buyerName: z.string().optional(),
+    sellerRating: RatingSummarySchema.nullable().optional(),
+    buyerRating: RatingSummarySchema.nullable().optional(),
     requestedQuantity: z.number().int().positive(),
     confirmedQuantity: z.number().int().positive().nullable(),
     status: BookingStatusSchema,
@@ -370,6 +388,8 @@ export const DebtResponseSchema = z
     creditorName: z.string().optional(),
     debtorId: z.string().min(1),
     debtorName: z.string().optional(),
+    creditorRating: RatingSummarySchema.nullable().optional(),
+    debtorRating: RatingSummarySchema.nullable().optional(),
     amount: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Сумму ждём строкой вида «12500.00»'),
     currency: z.string().min(1),
     description: z.string().nullable(),
@@ -387,6 +407,243 @@ export const DebtResponseSchema = z
   .passthrough();
 
 export type DebtResponse = z.infer<typeof DebtResponseSchema>;
+
+// ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────────────
+
+/** Действие журнала рейтинга. */
+export const ReputationActionSchema = z.enum(REPUTATION_ACTIONS);
+
+/** Строка журнала рейтинга в ответах API. */
+export const ReputationEventSchema = z
+  .object({
+    id: z.string().min(1),
+    action: ReputationActionSchema,
+    delta: z.number(),
+    reason: z.string().nullable(),
+    createdAt: IsoDateString,
+  })
+  .passthrough();
+
+export type ReputationEventResponse = z.infer<typeof ReputationEventSchema>;
+
+/** Ответ GET /reputation/:userId — публичный профиль рейтинга. */
+export const ReputationResponseSchema = z
+  .object({
+    userId: z.string().min(1),
+    score: z.number().min(0).max(5).nullable(),
+    reason: z.literal('min_deals_not_reached').optional(),
+    dealsCount: z.number().int().nonnegative(),
+    disputesCount: z.number().int().nonnegative(),
+    autoConfirmedCount: z.number().int().nonnegative(),
+    lastCalculatedAt: IsoDateString.nullable(),
+  })
+  .passthrough();
+
+export type ReputationResponse = z.infer<typeof ReputationResponseSchema>;
+
+/** Ответ GET /reputation/me — мой рейтинг + история событий. */
+export const MyReputationResponseSchema = ReputationResponseSchema.extend({
+  dealsToRating: z.number().int().nonnegative(),
+  events: z.array(ReputationEventSchema),
+});
+
+export type MyReputationResponse = z.infer<typeof MyReputationResponseSchema>;
+
+
+// ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────────────
+
+/** Вид геозоны. */
+export const GeoPointKindSchema = z.enum(GEO_POINT_KINDS);
+
+/** Тип транспорта коридора. */
+export const GeoVehicleTypeSchema = z.enum(GEO_VEHICLE_TYPES);
+
+/** Координата {lat, lng}. */
+export const GeoCoordSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  })
+  .strict();
+
+/** Радиус поиска: 10 м…5 км (спецификация v0.5.0-B). */
+export const GEO_RADIUS_METERS = z
+  .number()
+  .int('Радиус — целое число метров')
+  .min(10, 'Радиус не меньше 10 м')
+  .max(5000, 'Радиус не больше 5000 м');
+
+/** Ответ эндпоинтов геозон. */
+export const GeoPointResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    ownerId: z.string().min(1),
+    kind: GeoPointKindSchema,
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    address: z.string().nullable(),
+    label: z.string().nullable(),
+    radiusMeters: z.number().int().positive(),
+    isActive: z.boolean(),
+    corridorFrom: GeoCoordSchema.nullable(),
+    corridorTo: GeoCoordSchema.nullable(),
+    vehicleType: GeoVehicleTypeSchema,
+    maxWeightKg: z.number().int().positive().nullable(),
+    isRefrigerated: z.boolean(),
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+    distanceMeters: z.number().nonnegative().optional(),
+  })
+  .passthrough();
+
+export type GeoPointResponse = z.infer<typeof GeoPointResponseSchema>;
+
+/** Ответ GET /geo/points/nearby и GET /geo/points/mine. */
+export const GeoPointsResponseSchema = z.array(GeoPointResponseSchema);
+
+/** Тело POST /geo/points — точка покупателя или линия продавца. */
+export const CreateGeoPointSchema = z
+  .object({
+    kind: z.enum(['buyer_point', 'seller_line'], {
+      errorMap: () => ({ message: 'Здесь только buyer_point или seller_line; коридоры — POST /geo/corridors' }),
+    }),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    address: z.string().trim().max(300).optional(),
+    label: z.string().trim().max(100).optional(),
+    radiusMeters: GEO_RADIUS_METERS.optional().default(50),
+  })
+  .strict();
+
+export type CreateGeoPointInput = z.infer<typeof CreateGeoPointSchema>;
+
+/** Тело POST /geo/corridors — маршрут доставщика (ADR-014). */
+export const CreateGeoCorridorSchema = z
+  .object({
+    corridorFrom: GeoCoordSchema,
+    corridorTo: GeoCoordSchema,
+    vehicleType: GeoVehicleTypeSchema.optional().default('car'),
+    maxWeightKg: z.number().int().positive().max(20000).optional(),
+    isRefrigerated: z.boolean().optional().default(false),
+    address: z.string().trim().max(300).optional(),
+    label: z.string().trim().max(100).optional(),
+  })
+  .strict();
+
+export type CreateGeoCorridorInput = z.infer<typeof CreateGeoCorridorSchema>;
+
+/** Тело PATCH /geo/points/:id — только владелец, без смены вида. */
+export const UpdateGeoPointSchema = z
+  .object({
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    address: z.string().trim().max(300).optional(),
+    label: z.string().trim().max(100).optional(),
+    radiusMeters: GEO_RADIUS_METERS.optional(),
+  })
+  .strict();
+
+export type UpdateGeoPointInput = z.infer<typeof UpdateGeoPointSchema>;
+
+/** Query GET /geo/points/nearby и /geo/corridors/nearby: lat, lng, radiusMeters.
+ *  Параметры URL приходят строками — отсюда z.coerce. */
+export const GeoNearbyQuerySchema = z
+  .object({
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+    radiusMeters: z.coerce
+      .number()
+      .int('Радиус — целое число метров')
+      .min(10, 'Радиус не меньше 10 м')
+      .max(5000, 'Радиус не больше 5000 м')
+      .optional(),
+    kind: z.enum(['buyer_point', 'seller_line']).optional(),
+  })
+  .strict();
+
+export type GeoNearbyQuery = z.infer<typeof GeoNearbyQuerySchema>;
+
+// ─── Доставка попутчиками (v0.5.0, ADR-015) ─────────────────────────────────
+
+/** Статус доставки. */
+export const DeliveryStatusSchema = z.enum(DELIVERY_STATUSES);
+
+/** Точка маршрута в ответах API. */
+const DeliveryPointSchema = z
+  .object({
+    id: z.string().min(1),
+    ownerId: z.string().min(1),
+    ownerName: z.string().min(1),
+    label: z.string().nullable(),
+    address: z.string().nullable(),
+    latitude: z.number(),
+    longitude: z.number(),
+  })
+  .passthrough();
+
+/** Ответ эндпоинтов доставки. */
+export const DeliveryResponseSchema = z
+  .object({
+    id: z.string().min(1),
+    buyerId: z.string().min(1),
+    buyerName: z.string().min(1),
+    bookingId: z.string().nullable(),
+    pickup: DeliveryPointSchema,
+    dropoff: DeliveryPointSchema,
+    weightKg: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Вес ждём строкой вида «12.50»'),
+    description: z.string().nullable(),
+    status: DeliveryStatusSchema,
+    assignedDriverId: z.string().nullable(),
+    assignedDriverName: z.string().nullable(),
+    assignedAt: IsoDateString.nullable(),
+    deliveredAt: IsoDateString.nullable(),
+    expiresAt: IsoDateString,
+    createdAt: IsoDateString,
+    updatedAt: IsoDateString,
+    pickupCode: z.string().nullable(),
+    dropoffCode: z.string().nullable(),
+    corridorDistanceMeters: z.number().nonnegative().nullable(),
+  })
+  .passthrough();
+
+export type DeliveryResponse = z.infer<typeof DeliveryResponseSchema>;
+
+/** Ответ GET /deliveries (лента радара / мои). */
+export const DeliveriesResponseSchema = z.array(DeliveryResponseSchema);
+
+/** Максимальный вес заказа: вместимость «Газели» с запасом (ADR-015). */
+export const DELIVERY_MAX_WEIGHT_KG = 20000;
+
+/** Тело POST /deliveries — покупатель просит подвезти (ADR-015). */
+export const CreateDeliverySchema = z
+  .object({
+    /** Откуда забрать: линия продавца (geo point id). */
+    pickupPointId: z.string().uuid('Выберите точку забора'),
+    /** Куда привезти: точка покупателя (geo point id). */
+    dropoffPointId: z.string().uuid('Выберите точку доставки'),
+    weightKg: z.coerce
+      .number()
+      .positive('Вес должен быть положительным')
+      .max(DELIVERY_MAX_WEIGHT_KG, 'Максимум 20 000 кг — это уже не попутная доставка')
+      .refine((value) => Math.round(value * 100) === value * 100, {
+        message: 'Максимум две цифры после запятой',
+      }),
+    description: z.string().trim().max(500).optional(),
+    /** Доставка по конкретной брони (опционально). */
+    bookingId: z.string().uuid().optional(),
+  })
+  .strict();
+
+export type CreateDeliveryInput = z.infer<typeof CreateDeliverySchema>;
+
+/** Тело POST /deliveries/:id/cancel — причина обязательна после старта. */
+export const CancelDeliverySchema = z
+  .object({
+    reason: z.string().trim().max(300).optional(),
+  })
+  .strict();
+
+export type CancelDeliveryInput = z.infer<typeof CancelDeliverySchema>;
 
 /** Ответ GET /debts (мои долги обеих сторон). */
 export const DebtsResponseSchema = z.array(DebtResponseSchema);
@@ -539,6 +796,16 @@ export const apiEnvSchema = z.object({
   WORK_MONTHS_SERIES: z.coerce.number().int().positive().max(24).default(6),
   /** Окно авто-подтверждения приёмки в часах (ADR-012). */
   BOOKING_AUTO_CONFIRM_HOURS: z.coerce.number().int().positive().max(24 * 30).default(24),
+  /** Публичный рейтинг (ADR-013): минимум взвешенных событий для score. */
+  RATING_MIN_DEALS: z.coerce.number().int().positive().max(1000).default(5),
+  /** Анти-накрутка (ADR-013): сделок пары в окне, выше — вес 0.3. */
+  RATING_MAX_PAIR_DEALS: z.coerce.number().int().positive().max(10_000).default(10),
+  /** Окно анти-накрутки в днях. */
+  RATING_PAIR_WINDOW_DAYS: z.coerce.number().int().positive().max(365).default(30),
+  /** Радиус поиска «рядом» по умолчанию в метрах (ADR-014). */
+  DEFAULT_GEO_RADIUS_METERS: z.coerce.number().int().min(10).max(5000).default(2000),
+  /** TTL открытого запроса доставки в минутах (ADR-015). */
+  DELIVERY_TTL_MINUTES: z.coerce.number().int().positive().max(24 * 60).default(60),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

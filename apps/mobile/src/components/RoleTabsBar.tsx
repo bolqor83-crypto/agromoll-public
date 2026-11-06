@@ -55,6 +55,7 @@ function routeNameToLabel(name: string): string {
     inbox: 'Входящие',
     radar: 'Радар',
     deliveries: 'Мои доставки',
+    delivery: 'Доставка',
   };
   return labels[name] ?? name;
 }
@@ -69,6 +70,7 @@ function routeNameToIcon(name: string): TabBarItem['icon'] {
     inbox: 'mail-outline',
     radar: 'locate-outline',
     deliveries: 'car-outline',
+    delivery: 'cube-outline',
   };
   return icons[name] ?? 'ellipse-outline';
 }
