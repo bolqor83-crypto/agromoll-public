@@ -12,7 +12,7 @@
  * вас и платформу» (не «вы нарушили закон», спецификация v0.4.0-B).
  * Сессии — прямые вызовы API: серверные временные метки авторитетны.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
 import {
   AnimatedNumber,
@@ -174,7 +174,12 @@ export function WorkHoursScreen() {
                   Смена идёт: {state.openSession.sellerName}
                 </Text>
                 <Text variant="caption" color="secondary">
-                  Начали в {new Date(state.openSession.startedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · часы учитываются автоматически
+                  Начали в{' '}
+                  {new Date(state.openSession.startedAt).toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}{' '}
+                  · часы учитываются автоматически
                 </Text>
                 <Button
                   title="Завершить смену"
@@ -301,13 +306,12 @@ function PairCard({
 
         {pair.blocked ? (
           <Text variant="caption" color="secondary">
-            По закону нужна пауза, чтобы защитить вас и платформу. Счётчик
-            обнулится в следующем месяце.
+            По закону нужна пауза, чтобы защитить вас и платформу. Счётчик обнулится в следующем
+            месяце.
           </Text>
         ) : approaching ? (
           <Text variant="caption" color="secondary">
-            Вы близки к лимиту по 289-ФЗ с {pair.counterpartName}. Скоро
-            потребуется пауза.
+            Вы близки к лимиту по 289-ФЗ с {pair.counterpartName}. Скоро потребуется пауза.
           </Text>
         ) : null}
 
@@ -361,8 +365,8 @@ function SellerPicker({
           <View style={{ gap: spacing.md }}>
             <Text variant="title">Начать смену с продавцом</Text>
             <Text variant="caption" color="secondary">
-              Смена начнётся сейчас — часы посчитаются автоматически при
-              завершении. Часы пары видны и продавцу.
+              Смена начнётся сейчас — часы посчитаются автоматически при завершении. Часы пары видны
+              и продавцу.
             </Text>
             {counterparties.length === 0 ? (
               <Text variant="body" color="secondary">

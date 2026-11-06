@@ -71,7 +71,11 @@ function BuyerDeliveryCard({
   const ttlLeft = delivery.status === 'open' ? minutesLeft(delivery.expiresAt) : null;
 
   return (
-    <Animated.View entering={FadeInDown.springify().damping(18).delay(Math.min(index * 50, 300))}>
+    <Animated.View
+      entering={FadeInDown.springify()
+        .damping(18)
+        .delay(Math.min(index * 50, 300))}
+    >
       <Card style={{ gap: spacing.sm }}>
         <View
           style={{
@@ -92,7 +96,10 @@ function BuyerDeliveryCard({
               {delivery.assignedDriverName ? ` · везёт ${delivery.assignedDriverName}` : ''}
             </Text>
           </View>
-          <Badge label={DELIVERY_STATUS_LABELS[delivery.status]} variant={statusVariant(delivery.status)} />
+          <Badge
+            label={DELIVERY_STATUS_LABELS[delivery.status]}
+            variant={statusVariant(delivery.status)}
+          />
         </View>
 
         {ttlLeft !== null ? (
@@ -162,9 +169,7 @@ export default function BuyerDeliveryScreen() {
     } catch (err) {
       logger.warn('buyer-delivery', 'запросы не загрузились', { error: toApiError(err).message });
       setState((prev) =>
-        prev.phase === 'ready'
-          ? { ...prev, staleError: err }
-          : { phase: 'error', error: err },
+        prev.phase === 'ready' ? { ...prev, staleError: err } : { phase: 'error', error: err },
       );
     } finally {
       setRefreshing(false);
@@ -232,12 +237,18 @@ export default function BuyerDeliveryScreen() {
           </View>
         ) : state.deliveries.length === 0 ? (
           <EmptyState
-            illustration="box"
+            illustration="truck"
             title="Запросов пока нет"
             description="Создайте запрос: попутчик по пути подвезёт товар от линии продавца к вашей точке."
+            // v0.6.2-C: грузовик-иллюстрация + конкретное действие (ADR-029)
+            action={{ label: 'Создать запрос', onPress: () => setSheetOpen(true) }}
           />
         ) : (
-          <PullToRefreshScrollView refreshing={refreshing} onRefresh={handleRefresh} style={{ flex: 1 }}>
+          <PullToRefreshScrollView
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            style={{ flex: 1 }}
+          >
             <View style={{ gap: spacing.md, paddingBottom: spacing.xxl }}>
               {stale !== null ? (
                 <ErrorState

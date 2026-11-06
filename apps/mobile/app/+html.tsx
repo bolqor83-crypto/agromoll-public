@@ -1,4 +1,3 @@
-/* eslint-disable react/no-unknown-property */
 /**
  * Кастомный HTML-корень web-версии (v0.6.1-C, ADR-025).
  *

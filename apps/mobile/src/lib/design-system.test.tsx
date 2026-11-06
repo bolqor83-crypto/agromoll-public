@@ -8,10 +8,9 @@
  */
 import { StyleSheet } from 'react-native';
 import { render } from '@testing-library/react-native';
-import { Badge, Button, Card, ThemeProvider, Text } from '@agromoll/ui';
+import { Badge, Button, Card, TabBar, ThemeProvider, Text } from '@agromoll/ui';
 
 function flattenStyle(style: unknown): Record<string, unknown> {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   return StyleSheet.flatten(style as never) ?? {};
 }
 
@@ -160,5 +159,33 @@ describe('Badge — иконка + текст (v0.6.2-B)', () => {
   it('без иконки — просто текст (обратная совместимость)', () => {
     const screen = renderUi(<Badge label="Линия 12" variant="neutral" />);
     expect(screen.getByText('Линия 12')).toBeTruthy();
+  });
+});
+
+describe('TabBar — вкладки в РЯД, не столбиком (v0.6.2-C, регрессия)', () => {
+  it('контейнер flexDirection: row', () => {
+    const items = [
+      { key: 'feed', label: 'Лента', icon: 'basket-outline' as never },
+      { key: 'bookings', label: 'Брони', icon: 'bookmark-outline' as never },
+    ];
+    const screen = renderUi(<TabBar items={items} activeKey="feed" onChange={() => undefined} />);
+    // 'tablist' нет в ARIA-карте RTL — ищем по пропсу напрямую
+    const bar = screen.UNSAFE_getByProps({ accessibilityRole: 'tablist' });
+    const style = flattenStyle(bar.props.style);
+    // регрессия v0.3.1→v0.6.2: flexDirection потерялся, вкладки стояли столбиком
+    expect(style.flexDirection).toBe('row');
+  });
+
+  it('вкладки делят ширину поровну (flex: 1)', () => {
+    const items = [
+      { key: 'feed', label: 'Лента', icon: 'basket-outline' as never },
+      { key: 'bookings', label: 'Брони', icon: 'bookmark-outline' as never },
+    ];
+    const screen = renderUi(<TabBar items={items} activeKey="feed" onChange={() => undefined} />);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(2);
+    for (const tab of tabs) {
+      expect(flattenStyle(tab.props.style).flex).toBe(1);
+    }
   });
 });

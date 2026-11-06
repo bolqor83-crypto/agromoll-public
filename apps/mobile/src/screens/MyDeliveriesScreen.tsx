@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   Badge,
@@ -88,8 +89,7 @@ function ActiveDeliveryCard({
     [delivery.id, cancelReason, onFinished],
   );
 
-  const step =
-    delivery.status === 'assigned' ? 1 : delivery.status === 'in_transit' ? 3 : 0;
+  const step = delivery.status === 'assigned' ? 1 : delivery.status === 'in_transit' ? 3 : 0;
 
   return (
     <Card style={{ gap: spacing.md }}>
@@ -100,17 +100,37 @@ function ActiveDeliveryCard({
           {delivery.dropoff.label ?? delivery.buyerName}
         </Text>
         <Text variant="caption" color="secondary">
-          {delivery.weightKg} кг · {delivery.buyerName} · взят {formatClock(delivery.assignedAt ?? delivery.createdAt)}
+          {delivery.weightKg} кг · {delivery.buyerName} · взят{' '}
+          {formatClock(delivery.assignedAt ?? delivery.createdAt)}
         </Text>
-        <Badge label={DELIVERY_STATUS_LABELS[delivery.status]} variant={statusVariant(delivery.status)} />
+        <Badge
+          label={DELIVERY_STATUS_LABELS[delivery.status]}
+          variant={statusVariant(delivery.status)}
+        />
       </View>
 
       {/* Пошаговый сценарий (спецификация C). */}
       <View style={{ gap: spacing.xs }}>
-        <StepRow done={step > 1} active={step === 1} label={`Заберите на линии: ${delivery.pickup.label ?? delivery.pickup.ownerName}`} />
-        <StepRow done={step > 1} active={step === 1} label="Покажите QR продавцу — подтвердите забор" />
-        <StepRow done={step > 3} active={step === 3} label={`Везите: ${delivery.dropoff.label ?? delivery.dropoff.address ?? delivery.buyerName}`} />
-        <StepRow done={step > 3} active={step === 3} label="Передайте товар, покажите QR покупателю" />
+        <StepRow
+          done={step > 1}
+          active={step === 1}
+          label={`Заберите на линии: ${delivery.pickup.label ?? delivery.pickup.ownerName}`}
+        />
+        <StepRow
+          done={step > 1}
+          active={step === 1}
+          label="Покажите QR продавцу — подтвердите забор"
+        />
+        <StepRow
+          done={step > 3}
+          active={step === 3}
+          label={`Везите: ${delivery.dropoff.label ?? delivery.dropoff.address ?? delivery.buyerName}`}
+        />
+        <StepRow
+          done={step > 3}
+          active={step === 3}
+          label="Передайте товар, покажите QR покупателю"
+        />
       </View>
 
       {/* QR-кнопки: показать код забора/передачи. */}
@@ -145,10 +165,7 @@ function ActiveDeliveryCard({
         />
       ) : null}
       {showQr === 'dropoff' && delivery.dropoffCode ? (
-        <QrCode
-          value={delivery.dropoffCode}
-          caption="Покажите покупателю при передаче товара"
-        />
+        <QrCode value={delivery.dropoffCode} caption="Покажите покупателю при передаче товара" />
       ) : null}
 
       {/* Действия по статусу. */}
@@ -212,14 +229,14 @@ function ActiveDeliveryCard({
 
 /** Строка шага: галка / активная точка / будущая. */
 function StepRow({ done, active, label }: { done: boolean; active: boolean; label: string }) {
-  const iconName = done ? 'checkmark-circle' : active ? 'ellipse-outline' : 'radio-button-off-outline';
+  const iconName = done
+    ? 'checkmark-circle'
+    : active
+      ? 'ellipse-outline'
+      : 'radio-button-off-outline';
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-      <Icon
-        name={iconName}
-        size={20}
-        color={done ? 'primary' : active ? 'warning' : 'secondary'}
-      />
+      <Icon name={iconName} size={20} color={done ? 'primary' : active ? 'warning' : 'secondary'} />
       <Text variant="caption" color={done ? 'primary' : 'secondary'} style={{ flex: 1 }}>
         {label}
       </Text>
@@ -234,6 +251,7 @@ type MyDeliveriesState =
   | { phase: 'ready'; deliveries: DeliveryDto[]; staleError?: unknown };
 
 export default function DeliveriesScreen() {
+  const router = useRouter();
   const [state, setState] = useState<MyDeliveriesState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
 
@@ -244,9 +262,7 @@ export default function DeliveriesScreen() {
     } catch (err) {
       logger.warn('deliveries', 'мои доставки не загрузились', { error: toApiError(err).message });
       setState((prev) =>
-        prev.phase === 'ready'
-          ? { ...prev, staleError: err }
-          : { phase: 'error', error: err },
+        prev.phase === 'ready' ? { ...prev, staleError: err } : { phase: 'error', error: err },
       );
     } finally {
       setRefreshing(false);
@@ -277,7 +293,11 @@ export default function DeliveriesScreen() {
       <ScreenHeader
         title="Мои доставки"
         subtitle="Активные рейсы и история"
-        badge={active.length > 0 ? <Badge label={`${active.length} в работе`} variant="attention" /> : undefined}
+        badge={
+          active.length > 0 ? (
+            <Badge label={`${active.length} в работе`} variant="attention" />
+          ) : undefined
+        }
       />
 
       {state.phase === 'loading' ? (
@@ -289,12 +309,18 @@ export default function DeliveriesScreen() {
         <ErrorState {...errorContentFor(state.error)} onRetry={() => void load()} />
       ) : deliveries.length === 0 ? (
         <EmptyState
-          illustration="box"
+          illustration="truck"
           title="Доставок пока нет"
           description="Возьмите заказ в «Радаре» — активный рейс появится здесь с пошаговым сценарием."
+          // v0.6.2-C: грузовик-иллюстрация + конкретное действие (ADR-029)
+          action={{ label: 'В радар', onPress: () => router.push('/(driver)/radar') }}
         />
       ) : (
-        <PullToRefreshScrollView refreshing={refreshing} onRefresh={handleRefresh} style={{ flex: 1 }}>
+        <PullToRefreshScrollView
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          style={{ flex: 1 }}
+        >
           <View style={{ gap: spacing.md, paddingBottom: spacing.xxl }}>
             {stale !== null ? (
               <ErrorState
@@ -307,7 +333,9 @@ export default function DeliveriesScreen() {
             {active.map((delivery, index) => (
               <Animated.View
                 key={delivery.id}
-                entering={FadeInDown.springify().damping(18).delay(Math.min(index * 50, 200))}
+                entering={FadeInDown.springify()
+                  .damping(18)
+                  .delay(Math.min(index * 50, 200))}
               >
                 <ActiveDeliveryCard delivery={delivery} onFinished={() => void load()} />
               </Animated.View>
@@ -333,7 +361,10 @@ export default function DeliveriesScreen() {
                     {'  →  '}
                     {delivery.dropoff.label ?? delivery.buyerName}
                   </Text>
-                  <Badge label={DELIVERY_STATUS_LABELS[delivery.status]} variant={statusVariant(delivery.status)} />
+                  <Badge
+                    label={DELIVERY_STATUS_LABELS[delivery.status]}
+                    variant={statusVariant(delivery.status)}
+                  />
                 </View>
                 <Text variant="caption" color="secondary">
                   {delivery.weightKg} кг · {formatClock(delivery.createdAt)}

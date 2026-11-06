@@ -97,6 +97,10 @@ export function TabBar({ items, activeKey, onChange, style }: TabBarProps) {
         {
           borderTopWidth: 1,
           borderTopColor: colors.border,
+          // v0.6.2-C: вернуть row — при рефакторинге v0.3.1 flexDirection
+          // потерялся, и вкладки стояли СТОЛБИКОМ со времён v0.3.1 (баг
+          // нашёл визуальный аудит v0.6.2 на web-сборке).
+          flexDirection: 'row',
           paddingHorizontal: spacing.sm,
           paddingBottom: spacing.xs,
           // web (и platforms без blur): solid-подложка, как раньше
