@@ -18,6 +18,7 @@ import {
   success,
   tap,
   Text,
+  useTheme,
   warning,
 } from '@agromoll/ui';
 import type { GeoPointDto } from '@agromoll/types';
@@ -249,6 +250,9 @@ function OptionRow({
   subtitle?: string;
   onPress: () => void;
 }) {
+  // v0.6.2-D: обводка/подложка выбора — из токенов темы (аудит №5):
+  // в тёмной теме чипы больше не светятся «бумажным» цветом
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -260,8 +264,8 @@ function OptionRow({
         padding: spacing.md,
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: selected ? '#2E6B4E' : '#D8D2C6',
-        backgroundColor: selected ? '#E7F0E9' : 'transparent',
+        borderColor: selected ? colors.primary : colors.border,
+        backgroundColor: selected ? colors.primaryMuted : 'transparent',
       }}
     >
       <Icon

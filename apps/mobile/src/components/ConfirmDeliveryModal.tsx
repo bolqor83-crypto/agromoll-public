@@ -87,8 +87,8 @@ export function ConfirmDeliveryModal({ visible, booking, onClose }: ConfirmDeliv
       <View style={{ gap: spacing.md }}>
         <Text variant="title">Подтвердить получение</Text>
         <Text variant="caption" color="secondary">
-          {booking?.listingTitle ?? 'Лот'} · подтверждено{' '}
-          {defaultQuantity} {booking?.listingUnit === 'kg' ? 'кг' : booking?.listingUnit === 'box' ? 'ящ.' : 'шт'}
+          {booking?.listingTitle ?? 'Лот'} · подтверждено {defaultQuantity}{' '}
+          {booking?.listingUnit === 'kg' ? 'кг' : booking?.listingUnit === 'box' ? 'ящ.' : 'шт'}
         </Text>
 
         <Input
@@ -135,9 +135,9 @@ export function ConfirmDeliveryModal({ visible, booking, onClose }: ConfirmDeliv
         </View>
 
         {qualityFlag === 'major_issue' ? (
-          <Text variant="caption" color="warning">
-            Это создаст спор: продавец получит уведомление, бронь перейдёт
-            в статус «Спор по приёмке». Опишите проблему в комментарии.
+          <Text variant="caption" color="onWarning">
+            Это создаст спор: продавец получит уведомление, бронь перейдёт в статус «Спор по
+            приёмке». Опишите проблему в комментарии.
           </Text>
         ) : null}
 
@@ -150,7 +150,7 @@ export function ConfirmDeliveryModal({ visible, booking, onClose }: ConfirmDeliv
         />
 
         {error ? (
-          <Text variant="caption" color="warning">
+          <Text variant="caption" color="onWarning">
             {error}
           </Text>
         ) : null}

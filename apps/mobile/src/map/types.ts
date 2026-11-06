@@ -4,7 +4,12 @@
  * Платформенно-разделённая реализация: native — react-native-maps
  * (Expo Go), web — схематичная SVG-карта (без тайловых зависимостей,
  * см. ADR-014). Контракт один — MapCanvas.
+ *
+ * v0.6.2-D (ADR-030): цвета карты — обязательный проп из mapPalette[mode]
+ * (токены дизайн-системы). hardcoded-хексы ушли: карта теперь следует
+ * теме, в тёмной — тёмная канва и осветлённые маркеры (аудит №5/№6).
  */
+import type { MapThemeColors, ThemeMode } from '@agromoll/ui';
 import type { GeoCoord, GeoPointKind } from '@agromoll/types';
 
 /** Маркер на карте: точка покупателя / линия продавца / коридор. */
@@ -23,13 +28,6 @@ export interface MapLine {
   label?: string;
 }
 
-/** Цвета маркеров по виду геозоны: синий/зелёный/янтарный (спецификация). */
-export const MARKER_COLORS: Record<GeoPointKind, string> = {
-  buyer_point: '#3B6FA0', // спокойный синий — точка покупателя
-  seller_line: '#2E6B4E', // фирменный зелёный — линия продавца
-  delivery_corridor: '#C98A2D', // мягкий янтарный — коридор доставщика
-};
-
 /** Контракт платформенной карты (native + web). */
 export interface MapCanvasProps {
   center: GeoCoord;
@@ -41,4 +39,8 @@ export interface MapCanvasProps {
   /** Тап по свободному месту карты. */
   onTap?: (coord: GeoCoord) => void;
   height?: number;
+  /** Цвета карты из темы: mapPalette[mode] — обязательны (v0.6.2-D, ADR-030). */
+  colors: MapThemeColors;
+  /** Режим темы: native-карта переключает системные тайлы (iOS). */
+  mode: ThemeMode;
 }

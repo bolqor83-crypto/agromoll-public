@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { RoleTabsBar } from '@/components/RoleTabsBar';
+import { RoleCoachMark } from '@/components/RoleCoachMark';
 import { prefetchBuyerTabs } from '@/lib/prefetch';
 
 /**
@@ -16,11 +17,15 @@ export default function BuyerTabsLayout() {
   }, []);
 
   return (
-    <Tabs tabBar={(props) => <RoleTabsBar {...props} />} screenOptions={{ headerShown: false }}>
-      <Tabs.Screen name="feed" />
-      <Tabs.Screen name="bookings" />
-      <Tabs.Screen name="delivery" />
-      <Tabs.Screen name="debts" />
-    </Tabs>
+    <>
+      <Tabs tabBar={(props) => <RoleTabsBar {...props} />} screenOptions={{ headerShown: false }}>
+        <Tabs.Screen name="feed" />
+        <Tabs.Screen name="bookings" />
+        <Tabs.Screen name="delivery" />
+        <Tabs.Screen name="debts" />
+      </Tabs>
+      {/* v0.6.2-C: подсказки первого входа в роль (ADR-029), не блокируют */}
+      <RoleCoachMark role="buyer" />
+    </>
   );
 }

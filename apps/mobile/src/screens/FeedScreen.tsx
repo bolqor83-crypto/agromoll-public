@@ -25,6 +25,7 @@ import {
   SkeletonCard,
   spacing,
   tap,
+  useResponsive,
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { useRouter } from 'expo-router';
@@ -56,6 +57,8 @@ type FeedState =
 export function FeedScreen() {
   const router = useRouter();
   const role = useAuthStore((s) => s.user?.role ?? 'buyer');
+  // v0.6.2-D: планшет ≥768 — лента в 2 колонки (ADR-030, аудит №15)
+  const { isTablet } = useResponsive();
   const [state, setState] = useState<FeedState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   // Каскадный вход — только на ПЕРВУЮ отрисовку карточек (ADR-009):
@@ -84,9 +87,7 @@ export function FeedScreen() {
         // сервер ответил неожиданным форматом — демо-данные не показываем,
         // честный ErrorState с повтором (v0.6.1-D, ADR-026)
         setState((prev) =>
-          prev.phase === 'ready'
-            ? { ...prev, staleError: error }
-            : { phase: 'error', error },
+          prev.phase === 'ready' ? { ...prev, staleError: error } : { phase: 'error', error },
         );
         return;
       }
@@ -173,7 +174,7 @@ export function FeedScreen() {
           отключены. */}
       {demo ? (
         <View style={{ paddingBottom: spacing.sm }}>
-          <DemoBanner hint="Рядом со мной и Моя точка отключены." />
+          <DemoBanner hint="«Рядом» и «Моя точка» отключены." />
         </View>
       ) : null}
 
@@ -182,7 +183,9 @@ export function FeedScreen() {
         <DebtSummaryWidget />
       </View>
 
-      {/* Гео-панель (v0.5.0-B): «Рядом со мной» + «Моя точка» (ADR-014). */}
+      {/* Гео-панель (v0.5.0-B): «Рядом со мной» + «Моя точка» (ADR-014).
+          v0.6.2-B: кнопки — прямые дети ряда с flex:1 — при переносе
+          при длинной подписи («Рядом: 12») обе кнопки стретчатся до одной высоты. */}
       <View
         style={{
           flexDirection: 'row',
@@ -191,28 +194,27 @@ export function FeedScreen() {
           paddingBottom: spacing.sm,
         }}
       >
-        <View style={{ flex: 1 }}>
-          <Button
-            title={nearbySellers === null ? 'Рядом со мной' : `Рядом: ${nearbySellers.size}`}
-            variant={nearbySellers !== null ? 'primary' : 'secondary'}
-            size="md"
-            loading={geoBusy}
-            disabled={demo}
-            onPress={() => void toggleNearby()}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Button
-            title="Моя точка"
-            variant="secondary"
-            size="md"
-            disabled={demo}
-            onPress={() => {
-              tap();
-              setPointSheetOpen(true);
-            }}
-          />
-        </View>
+        <Button
+          style={{ flex: 1 }}
+          // v0.6.2-B: «Рядом» вместо «Рядом со мной» — одна строка в полкнопки
+          title={nearbySellers === null ? 'Рядом' : `Рядом: ${nearbySellers.size}`}
+          variant={nearbySellers !== null ? 'primary' : 'secondary'}
+          size="md"
+          loading={geoBusy}
+          disabled={demo}
+          onPress={() => void toggleNearby()}
+        />
+        <Button
+          style={{ flex: 1 }}
+          title="Моя точка"
+          variant="secondary"
+          size="md"
+          disabled={demo}
+          onPress={() => {
+            tap();
+            setPointSheetOpen(true);
+          }}
+        />
       </View>
       {state.phase === 'loading' ? (
         <View style={{ gap: spacing.md }}>
@@ -253,39 +255,47 @@ export function FeedScreen() {
               onRetry={handleRefresh}
             />
           ) : null}
-          {state.listings.map((listing, index) => {
-            // Гео-фильтр: показываем только продавцов рядом (ADR-014).
-            if (nearbySellers !== null && !nearbySellers.has(listing.sellerId)) {
-              return null;
+          {/* v0.6.2-D: планшет — 2 колонки: карточки по ~48.5%, межколонный
+              gap из сетки отступов; телефон — одна колонка как раньше. */}
+          <View
+            testID="listings-grid"
+            style={
+              isTablet
+                ? { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md, rowGap: spacing.md }
+                : undefined
             }
-            // Первая отрисовка: карточки входят каскадом — translateY 12→0
-            // + проявление, 40 мс между карточками (ADR-009).
-            const stagger = firstEntrance ? Math.min(index, STAGGER_CAP) * STAGGER_MS : 0;
-            return (
-              <Animated.View
-                key={listing.id}
-                entering={
-                  stagger > 0
-                    ? FadeInDown.delay(stagger).duration(300).springify().damping(16)
-                    : undefined
-                }
-              >
-                <ListingCard
-                  listing={listing}
-                  onPress={() => router.push(`/listing/${listing.id}`)}
-                />
-              </Animated.View>
-            );
-          })}
+          >
+            {state.listings.map((listing, index) => {
+              // Гео-фильтр: показываем только продавцов рядом (ADR-014).
+              if (nearbySellers !== null && !nearbySellers.has(listing.sellerId)) {
+                return null;
+              }
+              // Первая отрисовка: карточки входят каскадом — translateY 12→0
+              // + проявление, 40 мс между карточками (ADR-009).
+              const stagger = firstEntrance ? Math.min(index, STAGGER_CAP) * STAGGER_MS : 0;
+              return (
+                <Animated.View
+                  key={listing.id}
+                  entering={
+                    stagger > 0
+                      ? FadeInDown.delay(stagger).duration(300).springify().damping(16)
+                      : undefined
+                  }
+                  style={isTablet ? { width: '48.5%' } : undefined}
+                >
+                  <ListingCard
+                    listing={listing}
+                    onPress={() => router.push(`/listing/${listing.id}`)}
+                  />
+                </Animated.View>
+              );
+            })}
+          </View>
           <View style={{ height: spacing.md }} />
         </PullToRefreshScrollView>
       )}
 
-      <MyPointSheet
-        visible={pointSheetOpen}
-        onClose={() => setPointSheetOpen(false)}
-        role={role}
-      />
+      <MyPointSheet visible={pointSheetOpen} onClose={() => setPointSheetOpen(false)} role={role} />
     </Screen>
   );
 }

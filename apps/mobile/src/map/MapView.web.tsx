@@ -13,8 +13,8 @@
 import { useMemo, useRef } from 'react';
 import { View } from 'react-native';
 import type { NativeSyntheticEvent, View as RNView } from 'react-native';
-import { MARKER_COLORS } from './types';
-import type { GeoCoord, GeoPointKind } from '@agromoll/types';
+import { markerColorFor } from '@agromoll/ui';
+import type { GeoCoord } from '@agromoll/types';
 import type { MapCanvasProps } from './types';
 
 /** Полуразмах окна карты в градусах (~2.2 км по широте). */
@@ -42,11 +42,6 @@ function unproject(center: GeoCoord, x: number, y: number): GeoCoord {
   };
 }
 
-/** Цвет вида геозоны. */
-function colorFor(kind: GeoPointKind): string {
-  return MARKER_COLORS[kind];
-}
-
 export default function MapCanvas({
   center,
   markers,
@@ -55,6 +50,7 @@ export default function MapCanvas({
   onPinChange,
   onTap,
   height = 300,
+  colors,
 }: MapCanvasProps) {
   const canvasRef = useRef<RNView>(null);
   const centerProj = useMemo(() => project(center, center), [center]);
@@ -91,7 +87,8 @@ export default function MapCanvas({
         height,
         borderRadius: 16,
         overflow: 'hidden',
-        backgroundColor: '#EAF0E8',
+        // v0.6.2-D: канва из темы — тёмная карта в тёмной теме (аудит №6)
+        backgroundColor: colors.canvas,
       }}
       onPointerDown={handlePointerDown}
     >
@@ -105,8 +102,8 @@ export default function MapCanvas({
         {/* Сетка ориентира: крупные улицы рынка, без тайлов (ADR-014). */}
         {[25, 50, 75].map((v) => (
           <g key={v}>
-            <line x1={v} y1={0} x2={v} y2={100} stroke="#D8E2D4" strokeWidth={0.4} />
-            <line x1={0} y1={v} x2={100} y2={v} stroke="#D8E2D4" strokeWidth={0.4} />
+            <line x1={v} y1={0} x2={v} y2={100} stroke={colors.grid} strokeWidth={0.4} />
+            <line x1={0} y1={v} x2={100} y2={v} stroke={colors.grid} strokeWidth={0.4} />
           </g>
         ))}
 
@@ -121,7 +118,7 @@ export default function MapCanvas({
               y1={from.y}
               x2={to.x}
               y2={to.y}
-              stroke={MARKER_COLORS.delivery_corridor}
+              stroke={colors.corridor}
               strokeWidth={0.9}
               strokeLinecap="round"
             />
@@ -137,19 +134,19 @@ export default function MapCanvas({
               cx={p.x}
               cy={p.y}
               r={1.8}
-              fill={colorFor(marker.kind)}
+              fill={markerColorFor(marker.kind, colors)}
               fillOpacity={0.9}
             />
           );
         })}
 
-        {/* Центр (позиция пользователя) — тёмное кольцо. */}
+        {/* Центр (позиция пользователя) — кольцо из темы. */}
         <circle
           cx={centerProj.x}
           cy={centerProj.y}
           r={1.2}
           fill="none"
-          stroke="#4A4A44"
+          stroke={colors.centerRing}
           strokeWidth={0.5}
         />
 
@@ -159,8 +156,8 @@ export default function MapCanvas({
               const p = project(center, pin);
               return (
                 <g>
-                  <circle cx={p.x} cy={p.y} r={2.4} fill={MARKER_COLORS.seller_line} />
-                  <circle cx={p.x} cy={p.y} r={0.9} fill="#FAF8F4" />
+                  <circle cx={p.x} cy={p.y} r={2.4} fill={colors.sellerLine} />
+                  <circle cx={p.x} cy={p.y} r={0.9} fill={colors.pinHole} />
                 </g>
               );
             })()

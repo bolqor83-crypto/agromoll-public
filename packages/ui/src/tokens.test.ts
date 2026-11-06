@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { motion, palette, radius, resolveTheme, shadow, spacing, typography } from './tokens';
+import {
+  font,
+  fontFamilyForWeight,
+  mapPalette,
+  markerColorFor,
+  motion,
+  palette,
+  radius,
+  resolveTheme,
+  responsive,
+  shadow,
+  spacing,
+  typography,
+} from './tokens';
 
 describe('дизайн-токены', () => {
   it('радиусы: 12–20 px + pill, единообразно', () => {
@@ -22,6 +35,35 @@ describe('дизайн-токены', () => {
     }
   });
 
+  it('v0.6.2-B: типографика по спеке этапа (ADR-028)', () => {
+    expect(typography.display.fontSize).toBe(32);
+    expect(typography.display.lineHeight).toBe(40);
+    expect(typography.display.letterSpacing).toBe(-0.4);
+    expect(typography.title.fontSize).toBe(22);
+    expect(typography.body.fontSize).toBe(17);
+    // межстрочный body ≈ 1.5 (спека этапа)
+    expect(typography.body.lineHeight / typography.body.fontSize).toBeGreaterThanOrEqual(1.45);
+    expect(typography.caption.fontSize).toBe(13);
+    expect(typography.button.fontSize).toBe(17);
+  });
+
+  it('v0.6.2-B: шрифт Inter — 4 начертания, имена согласованы', () => {
+    expect(font).toEqual({
+      regular: 'Inter_400Regular',
+      medium: 'Inter_500Medium',
+      semibold: 'Inter_600SemiBold',
+      bold: 'Inter_700Bold',
+    });
+    // веса приложения покрываются четырьмя файлами
+    expect(fontFamilyForWeight('400')).toBe(font.regular);
+    expect(fontFamilyForWeight('500')).toBe(font.medium);
+    expect(fontFamilyForWeight('600')).toBe(font.semibold);
+    expect(fontFamilyForWeight('700')).toBe(font.bold);
+    // веса вне шкалы прижимаются к ближайшему доступному
+    expect(fontFamilyForWeight(undefined)).toBe(font.regular);
+    expect(fontFamilyForWeight('bold')).toBe(font.bold);
+  });
+
   it('светлая и тёмная темы содержат одинаковый набор цветов', () => {
     expect(Object.keys(palette.dark).sort()).toEqual(Object.keys(palette.light).sort());
   });
@@ -35,6 +77,13 @@ describe('дизайн-токены', () => {
     for (const s of Object.values(shadow)) {
       expect(s.shadowOpacity).toBeLessThanOrEqual(0.3);
     }
+  });
+
+  it('v0.6.2-B: web-тень многослойная в светлой теме, в тёмной — none (ADR-028)', () => {
+    // два слоя: «контакт» + «рассеяние»
+    expect(shadow.light.boxShadowWeb.split('rgba(').length - 1).toBe(2);
+    // в тёмной теме глубина через borderStrong, не через тень (ADR-030)
+    expect(shadow.dark.boxShadowWeb).toBe('none');
   });
 });
 
@@ -55,5 +104,45 @@ describe('resolveTheme', () => {
   it('явная настройка побеждает системную', () => {
     expect(resolveTheme('dark', 'light')).toBe('dark');
     expect(resolveTheme('light', 'dark')).toBe('light');
+  });
+});
+
+describe('v0.6.2-D: адаптивность (ADR-030)', () => {
+  it('breakpoints: планшет 768, широкий телефон 430, контент 600', () => {
+    expect(responsive.tabletMinWidth).toBe(768);
+    expect(responsive.widePhoneMinWidth).toBe(430);
+    expect(responsive.contentMaxWidth).toBe(600);
+  });
+
+  it('scrim — 0.7 в обеих темах: лист отделяется от контента (аудит №14)', () => {
+    const alpha = (rgba: string): number => Number(/rgba\([^)]+,\s*([\d.]+)\)/.exec(rgba)?.[1]);
+    expect(alpha(palette.light.scrim)).toBe(0.7);
+    expect(alpha(palette.dark.scrim)).toBe(0.7);
+  });
+});
+
+describe('v0.6.2-D: палитра карты (ADR-030)', () => {
+  it('обе темы содержат одинаковый набор цветов карты', () => {
+    expect(Object.keys(mapPalette.dark).sort()).toEqual(Object.keys(mapPalette.light).sort());
+  });
+
+  it('тёмная палитра отличается от светлой — карта следует теме', () => {
+    for (const key of Object.keys(mapPalette.light) as (keyof typeof mapPalette.light)[]) {
+      expect(mapPalette.dark[key]).not.toBe(mapPalette.light[key]);
+    }
+  });
+
+  it('коридор светлой темы затемнён: старый #C98A2D не проходит 3:1 (аудит №5)', () => {
+    expect(mapPalette.light.corridor).not.toBe('#C98A2D');
+    expect(mapPalette.dark.canvas).not.toBe(mapPalette.light.canvas);
+  });
+
+  it('markerColorFor: вид геозоны → цвет роли из палитры', () => {
+    const c = mapPalette.light;
+    expect(markerColorFor('buyer_point', c)).toBe(c.buyerPoint);
+    expect(markerColorFor('seller_line', c)).toBe(c.sellerLine);
+    expect(markerColorFor('delivery_corridor', c)).toBe(c.corridor);
+    // неизвестный вид — безопасный дефолт
+    expect(markerColorFor('unknown', c)).toBe(c.sellerLine);
   });
 });

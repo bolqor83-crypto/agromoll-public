@@ -1,5 +1,6 @@
 export * from './tokens';
 export * from './theme';
+export * from './hooks/useResponsive';
 export * from './haptics';
 export * from './color';
 export * from './components/Text';

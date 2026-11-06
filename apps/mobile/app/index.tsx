@@ -6,6 +6,7 @@ import { ROLE_LABELS } from '@agromoll/types';
 import type { UserRole } from '@agromoll/types';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useAuthStore } from '@/store/auth';
+import { isOnboardingSeen } from '@/lib/first-run';
 import { logger } from '@/lib/logger';
 
 interface RoleOption {
@@ -40,22 +41,37 @@ const OPTIONS: RoleOption[] = [
  * Выбор роли (v0.3.0): роль сохраняется на сервере через PATCH
  * /users/me/role, поэтому доступна с любого устройства пользователя.
  * Экран показывается только аутентифицированным (гейт в root layout).
+ *
+ * v0.6.2-C (ADR-029): первый запуск — после выбора роли показываем
+ * онбординг (3 слайда), потом экран роли. Онбординг не блокирует:
+ * «Пропустить» доступен с первого слайда, флаг пишется один раз.
  */
 export default function RolePickerScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const changeRole = useAuthStore((s) => s.changeRole);
 
+  const openRole = async (option: RoleOption): Promise<void> => {
+    // Онбординг виден один раз; при ошибке чтения флага — не показываем
+    // (лучше лишний слайд, чем заблокированный вход).
+    let seen = true;
+    try {
+      seen = await isOnboardingSeen();
+    } catch (error) {
+      logger.warn('role', 'не удалось прочитать флаг онбординга', { error: String(error) });
+    }
+    const target = seen ? option.route : `/onboarding?next=${encodeURIComponent(option.route)}`;
+    router.replace(target as never);
+  };
+
   const handleSelect = (option: RoleOption): void => {
     selection();
     changeRole(option.role)
-      .then(() => {
-        router.replace(option.route);
-      })
+      .then(() => void openRole(option))
       .catch((error) => {
         logger.warn('role', 'не удалось сменить роль', { error: String(error) });
         // даже при ошибке открываем экран роли — оффлайн-ядро догонит
-        router.replace(option.route);
+        void openRole(option);
       });
   };
 
@@ -99,7 +115,12 @@ export default function RolePickerScreen() {
           selection();
           router.push('/reputation');
         }}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.md,
+          marginTop: spacing.sm,
+        }}
       >
         <Icon name="star-outline" size={28} color="primary" />
         <View style={{ flex: 1 }}>
@@ -117,7 +138,12 @@ export default function RolePickerScreen() {
           selection();
           router.push('/map');
         }}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.md,
+          marginTop: spacing.sm,
+        }}
       >
         <Icon name="map-outline" size={28} color="primary" />
         <View style={{ flex: 1 }}>

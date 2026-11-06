@@ -1,9 +1,19 @@
 /**
- * Card — карточка дизайн-системы: скругление 20, мягкая тень, тёплая рамка.
+ * Card — карточка дизайн-системы: скругление 16, мягкая тень, тёплая рамка.
  * Фото, название, цена, бейдж — минимум текста (ADR-002).
+ *
+ * v0.6.2-B (ADR-028):
+ * - скругление radius.md (16) — единый «радиус-язык»: карточки 16,
+ *   модалки 20, бейджи pill;
+ * - глубина: в светлой теме — заметнее тень + на web многослойная
+ *   (boxShadowWeb: контакт + рассеяние); в тёмной — тень не работает,
+ *   глубину даёт усиленная рамка borderStrong (elevation через цвет);
+ * - состояния: нажатие — spring scale 0.98 (как раньше), фокус —
+ *   обводка 2px primary (клавиатура/web), disabled — opacity 0.5.
  */
+import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { Pressable, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useTheme } from '../theme';
@@ -18,6 +28,8 @@ export interface CardProps {
   padding?: number;
   /** Повышенная поверхность (шапка, важные блоки). */
   elevated?: boolean;
+  /** Недоступная карточка: полупрозрачность, без нажатия. */
+  disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -26,27 +38,38 @@ export function Card({
   onPress,
   padding = spacing.lg,
   elevated = false,
+  disabled = false,
   style,
 }: CardProps) {
   const { colors, mode } = useTheme();
   const scale = useSharedValue(1);
+  // Фокус с клавиатуры (web/Bluetooh-клавиатуры): обводка 2px primary.
+  const [focused, setFocused] = useState(false);
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
+  // Тёмная тема: тени не видны — глубина через усиленную рамку (ADR-030).
+  const isDark = mode === 'dark';
+  const borderColor = focused ? colors.primary : isDark ? colors.borderStrong : colors.border;
+  const borderWidth = focused ? 2 : 1;
+
   const baseStyle: StyleProp<ViewStyle> = [
     {
       backgroundColor: elevated ? colors.surfaceElevated : colors.surface,
-      borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: radius.md,
+      borderWidth,
+      borderColor,
       padding,
     },
-    shadow[mode],
+    !isDark ? shadow.light : null,
+    // web: многослойная тень из токена (в тёмной — 'none', рамка берёт своё)
+    Platform.OS === 'web' && !isDark ? { boxShadow: shadow.light.boxShadowWeb } : null,
+    disabled ? { opacity: 0.5 } : null,
     style,
   ];
 
-  if (!onPress) {
+  if (!onPress || disabled) {
     return <View style={baseStyle}>{children}</View>;
   }
 
@@ -59,6 +82,8 @@ export function Card({
       onPressOut={() => {
         scale.value = withSpring(1, motion.pressSpring);
       }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       accessibilityRole="button"
       style={[animatedStyle, baseStyle]}
     >

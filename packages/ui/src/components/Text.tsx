@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Text as RNText } from 'react-native';
 import type { TextProps as RNTextProps, StyleProp, TextStyle } from 'react-native';
 import { useTheme } from '../theme';
-import { typography } from '../tokens';
+import { fontFamilyForWeight, typography } from '../tokens';
 import type { ThemeColors, TextVariant } from '../tokens';
 
 export type TextColor =
@@ -36,6 +36,12 @@ export interface TextProps extends RNTextProps {
   align?: 'left' | 'center' | 'right';
   /** Переопределение насыщенности (по умолчанию — из варианта). */
   weight?: TextStyle['fontWeight'];
+  /**
+   * Табличные цифры (v0.6.2-B, ADR-028): ширина каждой цифры одинакова —
+   * суммы, часы и рейтинги не «прыгают» при смене значения. Inter
+   * поддерживает tnum (font-variant-numeric: tabular-nums).
+   */
+  numeric?: boolean;
   children: ReactNode;
   style?: StyleProp<TextStyle>;
 }
@@ -45,6 +51,7 @@ export function Text({
   color = 'text',
   align,
   weight,
+  numeric = false,
   style,
   children,
   ...rest
@@ -56,10 +63,13 @@ export function Text({
     <RNText
       style={[
         {
+          fontFamily: fontFamilyForWeight(weight ?? t.fontWeight),
           fontSize: t.fontSize,
           lineHeight: t.lineHeight,
           fontWeight: weight ?? t.fontWeight,
           color: COLOR_ACCESSORS[color](colors),
+          ...(t.letterSpacing ? { letterSpacing: t.letterSpacing } : null),
+          ...(numeric ? { fontVariant: ['tabular-nums'] as TextStyle['fontVariant'] } : null),
         },
         align ? { textAlign: align } : null,
         style,

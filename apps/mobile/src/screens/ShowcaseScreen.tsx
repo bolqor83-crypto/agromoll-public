@@ -13,6 +13,7 @@ import {
   SkeletonCard,
   spacing,
   tap,
+  useResponsive,
   useTheme,
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
@@ -46,6 +47,8 @@ export default function ShowcaseScreen() {
   const totalConfirmations = useAuthStore((s) => s.user?.totalConfirmations ?? 0);
   const insets = useSafeAreaInsets();
   const { colors, mode } = useTheme();
+  // v0.6.2-D: планшет ≥768 — витрина в 2 колонки (ADR-030, аудит №15)
+  const { isTablet } = useResponsive();
   const [state, setState] = useState<ShowcaseState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -145,9 +148,21 @@ export default function ShowcaseScreen() {
               onRetry={handleRefresh}
             />
           ) : null}
-          {state.listings.map((listing) => (
-            <ListingCard key={listing.id} listing={listing} sellerView />
-          ))}
+          {/* v0.6.2-D: планшет — 2 колонки (ADR-030); телефон — одна. */}
+          <View
+            testID="listings-grid"
+            style={
+              isTablet
+                ? { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md, rowGap: spacing.md }
+                : undefined
+            }
+          >
+            {state.listings.map((listing) => (
+              <View key={listing.id} style={isTablet ? { width: '48.5%' } : undefined}>
+                <ListingCard listing={listing} sellerView />
+              </View>
+            ))}
+          </View>
         </PullToRefreshScrollView>
       )}
 

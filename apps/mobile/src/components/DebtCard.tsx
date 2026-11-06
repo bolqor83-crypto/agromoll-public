@@ -47,7 +47,9 @@ export function DebtCard({
     if (debt.isOverdue) {
       return <Badge label="Просрочен · 30+ дней" variant="attention" />;
     }
-    return <Badge label={DEBT_STATUS_LABELS[debt.status]} variant={debtBadgeVariant(debt.status)} />;
+    return (
+      <Badge label={DEBT_STATUS_LABELS[debt.status]} variant={debtBadgeVariant(debt.status)} />
+    );
   }, [debt.status, debt.isOverdue]);
 
   return (
@@ -74,7 +76,9 @@ export function DebtCard({
             {statusBadge}
           </View>
 
-          <Text variant="title">{formatMoney(debt.amount)}</Text>
+          <Text variant="title" numeric>
+            {formatMoney(debt.amount)}
+          </Text>
 
           {debt.description ? (
             <Text variant="body" color="secondary" numberOfLines={2}>

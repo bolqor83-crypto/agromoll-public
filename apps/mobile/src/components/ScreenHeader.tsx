@@ -57,7 +57,8 @@ export function ScreenHeader({ title, subtitle, badge }: ScreenHeaderProps) {
             gap: spacing.xs,
             marginTop: spacing.xs,
             paddingHorizontal: spacing.md,
-            height: 40,
+            // v0.6.2-B: 48 px — минимальная зона нажатия (было 40)
+            height: 48,
             borderRadius: radius.pill,
             borderWidth: 1,
             borderColor: colors.border,

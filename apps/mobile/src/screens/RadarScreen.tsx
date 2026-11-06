@@ -73,9 +73,7 @@ export default function RadarScreen() {
     } catch (err) {
       logger.warn('radar', 'радар не загрузился', { error: toApiError(err).message });
       setState((prev) =>
-        prev.phase === 'ready'
-          ? { ...prev, staleError: err }
-          : { phase: 'error', error: err },
+        prev.phase === 'ready' ? { ...prev, staleError: err } : { phase: 'error', error: err },
       );
     } finally {
       setRefreshing(false);
@@ -155,9 +153,15 @@ export default function RadarScreen() {
           illustration="radar"
           title="Попутных заказов нет"
           description="Опубликуйте маршрут на «Карте рынка» — радар покажет заказы вдоль вашей дороги."
+          // v0.6.2-C: конкретное действие в пустом состоянии (ADR-029)
+          action={{ label: 'Обновить', onPress: () => void load() }}
         />
       ) : (
-        <PullToRefreshScrollView refreshing={refreshing} onRefresh={handleRefresh} style={{ flex: 1 }}>
+        <PullToRefreshScrollView
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          style={{ flex: 1 }}
+        >
           {/* Рефреш не удался, но данные есть: честно помечаем их устаревшими. */}
           {stale !== null ? (
             <View style={{ marginBottom: spacing.md }}>
@@ -175,7 +179,9 @@ export default function RadarScreen() {
               return (
                 <Animated.View
                   key={delivery.id}
-                  entering={FadeInDown.springify().damping(18).delay(Math.min(index * 50, 300))}
+                  entering={FadeInDown.springify()
+                    .damping(18)
+                    .delay(Math.min(index * 50, 300))}
                 >
                   <Card style={{ gap: spacing.sm }}>
                     <View
@@ -197,10 +203,7 @@ export default function RadarScreen() {
                           {delivery.description ? ` · ${delivery.description}` : ''}
                         </Text>
                       </View>
-                      <Badge
-                        label={ttl.label}
-                        variant={ttl.urgent ? 'attention' : 'neutral'}
-                      />
+                      <Badge label={ttl.label} variant={ttl.urgent ? 'attention' : 'neutral'} />
                     </View>
 
                     <View
@@ -211,7 +214,11 @@ export default function RadarScreen() {
                       }}
                     >
                       <Icon
-                        name={delivery.corridorDistanceMeters !== null ? 'navigate-outline' : 'location-outline'}
+                        name={
+                          delivery.corridorDistanceMeters !== null
+                            ? 'navigate-outline'
+                            : 'location-outline'
+                        }
                         size={16}
                         color="secondary"
                       />
