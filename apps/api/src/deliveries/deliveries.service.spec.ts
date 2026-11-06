@@ -401,7 +401,9 @@ describe('DeliveriesService.start / deliver / cancel', () => {
 
     const dto = await service.cancel('delivery-1', BUYER);
     expect(dto.status).toBe('cancelled');
-    expect(workHours.endSession).toHaveBeenCalledWith('ws-1', BUYER);
+    // Актёр закрытия — водитель пары: endSession пускает только
+    // сторону пары (ADR-011), а триггер — системный (ADR-015).
+    expect(workHours.endSession).toHaveBeenCalledWith('ws-1', DRIVER);
   });
 
   it('cancel после выезда: только водитель и только с причиной', async () => {

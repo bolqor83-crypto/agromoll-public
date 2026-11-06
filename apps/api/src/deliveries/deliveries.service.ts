@@ -352,7 +352,7 @@ export class DeliveriesService {
     });
 
     // Часы 289-ФЗ: закрываем смену пары (если открыта) и проверяем серию.
-    await this.closePairSession(deliveryId, driverId);
+    await this.closePairSession(deliveryId);
 
     this.logger.log({ deliveryId, driverId }, 'delivery:delivered');
     return this.toDto(delivery, driverId, null);
@@ -401,7 +401,7 @@ export class DeliveriesService {
     });
 
     // Смена закрывается и при отмене взятого заказа — часы честные.
-    await this.closePairSession(deliveryId, actorId);
+    await this.closePairSession(deliveryId);
 
     this.logger.log({ deliveryId, actorId }, 'delivery:cancelled');
     return this.toDto(delivery, actorId, null);
@@ -442,10 +442,12 @@ export class DeliveriesService {
 
   /**
    * Закрыть открытую смену пары заказа (driver, pickup-продавец):
-   * при deliver/cancel взятого. Часы уйдут в MonthlyPairTotal,
-   * затем — проверка серии 289-ФЗ (создание BlockedPair).
+   * при deliver/cancel взятого. Актёр закрытия — ВОДИТЕЛЬ пары:
+   * WorkHoursService пускает к закрытию только сторону пары
+   * (ADR-011), а триггер доставки — системный. Часы уйдут в
+   * MonthlyPairTotal, затем — проверка серии 289-ФЗ.
    */
-  private async closePairSession(deliveryId: string, actorId: string): Promise<void> {
+  private async closePairSession(deliveryId: string): Promise<void> {
     try {
       const delivery = await this.prisma.deliveryRequest.findUniqueOrThrow({
         where: { id: deliveryId },
@@ -462,7 +464,7 @@ export class DeliveriesService {
         where: { driverId: delivery.assignedDriverId, sellerId, endedAt: null },
       });
       if (open) {
-        await this.workHours.endSession(open.id, actorId);
+        await this.workHours.endSession(open.id, delivery.assignedDriverId);
       }
       // Серия 289-ФЗ: закрытие смены могло добить месяц до лимита.
       await this.workHours.enforceSeriesForPair(delivery.assignedDriverId, sellerId);
