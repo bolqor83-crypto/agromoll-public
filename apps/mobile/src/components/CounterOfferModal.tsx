@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Alert, View } from 'react-native';
 import type { BookingDto } from '@agromoll/types';
-import { Button, Card, Input, spacing, success, tap, Text, useTheme, warning } from '@agromoll/ui';
+import { Button, Card, Input, spacing, success, Text, useTheme, warning } from '@agromoll/ui';
 import { counterOfferMutation } from '@/lib/outbox/mutations';
 import { SheetModal } from './SheetModal';
 
 export interface CounterOfferModalProps {
   visible: boolean;
   booking: BookingDto;
-  demo: boolean;
   onClose: () => void;
   /** Успешная корректировка. */
   onDone: () => void;
@@ -17,11 +16,12 @@ export interface CounterOfferModalProps {
 /**
  * Модалка корректировки брони (seller): предложить другое количество,
  * время выкупа или комментарий. Отправка — POST /bookings/:id/counter-offer.
+ *
+ * v0.6.1-D (ADR-026): демо-ветка убрана — «Входящие» без фейков (вариант A).
  */
 export function CounterOfferModal({
   visible,
   booking,
-  demo,
   onClose,
   onDone,
 }: CounterOfferModalProps) {
@@ -36,12 +36,6 @@ export function CounterOfferModal({
   const canSend = quantityValid || pickupTime.trim().length > 0 || note.trim().length > 0;
 
   const send = async (): Promise<void> => {
-    if (demo) {
-      tap();
-      Alert.alert('Демо-режим', 'API недоступен — корректировка не отправлена.');
-      onClose();
-      return;
-    }
     setSending(true);
     try {
       await counterOfferMutation(booking.id, {

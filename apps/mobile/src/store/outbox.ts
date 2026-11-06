@@ -300,6 +300,18 @@ export async function initOutboxBridge(): Promise<() => void> {
     // отсеивает «подключено, но интернета нет» (например, Wi-Fi без шлюза).
     const isOnline = state.isConnected === true && state.isInternetReachable !== false;
     const wasOnline = useOutboxStore.getState().isOnline;
+    // v0.6.1-D (ADR-026): полный структурированный снимок состояния сети.
+    // Раньше слушатель молчал при переходах offline → ConnectionBadge не
+    // обновлялся в headless-средах и «офлайн» было нечем диагностировать:
+    // теперь каждое событие (включая isInternetReachable=null на старте)
+    // видно в логах рядом с принятым решением isOnline.
+    logger.info('outbox', 'сеть: состояние NetInfo', {
+      type: state.type,
+      isConnected: state.isConnected ?? null,
+      isInternetReachable: state.isInternetReachable ?? null,
+      isOnline,
+      wasOnline,
+    });
     useOutboxStore.setState({ isOnline });
     if (!wasOnline && isOnline) {
       logger.info('outbox', 'сеть восстановлена — синхронизируем очередь');

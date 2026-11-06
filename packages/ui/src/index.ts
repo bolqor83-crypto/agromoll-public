@@ -13,4 +13,8 @@ export * from './components/Skeleton';
 export * from './components/EmptyState';
 export * from './components/TabBar';
 export * from './components/PullToRefresh';
+export * from './components/ErrorState';
+export * from './components/AnimatedNumber';
+export * from './components/SuccessCheck';
+export * from './components/ShakeField';
 export * from './components/ProgressBar';

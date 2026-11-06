@@ -1,6 +1,6 @@
 {
   "name": "@agromoll/mobile",
-  "version": "0.5.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Мобильное приложение АгроМолл (Expo Router). Этап «фундамент»: экраны-заглушки.",
   "main": "expo-router/entry",
@@ -9,7 +9,7 @@
     "dev:web": "expo start --web",
     "dev:android": "expo start --android",
     "dev:ios": "expo start --ios",
-    "build": "expo export --platform web --output-dir dist",
+    "build": "expo export --platform web --output-dir dist --clear",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest"
@@ -20,6 +20,7 @@
     "@agromoll/validation": "workspace:^",
     "@expo/metro-runtime": "~4.0.1",
     "@expo/vector-icons": "^14.0.4",
+    "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/netinfo": "7.1.7",
     "axios": "^1.7.9",
     "expo": "~52.0.0",
@@ -49,6 +50,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^12.5.2",
     "@types/react": "~18.3.12",
     "eslint": "^9.17.0",
     "eslint-config-expo": "~8.0.1",

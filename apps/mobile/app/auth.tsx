@@ -7,7 +7,7 @@
  * Тёмная тема поддерживается токенами дизайн-системы автоматически.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, TextInput, View } from 'react-native';
 import {
   Button,
   Icon,
@@ -25,6 +25,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/auth';
 import { api, toApiError } from '@/lib/api';
+import { keyboardBehavior } from '@/lib/keyboard';
 import { normalizePhone } from '@agromoll/types';
 
 /** Перевод «сырых» цифр в маску +7 (961) 123-45-67. */
@@ -153,7 +154,10 @@ export default function AuthScreen() {
   };
 
   return (
-    <Screen scroll={false}>
+    // v0.6.1-B: клавиатура не перекрывает инпуты телефона и кода
+    // (behavior: iOS — padding, Android — height, web — без изменений, ADR-024).
+    <KeyboardAvoidingView behavior={keyboardBehavior} style={{ flex: 1 }}>
+      <Screen scroll={false}>
       <View style={{ gap: spacing.sm, marginBottom: spacing.xl }}>
         <View
           style={{
@@ -198,8 +202,10 @@ export default function AuthScreen() {
         </View>
       ) : null}
 
-      {step === 'phone' ? (
-        <View style={{ gap: spacing.lg }}>
+      {/* v0.6.1-C (ADR-025): форма сверху, primary-кнопка — внизу экрана
+          (thumb zone, одна рука): «Получить код»/«Войти» раньше были в центре. */}
+      <View style={{ flex: 1, gap: spacing.lg }}>
+        {step === 'phone' ? (
           <Input
             label="Телефон"
             value={phoneInput}
@@ -215,15 +221,8 @@ export default function AuthScreen() {
             placeholder="+7 (961) 123-45-67"
             error={error}
           />
-          <Button
-            title="Получить код"
-            onPress={() => void requestCode()}
-            loading={loading}
-            disabled={!normalizedPhone}
-          />
-        </View>
-      ) : (
-        <View style={{ gap: spacing.lg }}>
+        ) : (
+          <>
           <View>
             <Text variant="caption" color="secondary" style={{ marginBottom: spacing.sm }}>
               Код из SMS
@@ -287,12 +286,6 @@ export default function AuthScreen() {
             </Text>
           ) : null}
 
-          <Button
-            title="Войти"
-            onPress={() => void verifyCode()}
-            loading={loading}
-            disabled={!codeReady}
-          />
 
           <Pressable
             onPress={() => {
@@ -311,24 +304,32 @@ export default function AuthScreen() {
                 : 'Не пришло SMS? Запросить код повторно'}
             </Text>
           </Pressable>
-        </View>
-      )}
+          </>
+        )}
+      </View>
 
       {__DEV__ && step === 'code' ? (
-        <Text variant="caption" color="muted" align="center" style={{ marginTop: spacing.lg }}>
+        <Text variant="caption" color="muted" align="center">
           Dev-режим: код-заглушка 0000
         </Text>
       ) : null}
 
       {loading && step === 'code' ? (
-        <View style={{ marginTop: spacing.md }}>
-          <SkeletonCard />
-        </View>
+        <SkeletonCard />
       ) : null}
 
-      <Text variant="caption" color="muted" align="center" style={{ marginTop: spacing.xl }}>
+      {/* Primary action — внизу экрана, thumb zone (v0.6.1-C, ADR-025) */}
+      <Button
+        title={step === 'phone' ? 'Получить код' : 'Войти'}
+        onPress={() => (step === 'phone' ? void requestCode() : void verifyCode())}
+        loading={loading}
+        disabled={step === 'phone' ? !normalizedPhone : !codeReady}
+      />
+
+      <Text variant="caption" color="muted" align="center" style={{ marginTop: spacing.md }}>
         Входя, вы соглашаетесь с правилами рынка «АгроМолл».
       </Text>
-    </Screen>
+      </Screen>
+    </KeyboardAvoidingView>
   );
 }

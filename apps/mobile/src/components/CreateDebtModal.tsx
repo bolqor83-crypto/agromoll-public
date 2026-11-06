@@ -9,9 +9,9 @@
  * Отправка — через офлайн-ядро (createDebtMutation): работает и без сети,
  * карточка появится как оптимистичная, сервер подтвердит позже.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
-import { Button, Input, Text, spacing, useTheme } from '@agromoll/ui';
+import { Button, Input, ShakeField, Text, spacing, useTheme } from '@agromoll/ui';
 import { SheetModal } from '@/components/SheetModal';
 import type { CounterpartyDto } from '@agromoll/types';
 import { DEBT_MAX_AMOUNT } from '@agromoll/validation';
@@ -39,6 +39,9 @@ export function CreateDebtModal({
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // v0.6.1-E2 (ADR-027): покачивание суммы, когда она стала невалидной
+  // (выше лимита / не число) — ошибка валидации ощущается телом.
+  const [amountShake, setAmountShake] = useState(0);
 
   // Сброс формы при каждом открытии.
   useEffect(() => {
@@ -60,6 +63,16 @@ export function CreateDebtModal({
       Math.round(amount * 100) === amount * 100,
     [amount],
   );
+
+  // Невалидное значение ПОСЛЕ валидного (или первое же «слишком много»)
+  // — качаем поле: пользователь ещё держит телефон в руках и может поправить.
+  const amountWasValid = useRef(true);
+  useEffect(() => {
+    if (amountText.length > 0 && !amountValid && amountWasValid.current) {
+      setAmountShake((k) => k + 1);
+    }
+    amountWasValid.current = amountValid || amountText.length === 0;
+  }, [amountValid, amountText]);
 
   const canSubmit = debtorId !== null && amountValid && !submitting;
 
@@ -137,21 +150,23 @@ export function CreateDebtModal({
           </View>
         )}
 
-        <Input
-          label={`Сумма, ₽ (до ${DEBT_MAX_AMOUNT.toLocaleString('ru-RU')})`}
-          value={amountText}
-          onChangeText={(text) => {
-            setAmountText(text.replace(/[^\d.,]/g, ''));
-            setError(null);
-          }}
-          keyboardType="decimal-pad"
-          placeholder="12500"
-          error={
-            amountText.length > 0 && !amountValid
-              ? 'Сумма — от 1 ₽ до 1 000 000 ₽, максимум две цифры после запятой'
-              : null
-          }
-        />
+        <ShakeField shakeKey={amountShake}>
+          <Input
+            label={`Сумма, ₽ (до ${DEBT_MAX_AMOUNT.toLocaleString('ru-RU')})`}
+            value={amountText}
+            onChangeText={(text) => {
+              setAmountText(text.replace(/[^\d.,]/g, ''));
+              setError(null);
+            }}
+            keyboardType="decimal-pad"
+            placeholder="12500"
+            error={
+              amountText.length > 0 && !amountValid
+                ? 'Сумма — от 1 ₽ до 1 000 000 ₽, максимум две цифры после запятой'
+                : null
+            }
+          />
+        </ShakeField>
         <Input
           label="Описание (необязательно)"
           value={description}

@@ -1,15 +1,19 @@
 /**
  * Демо-данные: показываются, когда API недоступен (офлайн-устойчивость v0.2.0).
  *
- * Данные размечены бейджем «Демо-данные» — пользователь всегда понимает,
+ * Данные размечены янтарным баннером DemoBanner «Демо-режим. API недоступен.
+ * Данные не настоящие» (v0.6.1-D, ADR-026) — пользователь всегда понимает,
  * что смотрит витрину без сервера. Форма полностью совпадает с DTO API.
+ *
+ * v0.6.1-D: демо-брони удалены — «Мои брони» и «Входящие» больше не
+ * показывают выдуманных обязательств (вариант A, ADR-026). Остаются
+ * только витринные сущности: лоты (лента/витрина), долги, детали лота.
  */
-import type { BookingDto, DebtDto, ListingDto } from '@agromoll/types';
+import type { DebtDto, ListingDto } from '@agromoll/types';
 import { DEMO_ACCOUNTS } from '@agromoll/types';
 
 const NOW = new Date();
 const hoursFromNow = (h: number) => new Date(NOW.getTime() + h * 3_600_000).toISOString();
-const minutesFromNow = (m: number) => new Date(NOW.getTime() + m * 60_000).toISOString();
 
 export const DEMO_LISTINGS: ListingDto[] = [
   {
@@ -81,74 +85,6 @@ export const DEMO_LISTINGS: ListingDto[] = [
     updatedAt: hoursFromNow(-24),
   },
 ];
-
-export const DEMO_BUYER_BOOKINGS: BookingDto[] = [
-  {
-    id: 'demo-booking-1',
-    listingId: 'demo-listing-1',
-    listingTitle: 'Помидоры розовые',
-    listingUnit: 'kg',
-    buyerId: DEMO_ACCOUNTS.buyer.id,
-    buyerName: DEMO_ACCOUNTS.buyer.displayName,
-    requestedQuantity: 20,
-    confirmedQuantity: null,
-    confirmedAt: null,
-    deliveryConfirmedAt: null,
-    receivedQuantity: null,
-    qualityNotes: null,
-    qualityFlag: 'ok',
-    status: 'counter_offered',
-    expiresAt: minutesFromNow(18),
-    createdAt: minutesFromNow(-12),
-    updatedAt: minutesFromNow(-4),
-  },
-  {
-    id: 'demo-booking-2',
-    listingId: 'demo-listing-2',
-    listingTitle: 'Лук репчатый, ящик',
-    listingUnit: 'box',
-    buyerId: DEMO_ACCOUNTS.buyer.id,
-    buyerName: DEMO_ACCOUNTS.buyer.displayName,
-    requestedQuantity: 3,
-    confirmedQuantity: 3,
-    confirmedAt: null,
-    deliveryConfirmedAt: null,
-    receivedQuantity: null,
-    qualityNotes: null,
-    qualityFlag: 'ok',
-    status: 'confirmed',
-    expiresAt: minutesFromNow(42),
-    createdAt: minutesFromNow(-30),
-    updatedAt: minutesFromNow(-25),
-  },
-  {
-    id: 'demo-booking-3',
-    listingId: 'demo-listing-3',
-    listingTitle: 'Картофель молодой',
-    listingUnit: 'kg',
-    buyerId: DEMO_ACCOUNTS.buyer.id,
-    buyerName: DEMO_ACCOUNTS.buyer.displayName,
-    requestedQuantity: 50,
-    confirmedQuantity: null,
-    confirmedAt: null,
-    deliveryConfirmedAt: null,
-    receivedQuantity: null,
-    qualityNotes: null,
-    qualityFlag: 'ok',
-    status: 'requested',
-    expiresAt: minutesFromNow(25),
-    createdAt: minutesFromNow(-5),
-    updatedAt: minutesFromNow(-5),
-  },
-];
-
-/** Последнее корректировочное предложение для демо-брони counter_offered. */
-export const DEMO_COUNTER_OFFERS: Record<
-  string,
-  { offeredQuantity?: number; pickupTime?: string; note?: string }
-> = {
-  'demo-booking-1': { offeredQuantity: 15, pickupTime: 'после 9:00' },
-};
 
 // ─── Долги (v0.4.0, ADR-010) ────────────────────────────────────────────────
 

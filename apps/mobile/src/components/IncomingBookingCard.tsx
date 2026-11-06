@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, View } from 'react-native';
 import { BOOKING_STATUS_LABELS } from '@agromoll/types';
 import type { BookingDto } from '@agromoll/types';
-import { Badge, Button, Card, spacing, success, tap, Text, warning } from '@agromoll/ui';
+import { Badge, Button, Card, spacing, success as successHaptic, SuccessCheck, tap, Text, warning } from '@agromoll/ui';
 import { RatingBadge } from './RatingBadge';
 import { cancelBookingMutation, confirmBookingMutation } from '@/lib/outbox/mutations';
 import { CounterOfferModal } from './CounterOfferModal';
@@ -12,29 +12,23 @@ export interface IncomingBookingCardProps {
   booking: BookingDto;
   /** Оптимистичная операция ещё не подтверждена сервером. */
   pendingLabel?: string;
-  /** Демо-режим: действия не ходят в API. */
-  demo: boolean;
 }
 
 /**
  * Входящая бронь продавца («Входящие»): кто, что, сколько,
  * «Подтвердить» / «Предложить корректировку» / «Отклонить».
+ *
+ * v0.6.1-D (ADR-026): демо-ветка убрана — «Входящие» без фейков (вариант A).
  */
-export function IncomingBookingCard({ booking, pendingLabel, demo }: IncomingBookingCardProps) {
+export function IncomingBookingCard({ booking, pendingLabel }: IncomingBookingCardProps) {
   const [busy, setBusy] = useState<'confirm' | 'cancel' | null>(null);
   const [counterOpen, setCounterOpen] = useState(false);
+  // v0.6.1-E2 (ADR-027): тихая галочка после успешного подтверждения.
+  const [flash, setFlash] = useState(false);
 
   const canAct = booking.status === 'requested' || booking.status === 'counter_offered';
 
   const run = async (action: 'confirm' | 'cancel'): Promise<void> => {
-    if (demo) {
-      tap();
-      Alert.alert(
-        'Демо-режим',
-        'API недоступен — действие не выполнено. Поднимите pnpm dev, чтобы работать по-настоящему.',
-      );
-      return;
-    }
     setBusy(action);
     try {
       if (action === 'confirm') {
@@ -42,7 +36,11 @@ export function IncomingBookingCard({ booking, pendingLabel, demo }: IncomingBoo
       } else {
         await cancelBookingMutation(booking.id);
       }
-      success();
+      successHaptic();
+      // v0.6.1-E2 (ADR-027): галочка 400 мс spring — подтверждение телом.
+      if (action === 'confirm') {
+        setFlash(true);
+      }
       // Список обновится сам: событие outbox → version++ → экран перечитает.
     } catch (error) {
       warning();
@@ -54,6 +52,22 @@ export function IncomingBookingCard({ booking, pendingLabel, demo }: IncomingBoo
 
   return (
     <Card style={{ gap: spacing.md }}>
+      {/* Успех действия — тихая галочка поверх карточки (ADR-027). */}
+      {flash ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <SuccessCheck onDone={() => setFlash(false)} />
+        </View>
+      ) : null}
       <View
         style={{
           flexDirection: 'row',
@@ -127,7 +141,6 @@ export function IncomingBookingCard({ booking, pendingLabel, demo }: IncomingBoo
       <CounterOfferModal
         visible={counterOpen}
         booking={booking}
-        demo={demo}
         onClose={() => setCounterOpen(false)}
         onDone={() => setCounterOpen(false)}
       />

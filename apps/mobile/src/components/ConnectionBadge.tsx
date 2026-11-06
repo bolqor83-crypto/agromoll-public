@@ -7,7 +7,7 @@
  *  - зелёная пульсирующая «Синхронизация…» — очередь не пуста и есть сеть.
  * Тап открывает экран «Очередь» (прозрачность для пользователя).
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable } from 'react-native';
 import Animated, {
   Easing,
@@ -17,7 +17,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { radius, spacing, Text, useTheme } from '@agromoll/ui';
+import { radius, spacing, SuccessCheck, Text, useTheme } from '@agromoll/ui';
 import { useOutboxStore } from '@/store/outbox';
 
 export function ConnectionBadge() {
@@ -26,6 +26,17 @@ export function ConnectionBadge() {
   const isOnline = useOutboxStore((s) => s.isOnline);
   const pendingCount = useOutboxStore((s) => s.pendingCount);
   const syncing = useOutboxStore((s) => s.syncing);
+
+  // v0.6.1-E2 (ADR-027): очередь опустела при живой сети — синхронизация
+  // удалась. Тихая галочка на ~1 с: всё отправлено.
+  const [justSynced, setJustSynced] = useState(false);
+  const prevPending = useRef(pendingCount);
+  useEffect(() => {
+    if (prevPending.current > 0 && pendingCount === 0 && isOnline) {
+      setJustSynced(true);
+    }
+    prevPending.current = pendingCount;
+  }, [pendingCount, isOnline]);
 
   const isSyncing = syncing || (pendingCount > 0 && isOnline);
   const isOffline = !isOnline;
@@ -82,6 +93,9 @@ export function ConnectionBadge() {
         {label}
         {isSyncing && pendingCount > 0 ? ` (${pendingCount})` : ''}
       </Text>
+      {justSynced ? (
+        <SuccessCheck size="sm" onDone={() => setJustSynced(false)} />
+      ) : null}
     </Pressable>
   );
 }

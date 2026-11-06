@@ -23,4 +23,13 @@ module.exports = [
       },
     },
   },
+  {
+    // Jest-сетап: глобалы jest (v0.6.1-A, рендер-тесты RTL)
+    files: ['jest.setup.js'],
+    languageOptions: {
+      globals: {
+        jest: 'readonly',
+      },
+    },
+  },
 ];

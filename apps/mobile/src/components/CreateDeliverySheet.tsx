@@ -6,14 +6,14 @@
  * outbox (create_delivery): работает офлайн, уйдёт при появлении сети
  * (ADR-006/015). Цены нет НАМЕРЕННО — платформа не агент.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, View } from 'react-native';
-import * as Location from 'expo-location';
 import {
   Button,
   Card,
   Icon,
   Input,
+  ShakeField,
   spacing,
   success,
   tap,
@@ -49,12 +49,27 @@ export function CreateDeliverySheet({ visible, onClose, onCreated }: CreateDeliv
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // v0.6.1-E2 (ADR-027): вес вне пределов (0 < вес ≤ 20 000 кг, ADR-015) —
+  // качаем поле: вместимость «Газели» не резиновая.
+  const weightValid =
+    Number.isFinite(Number(weight)) && Number(weight) > 0 && Number(weight) <= 20000;
+  const [weightShake, setWeightShake] = useState(0);
+  const weightWasValid = useRef(true);
+  useEffect(() => {
+    if (weight.length > 0 && !weightValid && weightWasValid.current) {
+      setWeightShake((k) => k + 1);
+    }
+    weightWasValid.current = weightValid || weight.length === 0;
+  }, [weightValid, weight]);
+
   /** Загрузить варианты точек: линии продавцов рядом + мои точки. */
   const loadOptions = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
       let center = MARKET_CENTER;
       try {
+        // v0.6.1-A: динамический импорт — иначе Metro тащит expo-location в entry (ADR-023).
+        const { default: Location } = await import('expo-location');
         const permission = await Location.requestForegroundPermissionsAsync();
         if (permission.status === 'granted') {
           const position = await Location.getCurrentPositionAsync({
@@ -190,12 +205,15 @@ export function CreateDeliverySheet({ visible, onClose, onCreated }: CreateDeliv
           )}
         </View>
 
-        <Input
-          placeholder="Вес, кг (например 250.5)"
-          value={weight}
-          onChangeText={setWeight}
-          keyboardType="decimal-pad"
-        />
+        <ShakeField shakeKey={weightShake}>
+          <Input
+            placeholder="Вес, кг (например 250.5)"
+            value={weight}
+            onChangeText={setWeight}
+            keyboardType="decimal-pad"
+            error={weight.length > 0 && !weightValid ? 'От 1 кг до 20 000 кг — вместимость «Газели»' : null}
+          />
+        </ShakeField>
         <Input
           placeholder="Что везём (опционально)"
           value={description}

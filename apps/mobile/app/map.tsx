@@ -1,12 +1,11 @@
 /**
- * Экран «Карта рынка» (v0.5.0, подэтап B, ADR-014).
+ * Экран «Карта рынка» (v0.5.0, ADR-014).
  *
- * Тонкая обёртка над MarketMapScreen: экраны приложения живут в
- * src/components (как DebtsScreen и WorkHoursScreen), файлы в app/ —
- * только маршруты Expo Router.
+ * v0.6.1-A: тонкая обёртка — код MarketMapScreen грузится отдельным
+ * чанком (SVG-схема рынка не нужна в главном бандле, ADR-023).
  */
-import { MarketMapScreen } from '@/components';
+import { lazyScreen } from '@/lib/lazy-screen';
 
-export default function MapRoute() {
-  return <MarketMapScreen />;
-}
+export default lazyScreen(() =>
+  import('@/components/MarketMapScreen').then((m) => ({ default: m.MarketMapScreen })),
+);

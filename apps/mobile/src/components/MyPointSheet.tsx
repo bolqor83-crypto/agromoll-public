@@ -9,7 +9,6 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
-import * as Location from 'expo-location';
 import { Button, Card, Icon, Input, spacing, success, Text, warning } from '@agromoll/ui';
 import type { GeoCoord, UserRole } from '@agromoll/types';
 import { MapCanvas } from '@/map';
@@ -41,6 +40,9 @@ export function MyPointSheet({ visible, onClose, role, onSaved }: MyPointSheetPr
   const kindLabel = role === 'seller' ? 'Мой ряд на рынке' : 'Точка получения';
 
   // При открытии — попытка геолокации (мягкая: отказ не блокирует).
+  // v0.6.1-A: expo-location — динамический импорт: компонент общий для
+  // ленты и витрины (общий чанк), а геолокация нужна только когда лист
+  // открыт — не тащим 32 КБ в главный бандл (ADR-023).
   useEffect(() => {
     if (!visible) {
       return;
@@ -49,6 +51,7 @@ export function MyPointSheet({ visible, onClose, role, onSaved }: MyPointSheetPr
     setLocating(true);
     (async () => {
       try {
+        const { default: Location } = await import('expo-location');
         const permission = await Location.requestForegroundPermissionsAsync();
         if (permission.status !== 'granted') {
           logger.info('geo', 'разрешение геолокации не выдано — центр рынка');

@@ -23,6 +23,7 @@ import {
   PullToRefreshScrollView,
   Screen,
   SkeletonCard,
+  SuccessCheck,
   Text,
   spacing,
 } from '@agromoll/ui';
@@ -54,6 +55,8 @@ export function DebtsScreen() {
   const [createVisible, setCreateVisible] = useState(false);
   const [counterparties, setCounterparties] = useState<CounterpartyDto[]>([]);
   const [counterpartiesLoading, setCounterpartiesLoading] = useState(false);
+  // v0.6.1-E2 (ADR-027): тихая галочка после погашения/закрытия спора.
+  const [flash, setFlash] = useState(false);
 
   const viewerId = useAuthStore((s) => s.user?.id ?? '');
   const version = useOutboxStore((s) => s.version);
@@ -117,6 +120,7 @@ export function DebtsScreen() {
 
   const handleSettle = useCallback(
     (debt: DebtDto): void => {
+      setFlash(true); // ADR-027: успех — галочкой, не салютом
       void settleDebtMutation(debt.id);
     },
     [],
@@ -126,13 +130,19 @@ export function DebtsScreen() {
     void disputeDebtMutation(debt.id);
   }, []);
 
-  const handleResolve = useCallback((debt: DebtDto): void => {
-    // Оптимистичный статус: второе подтверждение закрывает спор, первое —
-    // оставляет открытым (ждём другую сторону).
-    const closes =
-      debt.resolveRequestedById !== null && debt.resolveRequestedById !== viewerId;
-    void resolveDebtMutation(debt.id, (closes ? 'settled' : 'disputed') as DebtStatus);
-  }, [viewerId]);
+  const handleResolve = useCallback(
+    (debt: DebtDto): void => {
+      // Оптимистичный статус: второе подтверждение закрывает спор, первое —
+      // оставляет открытым (ждём другую сторону).
+      const closes =
+        debt.resolveRequestedById !== null && debt.resolveRequestedById !== viewerId;
+      if (closes) {
+        setFlash(true); // спор закрыт обоюдно — тот же тихий успех (ADR-027)
+      }
+      void resolveDebtMutation(debt.id, (closes ? 'settled' : 'disputed') as DebtStatus);
+    },
+    [viewerId],
+  );
 
   const handleRemind = useCallback((debt: DebtDto): void => {
     void remindDebt(debt.id)
@@ -150,6 +160,23 @@ export function DebtsScreen() {
 
   return (
     <Screen scroll={false}>
+      {/* Успех действия — тихая галочка поверх экрана (ADR-027). */}
+      {flash ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 10,
+          }}
+        >
+          <SuccessCheck onDone={() => setFlash(false)} />
+        </View>
+      ) : null}
       <ScreenHeader
         title="Долги"
         subtitle="Учёт договорённостей · платформа не платёжный агент"

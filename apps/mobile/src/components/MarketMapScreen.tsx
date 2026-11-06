@@ -11,7 +11,6 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, View } from 'react-native';
-import * as Location from 'expo-location';
 import {
   Badge,
   Button,
@@ -30,7 +29,7 @@ import type { GeoCoord, GeoPointDto, GeoVehicleType } from '@agromoll/types';
 import { GEO_POINT_KIND_LABELS, GEO_VEHICLE_LABELS } from '@agromoll/types';
 import { MapCanvas } from '@/map';
 import type { MapLine, MapMarker } from '@/map';
-import { ScreenHeader } from '@/components';
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { MyPointSheet, MARKET_CENTER } from '@/components/MyPointSheet';
 import { useAuthStore } from '@/store/auth';
 import { api, toApiError } from '@/lib/api';
@@ -88,6 +87,8 @@ export function MarketMapScreen() {
     let cancelled = false;
     (async () => {
       try {
+        // v0.6.1-A: динамический импорт — иначе Metro тащит expo-location в entry (ADR-023).
+        const { default: Location } = await import('expo-location');
         const permission = await Location.requestForegroundPermissionsAsync();
         if (permission.status !== 'granted') {
           return;

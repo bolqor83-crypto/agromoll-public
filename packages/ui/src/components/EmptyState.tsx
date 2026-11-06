@@ -6,15 +6,20 @@
  * (никаких стоковых картинок), 1–2 строки текста и опциональное действие.
  *
  * v0.3.1: иллюстрация «появляется» — scale 0.9 → 1 + проявление,
- * 400 мс spring (ADR-009). Пустое состояние — часть живого интерфейса,
+ * spring (ADR-009). Пустое состояние — часть живого интерфейса,
  * а не простыня текста.
+ *
+ * v0.6.1-E2 (ADR-027): блок целиком — scale 0.95→1 + fade 300 мс,
+ * иллюстрация на 100 мс позже (staggered); reduced motion — мгновенно.
  */
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
+  withDelay,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -23,8 +28,10 @@ import { radius, spacing } from '../tokens';
 import { Button } from './Button';
 import { Text } from './Text';
 
-/** Пружина появления иллюстрации (400 мс, мягкая). */
-const ILLUSTRATION_SPRING = { damping: 15, mass: 0.8, stiffness: 200 };
+/** Пружина появления блока/иллюстрации (ADR-027: 300 мс spring). */
+const APPEAR_SPRING = { damping: 16, mass: 0.75, stiffness: 240 };
+/** Задержка иллюстрации — staggered entrance (ADR-027: 100 мс). */
+const STAGGER_MS = 100;
 
 /** Иллюстрации — простые геометрические композиции в токенах темы. */
 export type EmptyStateIllustration = 'basket' | 'box' | 'radar' | 'calendar';
@@ -46,15 +53,29 @@ export function EmptyState({
   children,
 }: EmptyStateProps) {
   const { colors } = useTheme();
+  const reduced = useReducedMotion();
 
-  // Появление иллюстрации: масштаб 0.9 → 1 пружиной + fade 400 мс.
-  const scale = useSharedValue(0.9);
-  const opacity = useSharedValue(0);
+  // Блок целиком: scale 0.95→1 + fade; иллюстрация — на 100 мс позже.
+  const contentScale = useSharedValue(reduced ? 1 : 0.95);
+  const contentOpacity = useSharedValue(reduced ? 1 : 0);
+  const scale = useSharedValue(reduced ? 1 : 0.9);
+  const opacity = useSharedValue(reduced ? 1 : 0);
 
   useEffect(() => {
-    scale.value = withSpring(1, ILLUSTRATION_SPRING);
-    opacity.value = withTiming(1, { duration: 400 });
-  }, [scale, opacity]);
+    if (reduced) {
+      return;
+    }
+    contentScale.value = withSpring(1, APPEAR_SPRING);
+    contentOpacity.value = withTiming(1, { duration: 300 });
+    scale.value = withDelay(STAGGER_MS, withSpring(1, APPEAR_SPRING));
+    opacity.value = withDelay(STAGGER_MS, withTiming(1, { duration: 300 }));
+    // появление — один раз на монтирование
+  }, []);
+
+  const contentStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: contentScale.value }],
+    opacity: contentOpacity.value,
+  }));
 
   const illustrationStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -62,14 +83,17 @@ export function EmptyState({
   }));
 
   return (
-    <View
+    <Animated.View
       accessibilityLabel={title}
-      style={{
-        alignItems: 'center',
-        gap: spacing.md,
-        paddingVertical: spacing.xxl,
-        paddingHorizontal: spacing.xl,
-      }}
+      style={[
+        contentStyle,
+        {
+          alignItems: 'center',
+          gap: spacing.md,
+          paddingVertical: spacing.xxl,
+          paddingHorizontal: spacing.xl,
+        },
+      ]}
     >
       <Animated.View style={[{ marginBottom: spacing.sm }, illustrationStyle]}>
         {renderIllustration(illustration, colors)}
@@ -91,7 +115,7 @@ export function EmptyState({
         />
       ) : null}
       {children}
-    </View>
+    </Animated.View>
   );
 }
 

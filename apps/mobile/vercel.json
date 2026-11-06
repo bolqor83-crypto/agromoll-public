@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@agromoll/ui --filter=@agromoll/types --filter=@agromoll/validation && cd apps/mobile && npx expo export --platform web",
+  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@agromoll/ui --filter=@agromoll/types --filter=@agromoll/validation && cd apps/mobile && EXPO_PUBLIC_API_URL=\"$EXPO_PUBLIC_API_URL\" npx expo export --platform web --clear",
   "outputDirectory": "dist",
   "framework": null,
   "installCommand": "echo 'install handled in buildCommand'"

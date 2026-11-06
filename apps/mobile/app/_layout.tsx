@@ -1,4 +1,4 @@
-import 'react-native-gesture-handler';
+import '@/lib/gesture-handler-boot';
 import { useEffect } from 'react';
 import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
@@ -7,10 +7,19 @@ import Constants from 'expo-constants';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from '@agromoll/ui';
 import { logger } from '@/lib/logger';
+import { IS_API_CONFIGURED } from '@/lib/api-config';
 import { useThemeStore } from '@/store/theme';
 import { listenForcedSignOut, useAuthStore } from '@/store/auth';
 import { initOutboxBridge } from '@/store/outbox';
+import { ApiNotConfiguredScreen } from '@/components/ApiNotConfiguredScreen';
 import { ConflictDialog } from '@/components/ConflictDialog';
+
+/**
+ * v0.6.1-B: защита от дубля «приложение запущено» — React 18 в dev
+ * монтирует эффекты дважды (StrictMode-поведение), в проде — один раз.
+ * Модульный флаг гарантирует одну запись за жизнь js-контекста.
+ */
+let bootLogged = false;
 
 function AppShell() {
   const { mode } = useTheme();
@@ -55,15 +64,23 @@ export default function RootLayout() {
   // Инициализация живёт ЗДЕСЬ, а не в AppShell: пока статус booting,
   // рендерится BootSplash и эффекты AppShell не выполнялись бы — дедлок.
   // При старте: refresh-токен есть → пробуем refresh и профиль; нет → вход.
+  // Адрес API не настроен (prod без EXPO_PUBLIC_API_URL, ADR-022) —
+  // bootstrap не запускаем: экран «Сервер не настроен» вместо входа.
   useEffect(() => {
-    void bootstrap();
+    if (IS_API_CONFIGURED) {
+      void bootstrap();
+    }
   }, [bootstrap]);
 
   // Интерцептор axios сказал «разлогинь» — слушаем один раз.
   useEffect(() => listenForcedSignOut(), []);
 
   // Офлайн-ядро: события очереди, сеть (NetInfo), передний план (AppState).
+  // Без адреса API очереди нечего отправлять — не инициализируем.
   useEffect(() => {
+    if (!IS_API_CONFIGURED) {
+      return;
+    }
     let cleanup: (() => void) | undefined;
     void initOutboxBridge().then((fn) => {
       cleanup = fn;
@@ -72,16 +89,26 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    logger.info('app', 'приложение запущено', {
-      version: Constants.expoConfig?.version ?? 'unknown',
-      sdk: String(Constants.expoConfig?.sdkVersion ?? 'unknown'),
-    });
+    if (!bootLogged) {
+      bootLogged = true;
+      logger.info('app', 'приложение запущено', {
+        version: Constants.expoConfig?.version ?? 'unknown',
+        sdk: String(Constants.expoConfig?.sdkVersion ?? 'unknown'),
+      });
+    }
   }, []);
 
   return (
     <SafeAreaProvider>
       <ThemeProvider setting={setting} onSettingChange={setSetting}>
-        {status === 'booting' ? <BootSplash /> : <AppShell />}
+        {/* Адрес API не настроен (prod, ADR-022) — честный экран вместо молчаливого localhost. */}
+        {!IS_API_CONFIGURED ? (
+          <ApiNotConfiguredScreen />
+        ) : status === 'booting' ? (
+          <BootSplash />
+        ) : (
+          <AppShell />
+        )}
       </ThemeProvider>
     </SafeAreaProvider>
   );

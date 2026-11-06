@@ -68,7 +68,22 @@ export function ConfirmDeliveryModal({ visible, booking, onClose }: ConfirmDeliv
   }, [booking, quantityValid, quantity, qualityFlag, notes, onClose]);
 
   return (
-    <SheetModal visible={visible} onClose={submitting ? () => undefined : onClose}>
+    <SheetModal
+      visible={visible}
+      onClose={submitting ? () => undefined : onClose}
+      footer={
+        // v0.6.1-C (ADR-025): primary-кнопка прибита к низу листа,
+        // не «плавает» в середине контента при коротких карточках.
+        <Button
+          title={submitting ? 'Подтверждаем…' : 'Подтвердить получение'}
+          variant="primary"
+          size="lg"
+          disabled={!canSubmit}
+          loading={submitting}
+          onPress={() => void handleSubmit()}
+        />
+      }
+    >
       <View style={{ gap: spacing.md }}>
         <Text variant="title">Подтвердить получение</Text>
         <Text variant="caption" color="secondary">
@@ -139,15 +154,6 @@ export function ConfirmDeliveryModal({ visible, booking, onClose }: ConfirmDeliv
             {error}
           </Text>
         ) : null}
-
-        <Button
-          title={submitting ? 'Подтверждаем…' : 'Подтвердить получение'}
-          variant="primary"
-          size="lg"
-          disabled={!canSubmit}
-          loading={submitting}
-          onPress={() => void handleSubmit()}
-        />
       </View>
     </SheetModal>
   );

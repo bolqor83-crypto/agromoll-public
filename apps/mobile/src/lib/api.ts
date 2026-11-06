@@ -44,6 +44,7 @@ import type {
 import { normalizePhone } from '@agromoll/types';
 import { tokenStore } from './token-store';
 import { logger } from './logger';
+import { API_URL, IS_API_CONFIGURED } from './api-config';
 import {
   AuthResponseSchema,
   BookingsResponseSchema,
@@ -69,10 +70,20 @@ import {
 } from '@agromoll/validation';
 import type { ZodType } from 'zod';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
-
-/** Таймаут запроса: рынок торопится, ждать дольше 8 секунд нельзя. */
 const REQUEST_TIMEOUT_MS = 8000;
+
+/**
+ * Адрес API (ADR-022): EXPO_PUBLIC_API_URL, в dev — localhost-фолбэк,
+ * в prod фолбэка НЕТ. Не настроен → приложение показывает экран
+ * «Сервер не настроен» (гейт в app/_layout.tsx) и экраны не рендерятся,
+ * поэтому недостижимый плейсхолдер ниже — только защита от «тихого» URL.
+ */
+export const RESOLVED_API_URL = API_URL;
+
+/** Задан ли адрес API (гейт корневого layout, ADR-022). */
+export function isApiConfigured(): boolean {
+  return IS_API_CONFIGURED;
+}
 
 /** Событие «токены сгорели, разлогинь» — слушает auth-store. */
 export const AUTH_SIGN_OUT_EVENT = 'agromoll:auth-sign-out';
@@ -185,7 +196,11 @@ function validateResponse<T>(schema: ZodType<T>, data: unknown, context: string)
 
 /** HTTP-клиент. */
 export const http = axios.create({
-  baseURL: API_URL,
+  // API_URL === null возможен только в prod без EXPO_PUBLIC_API_URL —
+  // тогда корневой layout показывает экран «Сервер не настроен» и до
+  // запросов дело не доходит. Плейсхолдер .invalid роняет DNS сразу,
+  // а не ходит на чужой localhost (хотфикс v0.6.1-0).
+  baseURL: API_URL ?? 'http://api-not-configured.invalid',
   timeout: REQUEST_TIMEOUT_MS,
   headers: { 'Content-Type': 'application/json' },
 });

@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, View } from 'react-native';
 import {
+  AnimatedNumber,
   Badge,
   Button,
   Card,
@@ -284,8 +285,16 @@ function PairCard({
 
         <ProgressBar progress={pair.totalMinutes / MONTHLY_LIMIT_MINUTES}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            {/* v0.6.1-E2 (ADR-027): часы «пробегают» к новому значению —
+                видно, сколько добавилось за смену, а не только итог. */}
             <Text variant="caption" color="secondary">
-              {formatHours(pair.totalMinutes)} из 60 ч в этом месяце
+              <AnimatedNumber
+                value={pair.totalMinutes}
+                format={formatHours}
+                variant="caption"
+                color="secondary"
+              />{' '}
+              из 60 ч в этом месяце
             </Text>
           </View>
         </ProgressBar>

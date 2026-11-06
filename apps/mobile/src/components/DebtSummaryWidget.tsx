@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { Badge, Card, Icon, Text, spacing, useTheme } from '@agromoll/ui';
+import { AnimatedNumber, Badge, Card, Icon, Text, spacing, useTheme } from '@agromoll/ui';
 import type { DebtsSummaryDto } from '@agromoll/types';
 import { useRouter } from 'expo-router';
 import { api } from '@/lib/api';
@@ -69,7 +69,8 @@ export function DebtSummaryWidget() {
               <Row
                 icon="trending-up-outline"
                 label="Вам должны"
-                value={`${formatMoney(owedToMe.total)} · ${owedToMe.count} запис${plural(owedToMe.count)}`}
+                amount={Number(owedToMe.total)}
+                count={owedToMe.count}
                 overdue={owedToMe.overdueCount > 0}
               />
             ) : null}
@@ -77,7 +78,8 @@ export function DebtSummaryWidget() {
               <Row
                 icon="trending-down-outline"
                 label="Вы должны"
-                value={`${formatMoney(iOwe.total)} · ${iOwe.count} запис${plural(iOwe.count)}`}
+                amount={Number(iOwe.total)}
+                count={iOwe.count}
                 overdue={iOwe.overdueCount > 0}
               />
             ) : null}
@@ -96,12 +98,14 @@ export function DebtSummaryWidget() {
 function Row({
   icon,
   label,
-  value,
+  amount,
+  count,
   overdue,
 }: {
   icon: 'trending-up-outline' | 'trending-down-outline';
   label: string;
-  value: string;
+  amount: number;
+  count: number;
   overdue: boolean;
 }) {
   return (
@@ -110,9 +114,20 @@ function Row({
       <Text variant="caption" color="secondary" style={{ flex: 1 }}>
         {label}
       </Text>
-      <Text variant="body" weight="600" color={overdue ? 'warning' : 'text'}>
-        {value}
-      </Text>
+      {/* v0.6.1-E2 (ADR-027): сумма «пробегает» к новому значению — видно,
+          НА СКОЛЬКО изменились долги, а не только что изменились. */}
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs }}>
+        <AnimatedNumber
+          value={amount}
+          format={(n) => formatMoney(String(n))}
+          variant="body"
+          weight="600"
+          color={overdue ? 'warning' : 'text'}
+        />
+        <Text variant="caption" color={overdue ? 'warning' : 'text'}>
+          · {count} запис{plural(count)}
+        </Text>
+      </View>
     </View>
   );
 }

@@ -4,7 +4,7 @@ import { Card, Icon, Screen, selection, spacing, Text } from '@agromoll/ui';
 import type { IconName } from '@agromoll/ui';
 import { ROLE_LABELS } from '@agromoll/types';
 import type { UserRole } from '@agromoll/types';
-import { ScreenHeader } from '@/components';
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { useAuthStore } from '@/store/auth';
 import { logger } from '@/lib/logger';
 

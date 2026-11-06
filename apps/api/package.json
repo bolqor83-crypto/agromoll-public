@@ -1,6 +1,6 @@
 {
   "name": "@agromoll/api",
-  "version": "0.5.0",
+  "version": "0.6.1",
   "private": true,
   "description": "API АгроМолл (NestJS). v0.2.0: модель бронирования + доменный сервис броней.",
   "scripts": {

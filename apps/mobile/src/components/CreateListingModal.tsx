@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, View } from 'react-native';
 import {
   LISTING_CATEGORIES,
@@ -12,6 +12,7 @@ import {
   Card,
   Input,
   radius,
+  ShakeField,
   spacing,
   success,
   tap,
@@ -46,12 +47,27 @@ export function CreateListingModal({ visible, demo, onClose, onCreated }: Create
 
   const parsedPrice = useMemo(() => Number.parseFloat(price.replace(',', '.')), [price]);
   const parsedQuantity = useMemo(() => Number.parseInt(quantity, 10), [quantity]);
-  const formValid =
-    title.trim().length >= 2 &&
-    Number.isFinite(parsedPrice) &&
-    parsedPrice > 0 &&
-    Number.isInteger(parsedQuantity) &&
-    parsedQuantity > 0;
+  const priceValid = Number.isFinite(parsedPrice) && parsedPrice > 0;
+  const quantityValid = Number.isInteger(parsedQuantity) && parsedQuantity > 0;
+  const formValid = title.trim().length >= 2 && priceValid && quantityValid;
+
+  // v0.6.1-E2 (ADR-027): цена/количество стали невалидными — качаем поле.
+  const [priceShake, setPriceShake] = useState(0);
+  const [quantityShake, setQuantityShake] = useState(0);
+  const priceWasValid = useRef(true);
+  const quantityWasValid = useRef(true);
+  useEffect(() => {
+    if (price.length > 0 && !priceValid && priceWasValid.current) {
+      setPriceShake((k) => k + 1);
+    }
+    priceWasValid.current = priceValid || price.length === 0;
+  }, [priceValid, price]);
+  useEffect(() => {
+    if (quantity.length > 0 && !quantityValid && quantityWasValid.current) {
+      setQuantityShake((k) => k + 1);
+    }
+    quantityWasValid.current = quantityValid || quantity.length === 0;
+  }, [quantityValid, quantity]);
 
   const reset = (): void => {
     setTitle('');
@@ -147,23 +163,27 @@ export function CreateListingModal({ visible, demo, onClose, onCreated }: Create
             <Text variant="caption" color="secondary">
               Цена за единицу, ₽
             </Text>
-            <Input
-              placeholder="85,50"
-              value={price}
-              onChangeText={setPrice}
-              keyboardType="decimal-pad"
-            />
+            <ShakeField shakeKey={priceShake}>
+              <Input
+                placeholder="85,50"
+                value={price}
+                onChangeText={setPrice}
+                keyboardType="decimal-pad"
+              />
+            </ShakeField>
           </View>
           <View style={{ flex: 1, gap: spacing.xs }}>
             <Text variant="caption" color="secondary">
               Количество
             </Text>
-            <Input
-              placeholder="120"
-              value={quantity}
-              onChangeText={setQuantity}
-              keyboardType="number-pad"
-            />
+            <ShakeField shakeKey={quantityShake}>
+              <Input
+                placeholder="120"
+                value={quantity}
+                onChangeText={setQuantity}
+                keyboardType="number-pad"
+              />
+            </ShakeField>
           </View>
         </View>
 
