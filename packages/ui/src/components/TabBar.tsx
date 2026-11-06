@@ -26,8 +26,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from '../theme';
-import { font, motion, radius, spacing, touchTarget } from '../tokens';
+import { font, motion, radius, spacing, touchTarget, responsive } from '../tokens';
 import { selection } from '../haptics';
+import { useResponsive } from '../hooks/useResponsive';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 
@@ -51,6 +52,9 @@ const ICON_FADE_MS = 200;
 
 export function TabBar({ items, activeKey, onChange, style }: TabBarProps) {
   const { colors, mode } = useTheme();
+  // v0.6.2-D: на широких экранах панель не растягивается на всю ширину —
+  // кап 600 px по центру, в одной линии с контентной колонкой Screen (ADR-030)
+  const { isWidePhone } = useResponsive();
   const activeIndex = Math.max(
     0,
     items.findIndex((item) => item.key === activeKey),
@@ -103,6 +107,9 @@ export function TabBar({ items, activeKey, onChange, style }: TabBarProps) {
           flexDirection: 'row',
           paddingHorizontal: spacing.sm,
           paddingBottom: spacing.xs,
+          ...(isWidePhone
+            ? { maxWidth: responsive.contentMaxWidth, width: '100%', alignSelf: 'center' as const }
+            : null),
           // web (и platforms без blur): solid-подложка, как раньше
           backgroundColor: isWeb ? colors.surface : 'transparent',
           overflow: 'hidden',

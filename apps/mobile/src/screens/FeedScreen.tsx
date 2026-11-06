@@ -25,6 +25,7 @@ import {
   SkeletonCard,
   spacing,
   tap,
+  useResponsive,
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { useRouter } from 'expo-router';
@@ -56,6 +57,8 @@ type FeedState =
 export function FeedScreen() {
   const router = useRouter();
   const role = useAuthStore((s) => s.user?.role ?? 'buyer');
+  // v0.6.2-D: планшет ≥768 — лента в 2 колонки (ADR-030, аудит №15)
+  const { isTablet } = useResponsive();
   const [state, setState] = useState<FeedState>({ phase: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   // Каскадный вход — только на ПЕРВУЮ отрисовку карточек (ADR-009):
@@ -252,30 +255,42 @@ export function FeedScreen() {
               onRetry={handleRefresh}
             />
           ) : null}
-          {state.listings.map((listing, index) => {
-            // Гео-фильтр: показываем только продавцов рядом (ADR-014).
-            if (nearbySellers !== null && !nearbySellers.has(listing.sellerId)) {
-              return null;
+          {/* v0.6.2-D: планшет — 2 колонки: карточки по ~48.5%, межколонный
+              gap из сетки отступов; телефон — одна колонка как раньше. */}
+          <View
+            testID="listings-grid"
+            style={
+              isTablet
+                ? { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.md, rowGap: spacing.md }
+                : undefined
             }
-            // Первая отрисовка: карточки входят каскадом — translateY 12→0
-            // + проявление, 40 мс между карточками (ADR-009).
-            const stagger = firstEntrance ? Math.min(index, STAGGER_CAP) * STAGGER_MS : 0;
-            return (
-              <Animated.View
-                key={listing.id}
-                entering={
-                  stagger > 0
-                    ? FadeInDown.delay(stagger).duration(300).springify().damping(16)
-                    : undefined
-                }
-              >
-                <ListingCard
-                  listing={listing}
-                  onPress={() => router.push(`/listing/${listing.id}`)}
-                />
-              </Animated.View>
-            );
-          })}
+          >
+            {state.listings.map((listing, index) => {
+              // Гео-фильтр: показываем только продавцов рядом (ADR-014).
+              if (nearbySellers !== null && !nearbySellers.has(listing.sellerId)) {
+                return null;
+              }
+              // Первая отрисовка: карточки входят каскадом — translateY 12→0
+              // + проявление, 40 мс между карточками (ADR-009).
+              const stagger = firstEntrance ? Math.min(index, STAGGER_CAP) * STAGGER_MS : 0;
+              return (
+                <Animated.View
+                  key={listing.id}
+                  entering={
+                    stagger > 0
+                      ? FadeInDown.delay(stagger).duration(300).springify().damping(16)
+                      : undefined
+                  }
+                  style={isTablet ? { width: '48.5%' } : undefined}
+                >
+                  <ListingCard
+                    listing={listing}
+                    onPress={() => router.push(`/listing/${listing.id}`)}
+                  />
+                </Animated.View>
+              );
+            })}
+          </View>
           <View style={{ height: spacing.md }} />
         </PullToRefreshScrollView>
       )}

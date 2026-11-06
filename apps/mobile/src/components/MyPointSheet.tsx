@@ -9,7 +9,18 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
-import { Button, Card, Icon, Input, spacing, success, Text, warning } from '@agromoll/ui';
+import {
+  Button,
+  Card,
+  Icon,
+  Input,
+  mapPalette,
+  spacing,
+  success,
+  Text,
+  useTheme,
+  warning,
+} from '@agromoll/ui';
 import type { GeoCoord, UserRole } from '@agromoll/types';
 import { MapCanvas } from '@/map';
 import { api, toApiError } from '@/lib/api';
@@ -29,6 +40,8 @@ export interface MyPointSheetProps {
 }
 
 export function MyPointSheet({ visible, onClose, role, onSaved }: MyPointSheetProps) {
+  // v0.6.2-D: карта следует теме (mapPalette, ADR-030)
+  const { mode } = useTheme();
   const [pin, setPin] = useState<GeoCoord>(MARKET_CENTER);
   const [center, setCenter] = useState<GeoCoord>(MARKET_CENTER);
   const [address, setAddress] = useState('');
@@ -123,6 +136,8 @@ export function MyPointSheet({ visible, onClose, role, onSaved }: MyPointSheetPr
           onPinChange={setPin}
           onTap={setPin}
           height={260}
+          colors={mapPalette[mode]}
+          mode={mode}
         />
 
         <Card style={{ gap: spacing.sm }}>

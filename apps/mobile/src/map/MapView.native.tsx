@@ -2,11 +2,14 @@
  * Карта для native (iOS/Android) — react-native-maps (v0.5.0, ADR-014).
  *
  * Библиотека входит в Expo Go — предbuild не нужен. Маркеры окрашены
- * по виду геозоны (спецификация B), коридоры — линиями маршрута.
+ * из палитры темы (mapPalette[mode], v0.6.2-D), коридоры — линиями
+ * маршрута. В тёмной теме iOS переключает системные тайлы карты
+ * (userInterfaceStyle) — карта не «выбивается» светлым пятном.
  */
 import { useMemo } from 'react';
+import { Platform } from 'react-native';
 import MapViewImpl, { Marker, Polyline } from 'react-native-maps';
-import { MARKER_COLORS } from './types';
+import { markerColorFor } from '@agromoll/ui';
 import type { MapCanvasProps, MapLine, MapMarker } from './types';
 
 /** Событие тапа по карте с координатой (подмножество типов react-native-maps). */
@@ -28,6 +31,8 @@ export default function MapCanvas({
   onPinChange,
   onTap,
   height = 300,
+  colors,
+  mode,
 }: MapCanvasProps) {
   const region = useMemo(
     () => ({
@@ -44,7 +49,7 @@ export default function MapCanvas({
       key={marker.id}
       coordinate={{ latitude: marker.coord.lat, longitude: marker.coord.lng }}
       title={marker.label ?? marker.kind}
-      pinColor={MARKER_COLORS[marker.kind]}
+      pinColor={markerColorFor(marker.kind, colors)}
     />
   );
 
@@ -55,7 +60,7 @@ export default function MapCanvas({
         { latitude: line.from.lat, longitude: line.from.lng },
         { latitude: line.to.lat, longitude: line.to.lng },
       ]}
-      strokeColor={MARKER_COLORS.delivery_corridor}
+      strokeColor={colors.corridor}
       strokeWidth={3}
     />
   );
@@ -75,6 +80,11 @@ export default function MapCanvas({
       initialRegion={region}
       region={region}
       onPress={handlePress}
+      // v0.6.2-D (ADR-030): тёмная тема — тёмные системные тайлы на iOS 13+.
+      // Пробрасываем только на iOS: на Android этот проп игнорируется
+      // (стилизация Google-тайлов — customMapStyle, отдельной задачей за
+      // пределами этапа: требует визуальной проверки на устройстве).
+      userInterfaceStyle={Platform.OS === 'ios' ? mode : undefined}
     >
       {markers.map(renderMarker)}
       {lines.map(renderLine)}
@@ -83,7 +93,7 @@ export default function MapCanvas({
           draggable
           coordinate={{ latitude: pin.lat, longitude: pin.lng }}
           title="Моя точка"
-          pinColor="#2E6B4E"
+          pinColor={colors.sellerLine}
           onDragEnd={(event: unknown) => onPinChange?.(toCoord(event as MapTapEvent))}
         />
       ) : null}

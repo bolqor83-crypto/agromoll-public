@@ -23,6 +23,8 @@ import {
   success,
   tap,
   Text,
+  mapPalette,
+  useTheme,
   warning,
 } from '@agromoll/ui';
 import type { GeoCoord, GeoPointDto, GeoVehicleType } from '@agromoll/types';
@@ -46,6 +48,11 @@ const VEHICLE_OPTIONS: GeoVehicleType[] = ['car', 'van', 'refrigerated', 'flatbe
 
 export function MarketMapScreen() {
   const role = useAuthStore((s) => s.user?.role ?? 'buyer');
+  // v0.6.2-D: карта следует теме — маркеры/канва из mapPalette, чипы
+  // выбора ТС и легенда — из тех же токенов (аудит №5/№6, ADR-030).
+  // themeMode, не mode: mode здесь — стейт «задать маршрут» (view/awaiting-*)
+  const { mode: themeMode, colors: themeColors } = useTheme();
+  const mapColors = mapPalette[themeMode];
   const [center, setCenter] = useState<GeoCoord>(MARKET_CENTER);
   const [points, setPoints] = useState<GeoPointDto[]>([]);
   const [corridors, setCorridors] = useState<GeoPointDto[]>([]);
@@ -217,6 +224,8 @@ export function MarketMapScreen() {
                 onPinChange={setFrom}
                 onTap={handleTap}
                 height={300}
+                colors={mapColors}
+                mode={themeMode}
               />
               {modeHint ? (
                 <Card style={{ marginTop: spacing.sm, padding: spacing.sm }}>
@@ -235,14 +244,14 @@ export function MarketMapScreen() {
               </Card>
             ) : null}
 
-            {/* Легенда — цвета по спецификации v0.5.0-B. */}
+            {/* Легенда — семантические роли из mapPalette (v0.6.2-D, ADR-030). */}
             <Card style={{ gap: spacing.sm }}>
               <Text variant="body" weight="600">
                 Обозначения
               </Text>
-              <LegendRow color="#3B6FA0" label="Точки покупателей — куда везти" />
-              <LegendRow color="#2E6B4E" label="Линии продавцов — ряды рынка" />
-              <LegendRow color="#C98A2D" label="Маршруты доставщиков — «еду туда»" />
+              <LegendRow color={mapColors.buyerPoint} label="Точки покупателей — куда везти" />
+              <LegendRow color={mapColors.sellerLine} label="Линии продавцов — ряды рынка" />
+              <LegendRow color={mapColors.corridor} label="Маршруты доставщиков — «еду туда»" />
             </Card>
 
             {/* Свои геозоны. */}
@@ -298,8 +307,12 @@ export function MarketMapScreen() {
                             paddingVertical: spacing.xs,
                             borderRadius: 12,
                             borderWidth: 1,
-                            borderColor: vehicleType === option ? '#2E6B4E' : '#D8D2C6',
-                            backgroundColor: vehicleType === option ? '#E7F0E9' : 'transparent',
+                            // v0.6.2-D: чипы выбора ТС — из токенов темы,
+                            // в тёмной больше не светятся «бумажным» цветом
+                            borderColor:
+                              vehicleType === option ? themeColors.primary : themeColors.border,
+                            backgroundColor:
+                              vehicleType === option ? themeColors.primaryMuted : 'transparent',
                           }}
                         >
                           <Text

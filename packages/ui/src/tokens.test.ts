@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   font,
   fontFamilyForWeight,
+  mapPalette,
+  markerColorFor,
   motion,
   palette,
   radius,
   resolveTheme,
+  responsive,
   shadow,
   spacing,
   typography,
@@ -101,5 +104,45 @@ describe('resolveTheme', () => {
   it('явная настройка побеждает системную', () => {
     expect(resolveTheme('dark', 'light')).toBe('dark');
     expect(resolveTheme('light', 'dark')).toBe('light');
+  });
+});
+
+describe('v0.6.2-D: адаптивность (ADR-030)', () => {
+  it('breakpoints: планшет 768, широкий телефон 430, контент 600', () => {
+    expect(responsive.tabletMinWidth).toBe(768);
+    expect(responsive.widePhoneMinWidth).toBe(430);
+    expect(responsive.contentMaxWidth).toBe(600);
+  });
+
+  it('scrim — 0.7 в обеих темах: лист отделяется от контента (аудит №14)', () => {
+    const alpha = (rgba: string): number => Number(/rgba\([^)]+,\s*([\d.]+)\)/.exec(rgba)?.[1]);
+    expect(alpha(palette.light.scrim)).toBe(0.7);
+    expect(alpha(palette.dark.scrim)).toBe(0.7);
+  });
+});
+
+describe('v0.6.2-D: палитра карты (ADR-030)', () => {
+  it('обе темы содержат одинаковый набор цветов карты', () => {
+    expect(Object.keys(mapPalette.dark).sort()).toEqual(Object.keys(mapPalette.light).sort());
+  });
+
+  it('тёмная палитра отличается от светлой — карта следует теме', () => {
+    for (const key of Object.keys(mapPalette.light) as (keyof typeof mapPalette.light)[]) {
+      expect(mapPalette.dark[key]).not.toBe(mapPalette.light[key]);
+    }
+  });
+
+  it('коридор светлой темы затемнён: старый #C98A2D не проходит 3:1 (аудит №5)', () => {
+    expect(mapPalette.light.corridor).not.toBe('#C98A2D');
+    expect(mapPalette.dark.canvas).not.toBe(mapPalette.light.canvas);
+  });
+
+  it('markerColorFor: вид геозоны → цвет роли из палитры', () => {
+    const c = mapPalette.light;
+    expect(markerColorFor('buyer_point', c)).toBe(c.buyerPoint);
+    expect(markerColorFor('seller_line', c)).toBe(c.sellerLine);
+    expect(markerColorFor('delivery_corridor', c)).toBe(c.corridor);
+    // неизвестный вид — безопасный дефолт
+    expect(markerColorFor('unknown', c)).toBe(c.sellerLine);
   });
 });

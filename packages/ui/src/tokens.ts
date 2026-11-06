@@ -43,7 +43,7 @@ export interface ThemeColors {
   borderStrong: string;
   /** Текст на primary-заливке (в тёмной теме primary светлее — текст тёмный). */
   onPrimary: string;
-  /** Затемнение под модалками-листами (v0.3.1, ADR-009). */
+  /** Затемнение под модалками-листами (v0.3.1, ADR-009; 0.7 — v0.6.2-D, ADR-030). */
   scrim: string;
 }
 
@@ -68,7 +68,8 @@ export const palette: Record<ThemeMode, ThemeColors> = {
     border: '#E7E2D8',
     borderStrong: '#D9D2C3',
     onPrimary: '#FFFFFF',
-    scrim: 'rgba(15, 20, 17, 0.45)',
+    // v0.6.2-D: 0.7 (было 0.45) — лист достаточно отделяется от контента (аудит №14)
+    scrim: 'rgba(15, 20, 17, 0.7)',
   },
   dark: {
     background: '#161917', // тёплый графит, без синевы
@@ -87,9 +88,88 @@ export const palette: Record<ThemeMode, ThemeColors> = {
     // v0.6.2-B: elevation-граница карточек в тёмной теме (ADR-030)
     borderStrong: '#3A423C',
     onPrimary: '#0E1F16',
-    scrim: 'rgba(0, 0, 0, 0.6)',
+    // v0.6.2-D: 0.7 (было 0.6) — спека этапа, единая глубина в обеих темах
+    scrim: 'rgba(0, 0, 0, 0.7)',
   },
 };
+
+/**
+ * Адаптивность (v0.6.2-D, ADR-030).
+ *
+ * Лента/витрина — 2 колонки на планшете; контент ограничен 600 px и
+ * центрирован на широких экранах — строки не растягиваются в 60+ символов
+ * (аудит №15/№16). Константы — здесь, чтобы breakpoints были единым
+ * источником правды для ui-пакета и приложения.
+ */
+export const responsive = {
+  /** Планшет: 2 колонки ленты/витрины (iPad ≥768). */
+  tabletMinWidth: 768,
+  /** Широкий телефон: контент уже ограничиваем (iPhone Pro Max ≥430). */
+  widePhoneMinWidth: 430,
+  /** Максимум контентной колонки — «читаемая» ширина строк 45–75 символов. */
+  contentMaxWidth: 600,
+} as const;
+
+/**
+ * Палитра карты (v0.6.2-D, ADR-030): семантические цвета геосон вне
+ * hardcoded-хексов экрана (аудит №5/№6). Маркеры — графика, порог
+ * WCAG 1.4.11 — 3:1 к канве (проверяется contrast-тестом).
+ */
+export interface MapThemeColors {
+  /** Точка покупателя «куда везти» — спокойный синий (семантика v0.5.0). */
+  buyerPoint: string;
+  /** Линия продавца — фирменный зелёный (primary темы). */
+  sellerLine: string;
+  /** Коридор доставщика — янтарный; в светлой теме затемнён до 3:1. */
+  corridor: string;
+  /** Фон web-канвы (SVG-карта). */
+  canvas: string;
+  /** Сетка улиц web-канвы. */
+  grid: string;
+  /** Кольцо центра — позиция пользователя. */
+  centerRing: string;
+  /** Сердцевина пина «моя точка». */
+  pinHole: string;
+}
+
+export const mapPalette: Record<ThemeMode, MapThemeColors> = {
+  light: {
+    buyerPoint: '#3B6FA0', // 4.57:1 на канве
+    sellerLine: '#2D6A4F', // = primary light, 5.52:1
+    corridor: '#A8731B', // 3.53:1 (было #C98A2D — 2.53:1, FAIL 1.4.11)
+    canvas: '#EAF0E8',
+    grid: '#D8E2D4',
+    centerRing: '#4A4A44', // 7.70:1
+    pinHole: '#FAF8F4',
+  },
+  dark: {
+    buyerPoint: '#7FA8CC', // 6.36:1
+    sellerLine: '#7BC496', // = primary dark, 7.73:1
+    corridor: '#E0AC4E', // = warning dark, 7.73:1
+    canvas: '#1E2320', // = surface: карта больше не «светлое пятно» (аудит №6)
+    grid: '#333A34', // = border
+    centerRing: '#868C82', // = textMuted dark, 4.62:1
+    pinHole: '#1E2320',
+  },
+};
+
+/**
+ * Цвет маркера по виду геозоны из палитры темы. kind — значение
+ * GeoPointKind ('buyer_point' | 'seller_line' | 'delivery_corridor');
+ * строкой — чтобы ui-пакет не зависел от пакета типов.
+ */
+export function markerColorFor(kind: string, colors: MapThemeColors): string {
+  switch (kind) {
+    case 'buyer_point':
+      return colors.buyerPoint;
+    case 'seller_line':
+      return colors.sellerLine;
+    case 'delivery_corridor':
+      return colors.corridor;
+    default:
+      return colors.sellerLine;
+  }
+}
 
 /**
  * Фирменный шрифт — Inter (v0.6.2-B, ADR-028).

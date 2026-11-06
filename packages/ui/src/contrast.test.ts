@@ -9,7 +9,7 @@
  * (≥24px или ≥18.66px bold). Все проверяемые пары — обычный текст.
  */
 import { describe, expect, it } from 'vitest';
-import { palette } from './tokens';
+import { mapPalette, palette } from './tokens';
 
 /** #RRGGBB → относительная яркость по WCAG 2.1. */
 function luminance(hex: string): number {
@@ -107,5 +107,36 @@ describe('WCAG AA: тёмная тема (ADR-028/030)', () => {
   it('янтарь читается на тёмном: AA для текста onWarning и warning-иконок', () => {
     expect(contrast(c.onWarning, c.surface)).toBeGreaterThanOrEqual(AA);
     expect(contrast(c.warning, c.surface)).toBeGreaterThanOrEqual(AA);
+  });
+});
+
+describe('WCAG 1.4.11: контраст графики карты (v0.6.2-D, ADR-030)', () => {
+  // Маркеры и кольцо центра — значимая графика: порог 3:1 к канве.
+  // Аудит №5: старый янтарь коридора #C98A2D давал 2.53:1 — FAIL.
+  const GRAPHIC = 3;
+
+  it('светлая тема: все маркеры и кольцо центра ≥3:1 на канве', () => {
+    const m = mapPalette.light;
+    expect(contrast(m.buyerPoint, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+    expect(contrast(m.sellerLine, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+    expect(contrast(m.corridor, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+    expect(contrast(m.centerRing, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+  });
+
+  it('тёмная тема: все маркеры и кольцо центра ≥3:1 на канве', () => {
+    const m = mapPalette.dark;
+    expect(contrast(m.buyerPoint, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+    expect(contrast(m.sellerLine, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+    expect(contrast(m.corridor, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+    expect(contrast(m.centerRing, m.canvas)).toBeGreaterThanOrEqual(GRAPHIC);
+  });
+
+  it('сердцевина пина отличима от капли в обеих темах', () => {
+    expect(contrast(mapPalette.light.pinHole, mapPalette.light.sellerLine)).toBeGreaterThanOrEqual(
+      GRAPHIC,
+    );
+    expect(contrast(mapPalette.dark.pinHole, mapPalette.dark.sellerLine)).toBeGreaterThanOrEqual(
+      GRAPHIC,
+    );
   });
 });
