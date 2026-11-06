@@ -1,0 +1,8 @@
+# Vercel: что не загружать при CLI-деплое из корня монорепо.
+# Сборке (pnpm install + expo export, см. apps/mobile/vercel.json)
+# нужны только исходники и локфайл — скриншоты и CI не нужны.
+docs/
+.github/
+**/dist/
+**/node_modules/
+apps/api/test/
