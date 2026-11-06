@@ -195,12 +195,12 @@ export class GeoService {
             ST_SetSRID(ST_MakePoint(
               CAST("corridorFrom"->>'lng' AS double precision),
               CAST("corridorFrom"->>'lat' AS double precision)
-            ), 4326)::geography,
+            ), 4326),
             ST_SetSRID(ST_MakePoint(
               CAST("corridorTo"->>'lng' AS double precision),
               CAST("corridorTo"->>'lat' AS double precision)
-            ), 4326)::geography
-          ),
+            ), 4326)
+          )::geography,
           ST_SetSRID(ST_MakePoint(CAST(${query.lng} AS double precision), CAST(${query.lat} AS double precision)), 4326)::geography
         ) AS "distanceMeters"
       FROM "geo_points"
@@ -213,12 +213,12 @@ export class GeoService {
             ST_SetSRID(ST_MakePoint(
               CAST("corridorFrom"->>'lng' AS double precision),
               CAST("corridorFrom"->>'lat' AS double precision)
-            ), 4326)::geography,
+            ), 4326),
             ST_SetSRID(ST_MakePoint(
               CAST("corridorTo"->>'lng' AS double precision),
               CAST("corridorTo"->>'lat' AS double precision)
-            ), 4326)::geography
-          ),
+            ), 4326)
+          )::geography,
           ST_SetSRID(ST_MakePoint(CAST(${query.lng} AS double precision), CAST(${query.lat} AS double precision)), 4326)::geography,
           CAST(${radius} AS double precision)
         )
