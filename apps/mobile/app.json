@@ -2,7 +2,7 @@
   "expo": {
     "name": "АгроМолл",
     "slug": "agromoll",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "scheme": "agromoll",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -30,7 +30,13 @@
       "output": "static",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-router"],
-    "platforms": ["ios", "android", "web"]
+    "plugins": [
+      "expo-router"
+    ],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ]
   }
 }

@@ -14,6 +14,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Badge, Button, Card, Icon, Text, spacing } from '@agromoll/ui';
 import { DEBT_STATUS_LABELS } from '@agromoll/types';
 import type { DebtDto } from '@agromoll/types';
+import { RatingBadge } from './RatingBadge';
 import { debtBadgeVariant, formatClock, formatMoney } from '@/lib/format';
 
 export interface DebtCardProps {
@@ -39,6 +40,8 @@ export function DebtCard({
 }: DebtCardProps) {
   const isCreditor = debt.creditorId === viewerId;
   const counterparty = isCreditor ? debt.debtorName : debt.creditorName;
+  // Рейтинг контрагента — чей долг смотрю, тот и показан (ADR-013).
+  const counterpartyRating = isCreditor ? debt.debtorRating : debt.creditorRating;
 
   const statusBadge = useMemo(() => {
     if (debt.isOverdue) {
@@ -63,6 +66,7 @@ export function DebtCard({
               <Text variant="body" weight="600" numberOfLines={1}>
                 {counterparty ?? 'Контрагент'}
               </Text>
+              <RatingBadge rating={counterpartyRating ?? null} short />
               <Text variant="caption" color="secondary">
                 {isCreditor ? 'Вам должны' : 'Вы должны'} · {formatClock(debt.createdAt)}
               </Text>

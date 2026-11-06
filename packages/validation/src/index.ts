@@ -9,6 +9,7 @@ import {
   LISTING_UNITS,
   NOTIFICATION_TYPES,
   QUALITY_FLAGS,
+  REPUTATION_ACTIONS,
   USER_ROLES,
   normalizePhone,
 } from '@agromoll/types';
@@ -263,12 +264,24 @@ export type StartWorkSessionInput = z.infer<typeof StartWorkSessionSchema>;
 /** ISO-дата. */
 const IsoDateString = z.string().datetime({ offset: true });
 
+/** Сводка рейтинга для бейджа на карточках (v0.5.0, ADR-013).
+ *  null/отсутствует — рейтинга нет (порог не достигнут или старый сервер). */
+export const RatingSummarySchema = z
+  .object({
+    score: z.number().min(0).max(5),
+    dealsCount: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+export type RatingSummary = z.infer<typeof RatingSummarySchema>;
+
 /** Ответ GET /listings/:id и POST /listings. */
 export const ListingResponseSchema = z
   .object({
     id: z.string().min(1),
     sellerId: z.string().min(1),
     sellerName: z.string().optional(),
+    sellerRating: RatingSummarySchema.nullable().optional(),
     title: z.string().min(1),
     category: ListingCategorySchema,
     unit: ListingUnitSchema,
@@ -299,6 +312,8 @@ export const BookingResponseSchema = z
     listingUnit: ListingUnitSchema.optional(),
     buyerId: z.string().min(1),
     buyerName: z.string().optional(),
+    sellerRating: RatingSummarySchema.nullable().optional(),
+    buyerRating: RatingSummarySchema.nullable().optional(),
     requestedQuantity: z.number().int().positive(),
     confirmedQuantity: z.number().int().positive().nullable(),
     status: BookingStatusSchema,
@@ -370,6 +385,8 @@ export const DebtResponseSchema = z
     creditorName: z.string().optional(),
     debtorId: z.string().min(1),
     debtorName: z.string().optional(),
+    creditorRating: RatingSummarySchema.nullable().optional(),
+    debtorRating: RatingSummarySchema.nullable().optional(),
     amount: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Сумму ждём строкой вида «12500.00»'),
     currency: z.string().min(1),
     description: z.string().nullable(),
@@ -387,6 +404,47 @@ export const DebtResponseSchema = z
   .passthrough();
 
 export type DebtResponse = z.infer<typeof DebtResponseSchema>;
+
+// ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────────────
+
+/** Действие журнала рейтинга. */
+export const ReputationActionSchema = z.enum(REPUTATION_ACTIONS);
+
+/** Строка журнала рейтинга в ответах API. */
+export const ReputationEventSchema = z
+  .object({
+    id: z.string().min(1),
+    action: ReputationActionSchema,
+    delta: z.number(),
+    reason: z.string().nullable(),
+    createdAt: IsoDateString,
+  })
+  .passthrough();
+
+export type ReputationEventResponse = z.infer<typeof ReputationEventSchema>;
+
+/** Ответ GET /reputation/:userId — публичный профиль рейтинга. */
+export const ReputationResponseSchema = z
+  .object({
+    userId: z.string().min(1),
+    score: z.number().min(0).max(5).nullable(),
+    reason: z.literal('min_deals_not_reached').optional(),
+    dealsCount: z.number().int().nonnegative(),
+    disputesCount: z.number().int().nonnegative(),
+    autoConfirmedCount: z.number().int().nonnegative(),
+    lastCalculatedAt: IsoDateString.nullable(),
+  })
+  .passthrough();
+
+export type ReputationResponse = z.infer<typeof ReputationResponseSchema>;
+
+/** Ответ GET /reputation/me — мой рейтинг + история событий. */
+export const MyReputationResponseSchema = ReputationResponseSchema.extend({
+  dealsToRating: z.number().int().nonnegative(),
+  events: z.array(ReputationEventSchema),
+});
+
+export type MyReputationResponse = z.infer<typeof MyReputationResponseSchema>;
 
 /** Ответ GET /debts (мои долги обеих сторон). */
 export const DebtsResponseSchema = z.array(DebtResponseSchema);
@@ -539,6 +597,12 @@ export const apiEnvSchema = z.object({
   WORK_MONTHS_SERIES: z.coerce.number().int().positive().max(24).default(6),
   /** Окно авто-подтверждения приёмки в часах (ADR-012). */
   BOOKING_AUTO_CONFIRM_HOURS: z.coerce.number().int().positive().max(24 * 30).default(24),
+  /** Публичный рейтинг (ADR-013): минимум взвешенных событий для score. */
+  RATING_MIN_DEALS: z.coerce.number().int().positive().max(1000).default(5),
+  /** Анти-накрутка (ADR-013): сделок пары в окне, выше — вес 0.3. */
+  RATING_MAX_PAIR_DEALS: z.coerce.number().int().positive().max(10_000).default(10),
+  /** Окно анти-накрутки в днях. */
+  RATING_PAIR_WINDOW_DAYS: z.coerce.number().int().positive().max(365).default(30),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

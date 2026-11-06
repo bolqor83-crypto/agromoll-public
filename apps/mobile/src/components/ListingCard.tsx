@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { Badge, Card, Icon, spacing, tap, Text, useTheme } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { LISTING_CATEGORY_LABELS } from '@agromoll/types';
+import { RatingBadge } from './RatingBadge';
 import { formatAvailable, formatPrice } from '@/lib/format';
 import { recordTransitionOrigin } from '@/lib/transition';
 
@@ -36,6 +37,10 @@ export function ListingCard({ listing, onPress, sellerView = false, footer }: Li
   const anchorRef = useRef<View>(null);
 
   const badges: ReactNode[] = [];
+  // Рейтинг продавца — первым: доверие важнее «скоропорта» (ADR-013).
+  if (!sellerView) {
+    badges.push(<RatingBadge key="rating" rating={listing.sellerRating ?? null} />);
+  }
   if (listing.isPerishable) {
     badges.push(<Badge key="perishable" label="Скоропорт" variant="attention" />);
   } else if (listing.category === 'vegetables' || listing.category === 'fruits') {

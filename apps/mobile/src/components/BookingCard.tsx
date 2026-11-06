@@ -3,6 +3,7 @@ import { Alert, View } from 'react-native';
 import { BOOKING_STATUS_LABELS } from '@agromoll/types';
 import type { BookingDto } from '@agromoll/types';
 import { Badge, Button, Card, spacing, success, tap, Text, warning } from '@agromoll/ui';
+import { RatingBadge } from './RatingBadge';
 import { acceptCounterMutation, cancelBookingMutation } from '@/lib/outbox/mutations';
 import { bookingBadgeVariant, formatClock, formatQuantity } from '@/lib/format';
 
@@ -72,6 +73,7 @@ export function BookingCard({ booking, counterOffer, pendingLabel, demo, onConfi
       >
         <View style={{ flex: 1, gap: spacing.xs }}>
           <Text variant="title">{booking.listingTitle ?? 'Лот'}</Text>
+          <RatingBadge rating={booking.sellerRating ?? null} short />
           <Text variant="caption" color="secondary">
             {formatQuantity(booking.requestedQuantity, booking.listingUnit)}
             {booking.confirmedQuantity !== null

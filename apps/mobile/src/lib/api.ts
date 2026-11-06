@@ -28,9 +28,11 @@ import type {
   DebtDto,
   DebtsSummaryDto,
   ListingDto,
+  MyReputationDto,
   NotificationsListDto,
   RefreshResponseDto,
   ReminderResultDto,
+  ReputationDto,
   UserDto,
   UserRole,
   WorkHoursCheckDto,
@@ -48,9 +50,11 @@ import {
   DebtsSummaryResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
+  MyReputationResponseSchema,
   NotificationsListResponseSchema,
   RefreshResponseSchema,
   ReminderResponseSchema,
+  ReputationResponseSchema,
   RequestCodeResponseSchema,
   UserResponseSchema,
   WorkHoursCheckResponseSchema,
@@ -433,6 +437,22 @@ export const api = {
   notifications(): Promise<NotificationsListDto> {
     return apiRequest<NotificationsListDto>({ method: 'GET', url: '/notifications/me' }).then(
       (d) => validateResponse(NotificationsListResponseSchema, d, 'notifications/me'),
+    );
+  },
+
+  // ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────
+
+  /** Мой рейтинг: score, счётчики, прогресс, последние события. */
+  myReputation(): Promise<MyReputationDto> {
+    return apiRequest<MyReputationDto>({ method: 'GET', url: '/reputation/me' }).then((d) =>
+      validateResponse(MyReputationResponseSchema, d, 'reputation/me'),
+    );
+  },
+
+  /** Публичный рейтинг пользователя (бейдж контрагента). */
+  reputation(userId: string): Promise<ReputationDto> {
+    return apiRequest<ReputationDto>({ method: 'GET', url: `/reputation/${userId}` }).then((d) =>
+      validateResponse(ReputationResponseSchema, d, 'reputation/:userId'),
     );
   },
 

@@ -5,20 +5,36 @@
  * Decimal — строки (точность денег не теряется в JSON).
  */
 import type { Booking, Listing } from '@prisma/client';
-import type { BookingDto, ListingDto } from '@agromoll/types';
+import type { BookingDto, ListingDto, RatingSummaryDto } from '@agromoll/types';
 
-type ListingWithSeller = Listing & { seller?: { displayName: string } | null };
+type ReputationView = { score: number | null; dealsCount: number } | null;
+
+type ListingWithSeller = Listing & {
+  seller?: ({ displayName: string } & { reputation?: ReputationView | null }) | null;
+};
 
 type BookingWithRelations = Booking & {
-  listing?: { title: string; unit: BookingDto['listingUnit'] } | null;
-  buyer?: { displayName: string } | null;
+  listing?:
+    | ({ title: string; unit: BookingDto['listingUnit'] } & {
+        seller?: { reputation?: ReputationView | null } | null;
+      })
+    | null;
+  buyer?: ({ displayName: string } & { reputation?: ReputationView | null }) | null;
 };
+
+/** Снимок рейтинга → сводка для бейджа. score=null не показываем (ADR-013). */
+export function toRatingSummaryDto(snapshot: ReputationView): RatingSummaryDto | null {
+  return snapshot && snapshot.score !== null
+    ? { score: snapshot.score, dealsCount: snapshot.dealsCount }
+    : null;
+}
 
 export function toListingDto(listing: ListingWithSeller): ListingDto {
   return {
     id: listing.id,
     sellerId: listing.sellerId,
     sellerName: listing.seller?.displayName,
+    sellerRating: toRatingSummaryDto(listing.seller?.reputation ?? null),
     title: listing.title,
     category: listing.category,
     unit: listing.unit,
@@ -42,6 +58,8 @@ export function toBookingDto(booking: BookingWithRelations): BookingDto {
     listingUnit: booking.listing?.unit,
     buyerId: booking.buyerId,
     buyerName: booking.buyer?.displayName,
+    sellerRating: toRatingSummaryDto(booking.listing?.seller?.reputation ?? null),
+    buyerRating: toRatingSummaryDto(booking.buyer?.reputation ?? null),
     requestedQuantity: booking.requestedQuantity,
     confirmedQuantity: booking.confirmedQuantity,
     status: booking.status,

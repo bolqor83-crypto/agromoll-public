@@ -92,6 +92,25 @@ export default function RolePickerScreen() {
           </Card>
         ))}
       </View>
+
+      {/* Мой рейтинг — вход с любой роли (v0.5.0, ADR-013). */}
+      <Card
+        onPress={() => {
+          selection();
+          router.push('/reputation');
+        }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm }}
+      >
+        <Icon name="star-outline" size={28} color="primary" />
+        <View style={{ flex: 1 }}>
+          <Text variant="title">Мой рейтинг</Text>
+          <Text variant="caption" color="secondary">
+            Скор по сделкам, история событий
+          </Text>
+        </View>
+        <Icon name="chevron-forward-outline" size={20} color="muted" />
+      </Card>
+
       <Text variant="caption" color="muted" align="center" style={{ marginTop: spacing.lg }}>
         Роль можно сменить в любой момент — кнопка «Сменить роль» на экранах.
       </Text>

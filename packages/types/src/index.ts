@@ -127,6 +127,9 @@ export interface ListingDto {
   id: string;
   sellerId: string;
   sellerName?: string;
+  /** Рейтинг продавца для бейджа на карточке (v0.5.0, ADR-013).
+   *  null — рейтинга нет (порог минимальных сделок не достигнут). */
+  sellerRating?: RatingSummaryDto | null;
   title: string;
   category: ListingCategory;
   unit: ListingUnit;
@@ -150,6 +153,9 @@ export interface BookingDto {
   listingUnit?: ListingUnit;
   buyerId: string;
   buyerName?: string;
+  /** Рейтинги сторон для бейджа контрагента (v0.5.0, ADR-013). */
+  sellerRating?: RatingSummaryDto | null;
+  buyerRating?: RatingSummaryDto | null;
   requestedQuantity: number;
   confirmedQuantity: number | null;
   status: BookingStatus;
@@ -282,6 +288,9 @@ export interface DebtDto {
   creditorName?: string;
   debtorId: string;
   debtorName?: string;
+  /** Рейтинги сторон для бейджа контрагента (v0.5.0, ADR-013). */
+  creditorRating?: RatingSummaryDto | null;
+  debtorRating?: RatingSummaryDto | null;
   /** Decimal от Prisma приходит строкой — точность денег не теряется. */
   amount: string;
   currency: string;
@@ -329,6 +338,59 @@ export interface CounterpartyDto {
 export interface ReminderResultDto {
   sentAt: string;
   nextReminderAt: string;
+}
+
+// ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────────────
+
+/** Сводка рейтинга для бейджа на карточках («4.7 · 42 сделки»). */
+export interface RatingSummaryDto {
+  /** 0–5, округление до 0.1. */
+  score: number;
+  dealsCount: number;
+}
+
+/** Действия журнала рейтинга. Совпадают с enum ReputationAction в Prisma-схеме. */
+export const REPUTATION_ACTIONS = [
+  'deal_confirmed',
+  'dispute_opened',
+  'dispute_resolved',
+  'auto_confirmed',
+  'penalty_applied',
+] as const;
+
+export type ReputationActionType = (typeof REPUTATION_ACTIONS)[number];
+
+/** Строка журнала рейтинга (DTO уровня API). */
+export interface ReputationEventDto {
+  id: string;
+  action: ReputationActionType;
+  /** Вес события: +1.0 / +0.5 / +0.3 / −1.0 / 0. */
+  delta: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** Ответ GET /reputation/:userId — публичный профиль рейтинга. */
+export interface ReputationDto {
+  userId: string;
+  /** 0–5 или null — данных меньше RATING_MIN_DEALS. */
+  score: number | null;
+  /** Присутствует только при score=null. */
+  reason?: 'min_deals_not_reached';
+  dealsCount: number;
+  disputesCount: number;
+  autoConfirmedCount: number;
+  /** ISO-момент последнего пересчёта; null — снимка ещё нет. */
+  lastCalculatedAt: string | null;
+}
+
+/** Ответ GET /reputation/me — мой рейтинг + история событий. */
+export interface MyReputationDto extends ReputationDto {
+  /** Сколько взвешенных событий не хватает до появления рейтинга
+   *  (0 — рейтинг уже посчитан). Для подсказки «Сделайте ещё N сделок». */
+  dealsToRating: number;
+  /** Последние 20 событий журнала (таймлайн «Мой рейтинг»). */
+  events: ReputationEventDto[];
 }
 
 // ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
