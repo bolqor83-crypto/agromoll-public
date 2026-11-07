@@ -1,0 +1,48 @@
+{
+  // EAS Build конфигурация (v0.8.0-D, ADR-041). Файл поддерживает
+  // комментарии — парсер EAS CLI читает JSONC.
+  //
+  // ВАЖНО: перед первой реальной сборкой замените PLACEHOLDER_API_URL на
+  // публичный домен API с Railway (подэтап B, docs/release/v0.8.0-B-railway-runbook.md)
+  // или задайте через `eas env:create` (тогда уберите блок env здесь).
+  // Альтернатива без правки файла:
+  //   eas env:create --name EXPO_PUBLIC_API_URL --value https://agromoll-api-production-XXXX.up.railway.app --environment production
+  "cli": {
+    "version": ">= 12.0.0",
+    // Версия приложения (app.json) ведётся в репозитории — источник
+    // правды git, а не состояние на expo.dev.
+    "appVersionSource": "local"
+  },
+  "build": {
+    // Превью для показа и тестов: .apk, установка по ссылке (internal
+    // distribution) — без сторов (ADR-041).
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "PLACEHOLDER_API_URL"
+      }
+    },
+    // Боевой профиль: aab для Google Play; iOS — archive (нужен Apple
+    // Developer $99/год; пока аккаунта нет — iOS пропущен, ADR-041).
+    "production": {
+      "autoIncrement": false,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "PLACEHOLDER_API_URL"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      }
+    }
+  }
+}
