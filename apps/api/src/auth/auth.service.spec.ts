@@ -133,6 +133,66 @@ describe('AuthService', () => {
         }),
       );
     });
+
+    describe('демо-режим входа (AUTH_DEMO_LOGIN, v0.8.0-C)', () => {
+      /** Сервис с заданным NODE_ENV на время теста; коды — в переданный store. */
+      const makeService = (nodeEnv: string, store: InMemoryCodeStore): AuthService => {
+        const prev = process.env.NODE_ENV;
+        process.env.NODE_ENV = nodeEnv;
+        try {
+          const jwt = new JwtService({ secret: ACCESS_SECRET });
+          return new AuthService(
+            prisma as unknown as PrismaService,
+            jwt,
+            store,
+            new InMemorySessionStore(),
+          );
+        } finally {
+          if (prev === undefined) {
+            delete process.env.NODE_ENV;
+          } else {
+            process.env.NODE_ENV = prev;
+          }
+        }
+      };
+
+      it('production + AUTH_DEMO_LOGIN=true — фиксированный «0000» (публичное демо)', async () => {
+        process.env.AUTH_DEMO_LOGIN = 'true';
+        try {
+          prisma.user.upsert.mockResolvedValue(makeUser());
+          const store = new InMemoryCodeStore();
+          const prodService = makeService('production', store);
+
+          await prodService.requestCode('+79000000010');
+
+          await expect(store.get('+79000000010')).resolves.toBe('0000');
+        } finally {
+          delete process.env.AUTH_DEMO_LOGIN;
+        }
+      });
+
+      it('production без AUTH_DEMO_LOGIN — случайный код, НЕ «0000» (боевой режим)', async () => {
+        prisma.user.upsert.mockResolvedValue(makeUser());
+        const store = new InMemoryCodeStore();
+        const prodService = makeService('production', store);
+
+        await prodService.requestCode('+79611234567');
+
+        const code = await store.get('+79611234567');
+        expect(code).toBeDefined();
+        expect(code).not.toBe('0000');
+      });
+
+      it('dev без AUTH_DEMO_LOGIN — по-прежнему «0000» (локальная разработка)', async () => {
+        prisma.user.upsert.mockResolvedValue(makeUser());
+        const store = new InMemoryCodeStore();
+        const devService = makeService('development', store);
+
+        await devService.requestCode('+79611234567');
+
+        await expect(store.get('+79611234567')).resolves.toBe('0000');
+      });
+    });
   });
 
   describe('verify', () => {
