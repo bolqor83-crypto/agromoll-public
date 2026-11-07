@@ -1,5 +1,5 @@
 /**
- * Сервис апелляций на блокировки 289-ФЗ (v0.6.0-E, ADR-035).
+ * Сервис апелляций на блокировки 289-ФЗ (v0.6.0-E ADR-035 → v0.7.0-C ADR-037).
  *
  * Апелляция — обжалование АКТИВНОЙ блокировки пары водитель–продавец:
  *   open → under_review (арбитр берёт в работу) → unblocked | rejected.
@@ -13,9 +13,9 @@
  *    одновременных POST ловит частичный unique-индекс (P2002 → 409);
  *    после закрытия (unblocked/rejected) подать снова можно — например,
  *    с новыми данными;
- *  - доказательство арбитра — сама история часов пары: месяцы,
- *    totalMinutes и monthCounted отдаются в деталях кейса; переписки
- *    и файлов в MVP нет (ADR-035);
+ *  - доказательства арбитра — история часов пары (месяцы, totalMinutes,
+ *    monthCounted в деталях кейса) и переписка (v0.7.0-C, ADR-037):
+ *    append-only, isInternal — служебные заметки арбитра;
  *  - решить кейс может только арбитр, ИЗ under_review и только тот, кто
  *    взял в работу;
  *  - unblock закрывает кейс и снимает блокировку в ОДНОЙ транзакции:
@@ -39,19 +39,39 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { toAppealDetailDto, toAppealDto } from '../common/serialization';
-import { APPEAL_ACTIVE_STATUSES, APPEAL_MONTHS_TAKE } from './appeals.constants';
-import type { AppealDetailDto, AppealDto, AppealsListDto, AppealStatus } from '@agromoll/types';
-import type { OpenAppealInput, ResolveAppealInput } from '@agromoll/validation';
+import {
+  APPEAL_ACTIVE_STATUSES,
+  APPEAL_MESSAGES_TAKE,
+  APPEAL_MONTHS_TAKE,
+} from './appeals.constants';
+import type {
+  AppealDetailDto,
+  AppealDto,
+  AppealMessageDto,
+  AppealMessagesListDto,
+  AppealsListDto,
+  AppealStatus,
+} from '@agromoll/types';
+import type {
+  AppealMessageInput,
+  OpenAppealInput,
+  ResolveAppealInput,
+} from '@agromoll/validation';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 type TransactionClient = Prisma.TransactionClient;
 
-/** Кейс со всеми связями для DTO. */
+/** Кейс со всеми связями для DTO (включая переписку, ADR-037). */
 const APPEAL_VIEW_INCLUDE = {
   driver: { select: { id: true, displayName: true, role: true } },
   seller: { select: { id: true, displayName: true, role: true } },
   appellant: { select: { id: true, displayName: true, role: true } },
   assignedTo: { select: { id: true, displayName: true, role: true } },
+  messages: {
+    include: { author: { select: { id: true, displayName: true, role: true } } },
+    orderBy: { createdAt: 'asc' as const },
+    take: APPEAL_MESSAGES_TAKE,
+  },
 } as const satisfies Prisma.AppealCaseInclude;
 
 type AppealWithRelations = Prisma.AppealCaseGetPayload<{
@@ -153,7 +173,8 @@ export class AppealsService {
   }
 
   /**
-   * Детали кейса + история месяцев часов пары (доказательство арбитра).
+   * Детали кейса + история месяцев часов пары (доказательство арбитра)
+   * + переписка (ADR-037; служебные заметки скрыты от сторон пары).
    * Доступ: стороны пары и арбитры; посторонним — 404 (не раскрываем факт).
    */
   async findOne(viewer: AuthenticatedUser, appealId: string): Promise<AppealDetailDto> {
@@ -167,7 +188,87 @@ export class AppealsService {
       take: APPEAL_MONTHS_TAKE,
     });
 
-    return toAppealDetailDto(appeal, months);
+    return toAppealDetailDto(filterInternalAppealMessages(viewer, appeal), months);
+  }
+
+  // ─── Переписка кейса (v0.7.0-C, ADR-037) ─────────────────────────────
+
+  /**
+   * Сообщение в кейсе: сторона пары или арбитр. Append-only.
+   * Служебные заметки (isInternal) — только арбитр; паре — 403.
+   */
+  async postMessage(
+    viewer: AuthenticatedUser,
+    appealId: string,
+    input: AppealMessageInput,
+  ): Promise<AppealMessageDto> {
+    const appeal = await this.loadForView(appealId);
+    this.assertCanAccess(viewer, appeal);
+    assertAppealActive(appeal);
+
+    const isArbitrator = viewer.role === 'arbitrator';
+    if (input.isInternal && !isArbitrator) {
+      throw new ForbiddenException('Служебные заметки доступны только арбитру');
+    }
+
+    const message = await this.prisma.appealMessage.create({
+      data: {
+        appealId,
+        authorId: viewer.id,
+        body: input.body,
+        isInternal: input.isInternal,
+      },
+      include: { author: { select: { id: true, displayName: true, role: true } } },
+    });
+
+    // Служебные заметки — только для арбитража, пара о них не узнаёт.
+    // Публичное сообщение — обеим сторонам пары и арбитру (кроме автора).
+    if (!input.isInternal) {
+      await this.notifyCaseActivity(
+        appeal,
+        viewer.id,
+        'Новое сообщение в апелляции',
+        input.body.length > 120 ? `${input.body.slice(0, 117)}…` : input.body,
+      );
+    }
+
+    return {
+      id: message.id,
+      author: message.author,
+      body: message.body,
+      isInternal: message.isInternal,
+      createdAt: message.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Список сообщений кейса (ADR-037). Стороне пары — только публичные,
+   * арбитру — все. Доступ к кейсу тот же, что в findOne.
+   */
+  async listMessages(
+    viewer: AuthenticatedUser,
+    appealId: string,
+  ): Promise<AppealMessagesListDto> {
+    const appeal = await this.loadForView(appealId);
+    this.assertCanAccess(viewer, appeal);
+
+    const messages = await this.prisma.appealMessage.findMany({
+      where: { appealId },
+      include: { author: { select: { id: true, displayName: true, role: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: APPEAL_MESSAGES_TAKE,
+    });
+
+    const visible = viewer.role === 'arbitrator' ? messages : messages.filter((m) => !m.isInternal);
+    return {
+      items: visible.map((m) => ({
+        id: m.id,
+        author: m.author,
+        body: m.body,
+        isInternal: m.isInternal,
+        createdAt: m.createdAt.toISOString(),
+      })),
+    };
   }
 
   /** Загрузка кейса со связями (404 если нет). */
@@ -329,6 +430,32 @@ export class AppealsService {
       });
     }
   }
+
+  /**
+   * Публичная активность в переписке (ADR-037): обеим сторонам пары и
+   * назначенному арбитру, кроме автора. Зеркалит notifyCaseActivity
+   * споров (ADR-033).
+   */
+  private async notifyCaseActivity(
+    appeal: { id: string; driverId: string; sellerId: string; assignedToId: string | null },
+    actorId: string,
+    title: string,
+    body: string,
+  ): Promise<void> {
+    const targets = [appeal.driverId, appeal.sellerId].filter((id) => id !== actorId);
+    if (appeal.assignedToId && appeal.assignedToId !== actorId) {
+      targets.push(appeal.assignedToId);
+    }
+    for (const userId of targets) {
+      await this.notifications.send({
+        userId,
+        type: 'appeal_message',
+        title,
+        body,
+        data: { appealId: appeal.id },
+      });
+    }
+  }
 }
 
 // ─── Помощники (вне класса — чистые функции) ────────────────────────────────
@@ -358,3 +485,25 @@ async function loadAppealForUpdate(tx: TransactionClient, appealId: string) {
 function trimReason(reason: string): string {
   return reason.length > 120 ? `${reason.slice(0, 117)}…` : reason;
 }
+
+/** Кейс должен быть активным для переписки (закрытый — только чтение). */
+function assertAppealActive(appeal: { status: AppealStatus }): void {
+  if (!ACTIVE_STATUSES.includes(appeal.status)) {
+    throw new ConflictException('Апелляция закрыта — переписка недоступна');
+  }
+}
+
+/** Служебные заметки не отдаются сторонам пары — только арбитру. */
+function filterInternalAppealMessages(
+  viewer: AuthenticatedUser,
+  appeal: AppealWithRelations,
+): AppealWithRelations {
+  if (viewer.role === 'arbitrator') {
+    return appeal;
+  }
+  return {
+    ...appeal,
+    messages: (appeal.messages ?? []).filter((m) => !m.isInternal),
+  };
+}
+

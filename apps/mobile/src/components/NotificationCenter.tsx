@@ -64,6 +64,8 @@ export function mapNotificationRoute(notification: {
     case 'appeal_opened':
     case 'appeal_assigned':
     case 'appeal_resolved':
+    // v0.7.0-C (ADR-037): сообщение в переписке апелляции — туда же.
+    case 'appeal_message':
       return '/appeal';
     default:
       return null;

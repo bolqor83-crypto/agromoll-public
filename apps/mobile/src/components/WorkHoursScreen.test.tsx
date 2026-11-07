@@ -100,7 +100,7 @@ describe('«Мои часы»: обжалование блокировки (ADR-
     ]);
 
     const { findByText, queryByText } = renderScreen();
-    expect(await findByText('Апелляция: Открыта')).toBeTruthy();
+    expect(await findByText('Апелляция: Открыта · переписка')).toBeTruthy();
     // Повторно подать нельзя — кейс уже в арбитраже.
     expect(queryByText('Оспорить блокировку')).toBeNull();
   });

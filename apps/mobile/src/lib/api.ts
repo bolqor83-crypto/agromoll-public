@@ -25,6 +25,7 @@ import type { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 
 import type {
   AppealDetailDto,
   AppealDto,
+  AppealMessagesListDto,
   AppealsListDto,
   AuthResponseDto,
   BookingDto,
@@ -61,6 +62,8 @@ import { logger } from './logger';
 import { API_URL, IS_API_CONFIGURED } from './api-config';
 import {
   AppealDetailResponseSchema,
+  AppealMessageResponseSchema,
+  AppealMessagesListResponseSchema,
   AppealResponseSchema,
   AppealsListResponseSchema,
   AuthResponseSchema,
@@ -944,6 +947,32 @@ export const api = {
   appealQueue(): Promise<AppealsListDto> {
     return apiRequest<AppealsListDto>({ method: 'GET', url: '/appeals/queue' }).then((d) =>
       validateResponse(AppealsListResponseSchema, d, 'appeals/queue'),
+    );
+  },
+
+  // ─── Переписка в апелляциях (v0.7.0-C, ADR-037) ────────────────
+
+  /** Сообщение в кейсе (append-only; isInternal — только арбитр). */
+  sendAppealMessage(
+    appealId: string,
+    body: string,
+    isInternal = false,
+  ): Promise<AppealDetailDto['messages'][number]> {
+    return apiRequest<AppealDetailDto['messages'][number]>({
+      method: 'POST',
+      url: `/appeals/${appealId}/messages`,
+      data: { body, isInternal },
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(AppealMessageResponseSchema, d, 'appeals/:id/messages'));
+  },
+
+  /** Список сообщений кейса (паре — публичные, арбитру — все). */
+  appealMessages(appealId: string): Promise<AppealMessagesListDto> {
+    return apiRequest<AppealMessagesListDto>({
+      method: 'GET',
+      url: `/appeals/${appealId}/messages`,
+    }).then((d) =>
+      validateResponse(AppealMessagesListResponseSchema, d, 'appeals/:id/messages (GET)'),
     );
   },
 

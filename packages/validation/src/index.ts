@@ -1094,6 +1094,21 @@ export const OpenAppealSchema = z
 export type OpenAppealInput = z.infer<typeof OpenAppealSchema>;
 
 /**
+ * Сообщение в переписке апелляции: POST /appeals/:id/messages
+ * (v0.7.0-C, ADR-037). Форма — как DisputeMessageSchema: isInternal
+ * — только арбитру (проверка роли в сервисе).
+ */
+export const AppealMessageSchema = z
+  .object({
+    body: z.string().trim().min(1, 'Сообщение не может быть пустым').max(2000),
+    /** Служебная заметка — только арбитру (проверка роли в сервисе). */
+    isInternal: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export type AppealMessageInput = z.infer<typeof AppealMessageSchema>;
+
+/**
  * Решение по апелляции: POST /appeals/:id/resolve.
  *
  * unblock — блокировка снимается в той же транзакции, reject — остаётся.
@@ -1124,7 +1139,15 @@ export const AppealResponseSchema = z.object({
   notes: z.string().nullable(),
 });
 
-/** Кейс с историей часов пары (GET /appeals/:id). */
+/** Сообщение переписки апелляции в DTO (v0.7.0-C, ADR-037). */
+export const AppealMessageResponseSchema = z.object({
+  id: z.string().min(1),
+  author: DisputePartyResponseSchema,
+  body: z.string().min(1),
+  isInternal: z.boolean(),
+  createdAt: IsoDateString,
+});
+
 export const AppealDetailResponseSchema = AppealResponseSchema.extend({
   months: z.array(
     z.object({
@@ -1133,7 +1156,14 @@ export const AppealDetailResponseSchema = AppealResponseSchema.extend({
       monthCounted: z.boolean(),
     }),
   ),
+  /** Переписка кейса (ADR-037): служебные скрыты от пары на сервере. */
+  messages: z.array(AppealMessageResponseSchema),
 });
+
+/** Ответ GET /appeals/:id/messages (v0.7.0-C, ADR-037). */
+export const AppealMessagesListResponseSchema = z
+  .object({ items: z.array(AppealMessageResponseSchema) })
+  .passthrough();
 
 /** Ответ GET /appeals/mine и GET /appeals/queue. */
 export const AppealsListResponseSchema = z

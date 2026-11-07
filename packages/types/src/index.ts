@@ -561,6 +561,8 @@ export const NOTIFICATION_TYPES = [
   'appeal_opened',
   'appeal_assigned',
   'appeal_resolved',
+  // v0.7.0-C (ADR-037): переписка в апелляциях.
+  'appeal_message',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -938,6 +940,23 @@ export interface AppealDto {
 export interface AppealDetailDto extends AppealDto {
   /** Месяцы работы пары: свежие сверху, лимит — 12 (ADR-035). */
   months: AppealMonthDto[];
+  /** Переписка кейса (v0.7.0-C, ADR-037): служебные — только арбитру. */
+  messages: AppealMessageDto[];
+}
+
+/** Сообщение в переписке апелляции (v0.7.0-C, ADR-037). */
+export interface AppealMessageDto {
+  id: string;
+  author: DisputePartyDto;
+  body: string;
+  /** Служебная заметка — видна только арбитрам. */
+  isInternal: boolean;
+  createdAt: string;
+}
+
+/** Ответ GET /appeals/:id/messages. */
+export interface AppealMessagesListDto {
+  items: AppealMessageDto[];
 }
 
 /** Ответ GET /appeals/mine — кейсы по моим парам и поданные мной. */

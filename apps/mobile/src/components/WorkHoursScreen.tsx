@@ -13,7 +13,8 @@
  * Сессии — прямые вызовы API: серверные временные метки авторитетны.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { Alert, Pressable, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import {
   AnimatedNumber,
   Badge,
@@ -276,6 +277,7 @@ function PairCard({
   /** Открыть шторку обжалования (заблокированная пара без активной апелляции). */
   onAppeal: (pair: WorkHoursPairDto) => void;
 }) {
+  const router = useRouter();
   const approaching =
     pair.totalMinutes >= WORK_HOURS_UI.approachingMinutes &&
     pair.series >= WORK_HOURS_UI.approachingSeries;
@@ -302,10 +304,18 @@ function PairCard({
           </View>
           {pair.blocked ? (
             pair.appeal ? (
-              <Badge
-                label={`Апелляция: ${APPEAL_STATUS_LABELS[pair.appeal.status]}`}
-                variant="neutral"
-              />
+              // v0.7.0-C (ADR-037): бейдж ведёт к переписке с арбитром —
+              // у пары больше нет «немого ожидания» решения.
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Апелляция: ${APPEAL_STATUS_LABELS[pair.appeal.status]}, открыть переписку`}
+                onPress={() => router.push(`/appeal/${pair.appeal!.id}`)}
+              >
+                <Badge
+                  label={`Апелляция: ${APPEAL_STATUS_LABELS[pair.appeal.status]} · переписка`}
+                  variant="neutral"
+                />
+              </Pressable>
             ) : (
               <Badge label="Пауза по 289-ФЗ" variant="attention" />
             )
@@ -334,10 +344,16 @@ function PairCard({
 
         {pair.blocked ? (
           pair.appeal ? (
-            <Text variant="caption" color="secondary">
-              По закону нужна пауза, чтобы защитить вас и платформу. Апелляция уже в арбитраже —
-              решение придёт в уведомлениях.
-            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Открыть апелляцию и переписку с арбитром"
+              onPress={() => router.push(`/appeal/${pair.appeal!.id}`)}
+            >
+              <Text variant="caption" color="primary">
+                По закону нужна пауза, чтобы защитить вас и платформу. Апелляция в арбитраже —
+                откройте кейс, чтобы ответить арбитру и увидеть решение.
+              </Text>
+            </Pressable>
           ) : (
             <>
               <Text variant="caption" color="secondary">

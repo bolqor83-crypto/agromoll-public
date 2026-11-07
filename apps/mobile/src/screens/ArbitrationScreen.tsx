@@ -122,6 +122,9 @@ export default function ArbitrationScreen() {
   const [appealDetail, setAppealDetail] = useState<DetailState<AppealDetailDto> | null>(null);
   const [appealDecision, setAppealDecision] = useState<AppealDecision | null>(null);
   const [appealNotes, setAppealNotes] = useState('');
+  // Переписка апелляции (v0.7.0-C, ADR-037): ввод + переключатель «служебная».
+  const [appealNote, setAppealNote] = useState('');
+  const [appealNoteInternal, setAppealNoteInternal] = useState(false);
 
   const loadQueue = useCallback(async (): Promise<void> => {
     if (!isArbitrator) {
@@ -202,6 +205,8 @@ export default function ArbitrationScreen() {
   const resetAppealForm = useCallback((): void => {
     setAppealDecision(null);
     setAppealNotes('');
+    setAppealNote('');
+    setAppealNoteInternal(false);
     setActionError(null);
   }, []);
 
@@ -219,6 +224,22 @@ export default function ArbitrationScreen() {
       setBusy(false);
     }
   }, []);
+
+  /** Сообщение в переписке апелляции (v0.7.0-C, ADR-037). */
+  const handleSendAppealNote = useCallback(
+    (appealId: string): void => {
+      const body = appealNote.trim();
+      if (body.length === 0) {
+        return;
+      }
+      void runAction(async () => {
+        await api.sendAppealMessage(appealId, body, appealNoteInternal);
+        setAppealNote('');
+        await loadAppealDetail(appealId);
+      });
+    },
+    [appealNote, appealNoteInternal, runAction, loadAppealDetail],
+  );
 
   const handleAssign = useCallback(
     (disputeId: string): void => {
@@ -671,6 +692,58 @@ export default function ArbitrationScreen() {
                 </Card>
               ))}
             </View>
+
+            {/* Переписка кейса (v0.7.0-C, ADR-037): арбитр уточняет
+                обстоятельства, не покидая кейс. Служебные заметки — тут. */}
+            {ready.messages.length > 0 || isActive ? (
+              <View style={{ flex: 1, gap: spacing.sm }}>
+                <Text variant="body" weight="600">
+                  Переписка
+                </Text>
+                {ready.messages.map((message) => (
+                  <Card key={message.id}>
+                    <View style={{ gap: spacing.xs }}>
+                      <Text variant="caption" color={message.isInternal ? 'primary' : 'secondary'}>
+                        {message.author.displayName} · {formatWhen(message.createdAt)}
+                        {message.isInternal ? ' · служебная' : ''}
+                      </Text>
+                      <Text variant="body">{message.body}</Text>
+                    </View>
+                  </Card>
+                ))}
+                {isActive ? (
+                  <View style={{ gap: spacing.sm }}>
+                    <Input
+                      label={
+                        appealNoteInternal
+                          ? 'Служебная заметка (только арбитрам)'
+                          : 'Сообщение паре'
+                      }
+                      value={appealNote}
+                      onChangeText={setAppealNote}
+                      multiline
+                      numberOfLines={2}
+                      placeholder="Уточните обстоятельства у пары"
+                      textAlignVertical="top"
+                    />
+                    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                      <Button
+                        title={appealNoteInternal ? 'Служебная' : 'Паре'}
+                        variant="secondary"
+                        onPress={() => setAppealNoteInternal((prev) => !prev)}
+                      />
+                      <Button
+                        title="Отправить"
+                        variant="secondary"
+                        disabled={appealNote.trim().length === 0 || busy}
+                        loading={busy}
+                        onPress={() => handleSendAppealNote(ready.id)}
+                      />
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
             {isActive ? (
               <View style={{ gap: spacing.md }}>

@@ -71,6 +71,8 @@ export function createApiModuleMock() {
     myAppeals: jest.fn(),
     appealQueue: jest.fn(),
     appeal: jest.fn(),
+    sendAppealMessage: jest.fn(),
+    appealMessages: jest.fn(),
     assignAppeal: jest.fn(),
     resolveAppeal: jest.fn(),
   };

@@ -72,7 +72,9 @@ export type IdempotentOperationType =
   // v0.6.0-E (ADR-035): апелляции на блокировки 289-ФЗ.
   | 'open_appeal'
   | 'assign_appeal'
-  | 'resolve_appeal';
+  | 'resolve_appeal'
+  // v0.7.0-C (ADR-037): переписка в апелляциях.
+  | 'appeal_message';
 
 /** Пометить POST-эндпоинт идемпотентным. */
 export const Idempotent = (operationType: IdempotentOperationType): MethodDecorator =>

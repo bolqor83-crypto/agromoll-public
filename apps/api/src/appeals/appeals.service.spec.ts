@@ -1,11 +1,12 @@
 /**
- * Unit-тесты сервиса апелляций на блокировки 289-ФЗ (v0.6.0-E, ADR-035)
- * — мок Prisma.
+ * Unit-тесты сервиса апелляций на блокировки 289-ФЗ (v0.6.0-E ADR-035 →
+ * v0.7.0-C ADR-037) — мок Prisma.
  *
  * Покрывают: открытие (только сторона пары, дубликат 409, гонка P2002,
  * обжалование снятой блокировки → 404), чтения (mine/queue/детали с
  * месяцами часов), assign (статусная машина), resolve (unblock снимает
- * блокировку в той же транзакции, reject — нет, чужой арбитр → 403).
+ * блокировку в той же транзакции, reject — нет, чужой арбитр → 403),
+ * переписку (append-only, служебные — только арбитру, доступ паре).
  * Полный HTTP-цикл — в test/appeals.e2e-spec.ts (реальная БД, CI).
  */
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
@@ -89,6 +90,7 @@ function createPrismaMock() {
       create: jest.fn(),
       update: jest.fn(),
     },
+    appealMessage: { create: jest.fn(), findMany: jest.fn() },
     monthlyPairTotal: { findMany: jest.fn() },
     $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
   };
@@ -369,6 +371,112 @@ describe('AppealsService (unit, v0.6.0-E)', () => {
       await expect(
         service.resolve(ARBITRATOR, 'appeal-1', { decision: 'unblock' }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('переписка (v0.7.0-C, ADR-037)', () => {
+    /** Сообщение-строка из БД (как include author). */
+    const row = (id: string, body: string, isInternal: boolean, authorId: string) => ({
+      id,
+      body,
+      isInternal,
+      createdAt: new Date('2026-11-07T10:00:00Z'),
+      author: { id: authorId, displayName: `Партия ${authorId}`, role: 'driver' },
+    });
+
+    it('сторона пары пишет публичное сообщение; уведомлены вторая сторона и арбитр', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.appealCase.findUnique.mockResolvedValue(
+        makeAppeal({ status: 'under_review', assignedToId: ARBITRATOR }),
+      );
+      prismaMock.appealMessage.create.mockResolvedValue(row('m-1', 'Часы задвоились', false, DRIVER));
+      const service = await createService(prisma);
+
+      const dto = await service.postMessage(viewer(DRIVER, 'driver'), 'appeal-1', {
+        body: 'Часы задвоились',
+        isInternal: false,
+      });
+
+      expect(dto.isInternal).toBe(false);
+      // Уведомления: продавец пары + назначенный арбитр (водитель — автор).
+      const notified = (service as unknown as { notifications: { send: jest.Mock } })
+        .notifications.send;
+      expect(notified).toHaveBeenCalledTimes(2);
+      const targets = notified.mock.calls.map((c: { 0: { userId: string } }) => c[0].userId);
+      expect(targets).toEqual(expect.arrayContaining([SELLER, ARBITRATOR]));
+      expect(targets).not.toContain(DRIVER);
+    });
+
+    it('стороне пары служебная заметка запрещена (403)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.appealCase.findUnique.mockResolvedValue(makeAppeal());
+      const service = await createService(prisma);
+
+      await expect(
+        service.postMessage(viewer(SELLER, 'seller'), 'appeal-1', {
+          body: 'Тайная мысль',
+          isInternal: true,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('посторонний не пишет и не читает (404)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.appealCase.findUnique.mockResolvedValue(makeAppeal());
+      const service = await createService(prisma);
+
+      await expect(
+        service.postMessage(viewer(OUTSIDER, 'buyer'), 'appeal-1', { body: 'Здравствуйте', isInternal: false }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.listMessages(viewer(OUTSIDER, 'buyer'), 'appeal-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('закрытый кейс — переписка недоступна (409)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.appealCase.findUnique.mockResolvedValue(
+        makeAppeal({ status: 'rejected' }),
+      );
+      const service = await createService(prisma);
+
+      await expect(
+        service.postMessage(viewer(DRIVER, 'driver'), 'appeal-1', { body: 'Опоздал', isInternal: false }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('listMessages: паре — только публичные, арбитру — все', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.appealCase.findUnique.mockResolvedValue(makeAppeal());
+      prismaMock.appealMessage.findMany.mockResolvedValue([
+        row('m-1', 'Жалоба уточнена', false, DRIVER),
+        row('m-2', 'Служебная проверка смен', true, ARBITRATOR),
+      ]);
+      const service = await createService(prisma);
+
+      const driverView = await service.listMessages(viewer(DRIVER, 'driver'), 'appeal-1');
+      expect(driverView.items).toHaveLength(1);
+      expect(driverView.items[0].isInternal).toBe(false);
+
+      const arbView = await service.listMessages(viewer(ARBITRATOR, 'arbitrator'), 'appeal-1');
+      expect(arbView.items).toHaveLength(2);
+    });
+
+    it('findOne: детали содержат переписку (служебные скрыты от пары)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.appealCase.findUnique.mockResolvedValue(
+        makeAppeal({
+          messages: [row('m-1', 'Жалоба', false, DRIVER), row('m-2', 'Заметка', true, ARBITRATOR)],
+        }),
+      );
+      prismaMock.monthlyPairTotal.findMany.mockResolvedValue([]);
+      const service = await createService(prisma);
+
+      const driverDetail = await service.findOne(viewer(DRIVER, 'driver'), 'appeal-1');
+      expect(driverDetail.messages).toHaveLength(1);
+
+      const arbDetail = await service.findOne(viewer(ARBITRATOR, 'arbitrator'), 'appeal-1');
+      expect(arbDetail.messages).toHaveLength(2);
     });
   });
 });

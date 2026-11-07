@@ -224,12 +224,13 @@ model User {
   disputesResolved      DisputeCase[]         @relation("DisputeResolvedBy")
   disputeMessages       DisputeMessage[]
   disputeEvidence       DisputeEvidence[]
-  // Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035).
+  // Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035 → v0.7.0-C, ADR-037).
   appealsAsDriver       AppealCase[]          @relation("AppealDriver")
   appealsAsSeller       AppealCase[]          @relation("AppealSeller")
   appealsAsAppellant    AppealCase[]          @relation("AppealAppellant")
   appealsAssigned       AppealCase[]          @relation("AppealAssignedTo")
   appealsResolved       AppealCase[]          @relation("AppealResolvedBy")
+  appealMessages        AppealMessage[]
   blocksUnblocked       BlockedPair[]         @relation("BlockedPairUnblockedBy")
 
   @@map("users")
@@ -380,6 +381,8 @@ enum OutboxOperationType {
   open_appeal
   assign_appeal
   resolve_appeal
+  // v0.7.0-C (ADR-037): переписка в апелляциях.
+  appeal_message
 }
 
 /// Состояние операции на сервере (ADR-006).
@@ -521,6 +524,8 @@ enum NotificationType {
   appeal_opened
   appeal_assigned
   appeal_resolved
+  // v0.7.0-C (ADR-037): переписка в апелляциях.
+  appeal_message
 }
 
 /// In-app уведомление (v0.4.0, ADR-010; push — v0.6.0, ADR-031).
@@ -1057,7 +1062,31 @@ model AppealCase {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
+  /// Переписка кейса (append-only, ADR-037).
+  messages      AppealMessage[]
+
   @@index([status, openedAt])
   @@index([driverId, sellerId])
   @@map("appeal_cases")
+}
+
+/// Сообщение в переписке апелляции (v0.7.0-C, ADR-037).
+///
+/// Зеркалит DisputeMessage: append-only (правка/удаление запрещены —
+/// журнал разбирательства), isInternal — служебные заметки, видит
+/// только арбитр. Автор — сторона пары или арбитр; посторонние в кейс
+/// не попадают (проверка в сервисе).
+model AppealMessage {
+  id         String     @id @default(uuid())
+  appealId   String
+  appeal     AppealCase @relation(fields: [appealId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User       @relation(fields: [authorId], references: [id])
+  body       String
+  /// Служебная заметка арбитра — скрыта от сторон пары (ADR-037).
+  isInternal Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+
+  @@index([appealId, createdAt])
+  @@map("appeal_messages")
 }

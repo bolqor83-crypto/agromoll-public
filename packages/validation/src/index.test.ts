@@ -27,6 +27,7 @@ import {
   ResolveDisputeSchema,
   UpdateRoleSchema,
   AppealDetailResponseSchema,
+  AppealMessageSchema,
   AppealResponseSchema,
   OpenAppealSchema,
   ResolveAppealSchema,
@@ -485,19 +486,34 @@ describe('@agromoll/validation', () => {
       expect(AppealResponseSchema.safeParse(base).success).toBe(true);
       // Неизвестный статус — нельзя
       expect(AppealResponseSchema.safeParse({ ...base, status: 'closed' }).success).toBe(false);
-      // Детали с месяцами часов — доказательство арбитра
+      // Детали с месяцами часов и перепиской (v0.7.0-C, ADR-037)
       expect(
         AppealDetailResponseSchema.safeParse({
           ...base,
           months: [{ month: '2026-11', totalMinutes: 3600, monthCounted: true }],
+          messages: [],
         }).success,
       ).toBe(true);
       expect(
         AppealDetailResponseSchema.safeParse({
           ...base,
           months: [{ month: '2026-1', totalMinutes: 3600, monthCounted: true }],
+          messages: [],
         }).success,
       ).toBe(false);
+      // Переписка обязательна: деталям без messages — отказ (ADR-037)
+      expect(
+        AppealDetailResponseSchema.safeParse({
+          ...base,
+          months: [{ month: '2026-11', totalMinutes: 3600, monthCounted: true }],
+        }).success,
+      ).toBe(false);
+      // Сообщение переписки — форма DisputeMessage
+      expect(
+        AppealMessageSchema.safeParse({ body: 'Смены 41 и 42 дублированы' }).success,
+      ).toBe(true);
+      expect(AppealMessageSchema.safeParse({ body: '' }).success).toBe(false);
+      expect(AppealMessageSchema.safeParse({ body: 'x', isInternal: true }).success).toBe(true);
     });
   });
 });

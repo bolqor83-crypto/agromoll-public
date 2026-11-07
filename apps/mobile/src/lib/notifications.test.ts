@@ -95,7 +95,13 @@ describe('mapNotificationRoute: события арбитража (v0.6.0-C, ADR
 
 describe('апелляции 289-ФЗ: развязка маршрута по роли (v0.6.0-E, ADR-035)', () => {
   it('appeal_* → паре на экран часов (свою по роли), арбитру — в арбитраж', () => {
-    for (const type of ['appeal_opened', 'appeal_assigned', 'appeal_resolved']) {
+    // v0.7.0-C (ADR-037): сообщения переписки идут тем же маршрутом.
+    for (const type of [
+      'appeal_opened',
+      'appeal_assigned',
+      'appeal_resolved',
+      'appeal_message',
+    ]) {
       expect(mapNotificationRoute({ type, data: { appealId: 'a1' } })).toBe('/appeal');
     }
 
