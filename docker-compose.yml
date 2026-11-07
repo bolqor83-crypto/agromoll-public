@@ -4,10 +4,14 @@
 #
 # Почему LocalStack, а не MinIO: MinIO ушёл с Docker Hub (октябрь 2025,
 # репозиторий заархивирован в феврале 2026) — образ minio/minio больше
-# не скачать анонимно ни с Docker Hub, ни с quay.io. LocalStack —
-# S3-совместимый шлюз, активно публикуется и ставится «из коробки».
-# Код приложения одинаков для LocalStack/AWS/R2/Yandex: меняется только
-# S3_ENDPOINT (ADR-036).
+# не скачать анонимно. LocalStack — S3-совместимый шлюз.
+#
+# Почему именно 4.14.0: с 2026.03.0 LocalStack требует LOCALSTACK_AUTH_TOKEN
+# даже для community-функций (аккаунт + лицензия на каждый CI-запуск).
+# 4.14.0 (26.02.2026) — последний свободный community-релиз, пин — осознанное
+# решение (безопасность за счёт обновлений), пересмотреть при смене
+# тестового S3-двойника. Код приложения одинаков для LocalStack/AWS/R2/Yandex:
+# меняется только S3_ENDPOINT (ADR-036).
 #
 # Бакет создаётся сам при старте API (StorageService.configureFromEnv).
 # Посмотреть файлы локально:
@@ -48,7 +52,7 @@ services:
   # S3-совместимое хранилище для локальной разработки и e2e (ADR-036).
   # Прод — любой S3-провайдер (AWS/R2/Yandex): код одинаков, меняется конфиг.
   s3:
-    image: localstack/localstack:2026.10.6
+    image: localstack/localstack:4.14.0
     container_name: agromoll-s3
     restart: unless-stopped
     environment:

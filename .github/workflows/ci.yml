@@ -20,8 +20,9 @@ jobs:
       DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
       REDIS_URL: redis://localhost:6379
       # S3-доказательства (v0.7.0-B, ADR-036): LocalStack-контейнер ниже
-      # (MinIO ушёл с Docker Hub, ADR-036 «Выбор провайдера»), бакет
-      # создаётся сам при старте приложения в e2e.
+      # (MinIO ушёл с Docker Hub; LocalStack ≥2026.03.0 требует auth-токен —
+      # поэтому пин 4.14.0, последний свободный community-релиз).
+      # Бакет создаётся сам при старте приложения в e2e.
       S3_ENDPOINT: http://localhost:4566
       S3_BUCKET: agromoll-evidence
       S3_ACCESS_KEY: test
@@ -50,7 +51,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       s3:
-        image: localstack/localstack:2026.10.6
+        # 4.14.0 — последний community-релиз без LOCALSTACK_AUTH_TOKEN
+        # (с 2026.03.0 токен обязателен даже для S3; ADR-036).
+        image: localstack/localstack:4.14.0
         env:
           SERVICES: s3
           AWS_ACCESS_KEY_ID: test
