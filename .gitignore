@@ -36,3 +36,4 @@ coverage/
 .vscode/
 .vercel
 .env*
+dist-e2e/

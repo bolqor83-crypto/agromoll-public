@@ -7,7 +7,9 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 module.exports = [
   ...compat.extends('eslint-config-expo'),
   {
-    ignores: ['dist/**', '.expo/**', 'coverage/**'],
+    // dist-e2e — статический экспорт локального E2E-стенда (v0.8.0-F):
+    // те же артефакты, что и dist, но с адресом локального API.
+    ignores: ['dist/**', 'dist-e2e/**', '.expo/**', 'coverage/**'],
   },
   {
     // Конфиг-файлы сборки — CommonJS с node-глобалами

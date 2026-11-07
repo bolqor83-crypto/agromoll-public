@@ -1,0 +1,722 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Локальный E2E-стенд АгроМолл v0.8.0 (подэтап F).
+
+Прогон пользовательских флоу через Playwright (headless Chromium) против
+локального стенда: API :3000 + web :8123 (scripts/e2e-stand-up.sh).
+
+Флоу (по спецификации подэтапа F):
+  buyer    — вход → лента → фильтр → лот → забронировать → мои брони →
+             подтвердить приёмку → долги
+  seller   — витрина → создать лот с 2 фото → входящие брони →
+             подтвердить → долг создать → напомнить
+  driver   — радар → взять заказ → QR pickup → QR dropoff → доставить
+  debtor   — покупатель погашает долг
+  appeal   — заблокированный водитель подаёт апелляцию 289-ФЗ
+  arbit    — арбитр решает спор и одобряет апелляцию
+  video    — видео полного цикла покупателя (опционально)
+
+Запуск: python3 e2e_local.py [buyer|seller|driver|debtor|appeal|arbit|video|all]
+Перед каждым прогоном: pkill -f 'dist/src/main.js'; bash e2e-stand-up.sh
+(рестарт API сбрасывает in-memory троттлер 1 запрос/60 с на телефон).
+"""
+import sys
+import time
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+BASE = "http://127.0.0.1:8123"
+SHOTS = Path("/home/z/my-project/agromoll/docs/screenshots/v0.8.0-local")
+SHOTS.mkdir(parents=True, exist_ok=True)
+
+PHONE_BUYER = "+79000000016"          # Марина — ларёк «Заря»
+PHONE_SELLER = "+79000000001"         # Арутюн — линия 1
+PHONE_DRIVER22 = "+79000000022"       # Артём — Largus
+PHONE_DRIVER_LEGACY = "+79611230003"  # легаси — заблокирован с ФХ «Донская долина»
+PHONE_ARBITRATOR = "+79000000023"     # Левон — арбитр
+
+
+import requests as _rq
+
+API = "http://127.0.0.1:3000"
+
+
+def api_login(phone):
+    """Вход через API (код 000000 в dev) → access-токен."""
+    _rq.post(f"{API}/auth/request-code", json={"phone": phone}, timeout=10).raise_for_status()
+    r = _rq.post(f"{API}/auth/verify", json={"phone": phone, "code": "000000"}, timeout=10)
+    r.raise_for_status()
+    return r.json()["accessToken"]
+
+
+PHONE_BUYER2 = "+79000000017"  # Игорь Ларин — для флоу доставки (не троттлится с 016)
+
+
+def create_delivery_as_buyer(phone=PHONE_BUYER):
+    """Покупатель создаёт запрос доставки через API (UI-часть — у водителя).
+
+    Точки: своя buyer_point (создаётся при необходимости) + линия продавца
+    (seed). Возвращает id запроса.
+    """
+    import json as _json
+    token = None
+    if phone == PHONE_BUYER and TOKENS_FILE.exists():
+        token = _json.loads(TOKENS_FILE.read_text())["a"]  # UI-токен Марины
+    if not token:
+        token = api_login(phone)
+    h = {"Authorization": f"Bearer {token}"}
+    mine = _rq.get(f"{API}/geo/points/mine", headers=h, timeout=10).json()
+    dropoff = next((p for p in mine if p["kind"] == "buyer_point"), None)
+    if not dropoff:
+        # у Игоря нет точки — создаём (как из UI «Моя точка»)
+        r = _rq.post(
+            f"{API}/geo/points",
+            json={"kind": "buyer_point", "latitude": 47.2172, "longitude": 39.7437,
+                  "label": "Ларёк у вокзала", "address": "Ростов-Главный, ларёк"},
+            headers=h, timeout=10,
+        )
+        if r.status_code < 300:
+            dropoff = r.json()
+            log("buyer_point Игоря создана")
+        else:
+            print("⚠ не удалось создать точку:", r.status_code, r.text[:120])
+            return None
+    if not dropoff:
+        print("⚠ у покупателя нет buyer_point:", mine)
+        return None
+    sellers = _rq.get(
+        f"{API}/geo/points/nearby",
+        params={"lat": dropoff["latitude"], "lng": dropoff["longitude"],
+                "radiusMeters": 5000, "kind": "seller_line"},
+        headers=h, timeout=10,
+    ).json()
+    pickup = sellers[0] if isinstance(sellers, list) and sellers else None
+    if not dropoff or not pickup:
+        print("⚠ нет геоточек для доставки (mine=%s, sellers=%s)" % (len(mine), len(sellers or [])))
+        return None
+    body = {
+        "pickupPointId": pickup["id"],
+        "dropoffPointId": dropoff["id"],
+        "weightKg": 80,
+        "description": "E2E: помидоры и огурцы — линия 1 → ларёк «Заря»",
+    }
+    r = _rq.post(f"{API}/deliveries", json=body, headers=h, timeout=10)
+    if r.status_code >= 300:
+        print("⚠ создание доставки:", r.status_code, r.text[:150])
+        return None
+    log(f"доставка создана через API: {r.json().get('id')}")
+    return r.json().get("id")
+
+
+STEP = {"n": 0}
+
+
+
+def read_qr_uuid(page):
+    """UUID из открытого QR: Pressable «скопировать» с текстом-UUID."""
+    import re as _re
+    els = page.locator('[role="button"]')
+    for i in range(els.count()):
+        t = els.nth(i).inner_text().strip()
+        if _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', t):
+            return t
+    return None
+
+
+def shot(page, name, dark=False):
+    STEP["n"] += 1
+    theme = "dark-" if dark else ""
+    path = SHOTS / f"{STEP['n']:02d}-{theme}{name}.png"
+    page.screenshot(path=str(path), full_page=False)
+    print(f"  📸 {path.name}")
+
+
+def log(msg):
+    print(f"▶ {msg}")
+
+
+def login(browser, phone, role_hint=None, dark=False, record_video=False):
+    """Свежий контекст + вход по коду 000000 (6-я цифра авто-сабмитит)."""
+    ctx = browser.new_context(
+        viewport={"width": 1280, "height": 900},
+        color_scheme="dark" if dark else "light",
+        locale="ru-RU",
+        record_video_dir="/tmp/e2e-video" if record_video else None,
+        record_video_size={"width": 1280, "height": 900} if record_video else None,
+    )
+    page = ctx.new_page()
+    page.set_default_timeout(15000)
+    if record_video:
+        page.video_ = None  # заглушка; видео забираем из контекста
+    page.goto(BASE + "/auth", wait_until="domcontentloaded")
+    page.wait_for_selector('input[placeholder*="961"]')
+    page.fill('input[placeholder*="961"]', phone)
+    page.get_by_role("button", name="Получить код").click()
+    page.wait_for_selector('[aria-label="Код из SMS"]')
+    time.sleep(0.4)
+    page.click('[aria-label="Код из SMS"]')
+    page.keyboard.type("000000", delay=110)
+    page.wait_for_url("**/", timeout=25000)
+    time.sleep(1.2)
+    skip = page.get_by_text("Пропустить", exact=True)
+    if skip.count() and skip.first.is_visible():
+        skip.first.click()
+        time.sleep(0.8)
+    if role_hint:
+        role_card = page.get_by_text(role_hint, exact=True)
+        if role_card.count() and role_card.first.is_visible():
+            role_card.first.click()
+            time.sleep(1.5)
+    skip = page.get_by_text("Пропустить", exact=True)
+    if skip.count() and skip.first.is_visible():
+        skip.first.click()
+        time.sleep(0.8)
+    start = page.get_by_role("button", name="Начать")
+    if start.count() and start.first.is_visible():
+        start.first.click()
+        time.sleep(0.8)
+    return ctx, page
+
+
+# ─── ФЛОУ 1: покупатель ────────────────────────────────────────────────────
+
+
+TOKENS_FILE = Path("/tmp/e2e-tokens-016.json")
+
+
+def save_tokens(page):
+    """Токены Марины из UI-сессии — для API-вызовов и session-restore
+    (экономит request-code: троттлер 1/60 c на телефон)."""
+    data = page.evaluate(
+        "() => ({ a: localStorage.getItem('agromoll.accessToken'),"
+        " r: localStorage.getItem('agromoll.refreshToken') })"
+    )
+    if data and data.get("a"):
+        TOKENS_FILE.write_text(__import__("json").dumps(data))
+        log("токены покупателя сохранены (localStorage)")
+
+
+def login_restore(browser):
+    """Session-restore по токенам из TOKENS_FILE — без request-code."""
+    import json
+    if not TOKENS_FILE.exists():
+        return None, None
+    data = json.loads(TOKENS_FILE.read_text())
+    ctx = browser.new_context(
+        viewport={"width": 1280, "height": 900}, locale="ru-RU"
+    )
+    page = ctx.new_page()
+    page.set_default_timeout(15000)
+    page.goto(BASE + "/auth", wait_until="domcontentloaded")
+    page.evaluate(
+        "([a, r]) => { localStorage.setItem('agromoll.accessToken', a);"
+        " localStorage.setItem('agromoll.refreshToken', r); }",
+        [data["a"], data["r"]],
+    )
+    page.goto(BASE + "/delivery", wait_until="domcontentloaded")
+    time.sleep(2.5)
+    return ctx, page
+
+
+def flow_buyer(browser):
+    log("ФЛОУ 1 — покупатель: вход, лента, фильтр, бронь, приёмка, долги")
+    ctx, page = login(browser, PHONE_BUYER, "Покупатель")
+    save_tokens(page)
+    shot(page, "buyer-01-feed")
+
+    page.wait_for_selector('[data-testid="listings-grid"]', timeout=20000)
+    page.wait_for_selector('text=Помидоры розовые', timeout=20000)
+    log("лента с лотами открылась")
+
+    chip = page.get_by_text("Овощи", exact=True)
+    if chip.count():
+        chip.first.click()
+        time.sleep(1.0)
+        shot(page, "buyer-02-feed-filter-vegetables")
+        all_chip = page.get_by_text("Все", exact=True)
+        if all_chip.count():
+            all_chip.first.click()
+            time.sleep(0.8)
+
+    page.get_by_text("Помидоры розовые", exact=True).first.click()
+    page.wait_for_selector('text=Забронировать', timeout=15000)
+    time.sleep(1.0)
+    shot(page, "buyer-03-listing-tomato")
+
+    page.get_by_role("button", name="Забронировать").click()
+    time.sleep(2.0)
+    shot(page, "buyer-04-booking-created")
+
+    page.goto(BASE + "/bookings")
+    time.sleep(1.5)
+    page.wait_for_selector('text=Мои брони')
+    shot(page, "buyer-05-bookings")
+
+    confirm_card = page.get_by_text("Подтвердить получение")
+    if confirm_card.count() == 0:
+        confirm_card = page.get_by_text("Подтвердить")
+    confirm_card.first.click()
+    time.sleep(0.8)
+    page.wait_for_selector('text=Фактически получено', timeout=10000)
+    shot(page, "buyer-06-confirm-delivery-modal")
+    page.get_by_role("button", name="Подтвердить получение").last.click()
+    time.sleep(1.5)
+    shot(page, "buyer-07-delivery-confirmed")
+
+    page.goto(BASE + "/debts")
+    time.sleep(1.5)
+    shot(page, "buyer-08-debts")
+    ctx.close()
+    return None
+
+
+# ─── ФЛОУ 2: продавец ──────────────────────────────────────────────────────
+
+
+def flow_seller(browser):
+    log("ФЛОУ 2 — продавец: витрина, лот с 2 фото, входящие брони, долг")
+    ctx, page = login(browser, PHONE_SELLER, "Продавец")
+    page.wait_for_selector('text=Витрина', timeout=15000)
+    time.sleep(1.2)
+    shot(page, "seller-01-showcase")
+
+    # Создать лот с 2 фото
+    page.get_by_role("button", name="Выставить лот").click()
+    page.wait_for_selector('input[placeholder="Помидоры розовые"]', timeout=15000)
+    time.sleep(1.5)  # анимация SheetModal
+    page.fill('input[placeholder="Помидоры розовые"]', "Перец ротунда (демо-лот)")
+    # категория «Овощи» и единица «кг» — дефолт модалки, кликать не нужно
+    # цена и количество: два числовых поля с плейсхолдерами 85,50 и 120
+    page.fill('input[placeholder="85,50"]', "95")
+    page.fill('input[placeholder="120"]', "60")
+    # 2 фото через filechooser (expo-image-picker → input[type=file])
+    add_photo = page.get_by_role("button", name="Добавить фото")
+    if add_photo.count() == 0:
+        add_photo = page.get_by_text("Добавить фото")
+    with page.expect_file_chooser() as fc_info:
+        add_photo.first.click()
+    fc = fc_info.value
+    if fc.is_multiple():
+        fc.set_files(["/tmp/tomato-test-1.jpg", "/tmp/tomato-test-2.jpg"])
+    else:
+        fc.set_files("/tmp/tomato-test-1.jpg")
+    time.sleep(2.0)  # сжатие фото (canvas)
+    shot(page, "seller-02-create-listing-photos")
+    # Второе фото, если пикер одинарный
+    if page.get_by_role("button", name="Добавить фото").count():
+        with page.expect_file_chooser() as fc_info:
+            page.get_by_role("button", name="Добавить фото").first.click()
+        fc_info.value.set_files("/tmp/tomato-test-2.jpg")
+        time.sleep(2.0)
+    page.get_by_role("button", name="Выставить").last.click()
+    time.sleep(2.5)
+    shot(page, "seller-03-listing-created")
+
+    # Входящие брони — подтвердить requested-бронь покупателя
+    page.goto(BASE + "/inbox")
+    time.sleep(1.5)
+    page.wait_for_selector('text=Входящие', timeout=15000)
+    shot(page, "seller-04-inbox")
+    confirm = page.get_by_role("button", name="Подтвердить")
+    if confirm.count():
+        confirm.first.click()
+        time.sleep(2.0)
+        shot(page, "seller-05-booking-confirmed")
+    else:
+        log("⚠ нет requested-броней (TTL?) — пропуск подтверждения")
+
+    # Долг: создать покупателю («Записать долг» → модалка CreateDebtModal)
+    page.goto(BASE + "/debts")
+    time.sleep(1.5)
+    shot(page, "seller-06-debts")
+    create_btn = page.get_by_role("button", name="Записать долг")
+    if create_btn.count():
+        create_btn.first.click()
+        page.wait_for_selector('input[placeholder="12500"]', timeout=15000)
+        time.sleep(1.8)  # загрузка контрагентов
+        # контрагент — Марина (бронь уже была, значит она в списке)
+        marina = page.get_by_text("Марина Ковалёва", exact=False)
+        if marina.count():
+            marina.first.click()
+            time.sleep(0.4)
+        page.fill('input[placeholder="12500"]', "1500")
+        page.fill('[placeholder="Помидоры, 2 ящика"]', "Перец ротунда — отсрочка до пятницы")
+        shot(page, "seller-07-debt-form")
+        page.get_by_role("button", name="Отпустить в долг").last.click()
+        time.sleep(2.5)
+        shot(page, "seller-08-debt-created")
+    else:
+        log("⚠ кнопка «Записать долг» не найдена")
+
+    # Напомнить по активному долгу (кредиторская кнопка)
+    remind = page.get_by_role("button", name="Напомнить")
+    if remind.count():
+        remind.first.click()
+        time.sleep(1.5)
+        shot(page, "seller-09-debt-reminder")
+    else:
+        log("⚠ нет активных долгов для напоминания")
+    ctx.close()
+    return None
+
+
+# ─── ФЛОУ 3: водитель (радар → взять → QR → доставить) ────────────────────
+
+
+def flow_driver(browser):
+    log("ФЛОУ 3 — водитель: радар, взять заказ, QR забора/передачи, доставка")
+    ctx, page = login(browser, PHONE_DRIVER22, "Доставщик")
+    page.wait_for_selector('text=Радар', timeout=15000)
+    # Живой запрос: покупатель только что создал доставку через API
+    # (UI-гимнастика выбора геоточек — вне фокуса этого флоу)
+    create_delivery_as_buyer()
+    time.sleep(1.5)
+    page.reload()
+    time.sleep(2.0)
+    shot(page, "driver-01-radar")
+
+    take = page.get_by_role("button", name="Беру")
+    if take.count():
+        take.first.click()
+        time.sleep(2.0)
+        shot(page, "driver-02-order-taken")
+    else:
+        log("⚠ открытых заказов в радаре нет (TTL?) — проверьте сид")
+        ctx.close()
+        return None
+
+    # Мои доставки — назначенный заказ
+    page.goto(BASE + "/deliveries")
+    time.sleep(1.5)
+    page.wait_for_selector('text=Мои доставки', timeout=15000)
+    shot(page, "driver-03-my-deliveries-assigned")
+
+    # QR забора (показ продавцу)
+    qr_pickup = page.get_by_role("button", name="QR забора")
+    if qr_pickup.count():
+        qr_pickup.first.click()
+        time.sleep(0.8)
+        shot(page, "driver-04-qr-pickup")
+        pickup_uuid = read_qr_uuid(page)
+        log(f"QR-код забора: {pickup_uuid}")
+        page.get_by_role("button", name="Скрыть QR забора").first.click()
+        time.sleep(0.5)
+
+    # Выехал за товаром
+    page.get_by_role("button", name="Выехал за товаром").first.click()
+    time.sleep(2.0)
+    shot(page, "driver-05-in-transit")
+
+    # QR передачи (показ покупателю) — читаем UUID для сверки покупателем
+    dropoff_uuid = None
+    qr_drop = page.get_by_role("button", name="QR передачи")
+    if qr_drop.count():
+        qr_drop.first.click()
+        time.sleep(0.8)
+        shot(page, "driver-06-qr-dropoff")
+        dropoff_uuid = read_qr_uuid(page)
+        log(f"QR-код передачи (активный рейс): {dropoff_uuid}")
+
+    # Покупатель сверяет код передачи ПОКА рейс in_transit (web-QrScanner —
+    # ручной ввод UUID, ADR-015)
+    if dropoff_uuid:
+        Path("/tmp/e2e-dropoff-code.txt").write_text(dropoff_uuid)
+        log(f"код передачи: {dropoff_uuid}")
+        verify_dropoff_code(browser, dropoff_uuid)
+
+    # Товар передан → delivered
+    page.get_by_role("button", name="Товар передан").first.click()
+    time.sleep(2.0)
+    shot(page, "driver-07-delivered")
+    ctx.close()
+    return None
+
+
+
+def verify_dropoff_code(browser, code):
+    """Покупатель сверяет QR-код передачи водителя (web-версия QrScanner)."""
+    log(f"ФЛОУ 3b — покупатель сверяет QR-код передачи ({code[:8]}…)")
+    ctx, page = login_restore(browser)
+    if page is None:
+        log("⚠ нет сохранённых токенов — пропуск сверки (запустите buyer-флоу)")
+        return None
+    verify = page.get_by_role("button", name="Сверить код водителя (QR)")
+    if verify.count():
+        verify.first.click()
+        time.sleep(0.8)
+        page.fill('[placeholder="UUID кода передачи"]', code)
+        page.get_by_role("button", name="Проверить код").click()
+        time.sleep(1.0)
+        shot(page, "buyer-09-qr-verified")
+    else:
+        log("⚠ сверка недоступна (рейс не in_transit?)")
+    ctx.close()
+
+
+def seeded_dropoff_code():
+    """Код передачи сид-доставки Анны (assigned, линия 6) из БД стенда."""
+    import subprocess
+    out = subprocess.run(
+        ["/tmp/pg/usr/lib/postgresql/17/bin/psql", "-h", "127.0.0.1", "-U", "agromoll",
+         "-d", "agromoll", "-t", "-A", "-c",
+         "SELECT \"dropoffCode\" FROM delivery_requests WHERE status = 'assigned' LIMIT 1;"],
+        capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    return out or None
+
+
+def flow_buyer_verify_qr(browser):
+    """Покупатель сверяет код передачи водителя (web-версия QrScanner).
+
+    Детерминированно: сид-доставка Анны 020 (assigned) + её код из БД.
+    """
+    code = seeded_dropoff_code()
+    if not code:
+        log("ФЛОУ QR-сверка — пропущено: нет assigned-доставки в сиде")
+        return None
+    log(f"ФЛОУ 3c — Анна сверяет QR-код передачи ({code[:8]}…)")
+    ctx, page = login(browser, "+79000000020", "Покупатель")
+    page.goto(BASE + "/delivery")
+    time.sleep(3.0)
+    verify = page.get_by_role("button", name="Сверить код водителя (QR)")
+    if verify.count():
+        verify.first.click()
+        time.sleep(0.8)
+        page.fill('[placeholder="UUID кода передачи"]', code)
+        page.get_by_role("button", name="Проверить код").click()
+        time.sleep(1.2)
+        shot(page, "buyer-09-qr-verified")
+    else:
+        log("⚠ кнопка сверки не найдена у Анны")
+    ctx.close()
+    return None
+
+
+# ─── ФЛОУ 4: покупатель гасит долг ─────────────────────────────────────────
+
+
+def flow_debtor(browser):
+    log("ФЛОУ 4 — покупатель Людмила: напоминание видно, гашу долг")
+    ctx, page = login(browser, "+79000000018", "Покупатель")
+    page.goto(BASE + "/debts")
+    time.sleep(1.5)
+    page.wait_for_selector('text=Долги', timeout=15000)
+    settle = page.get_by_role("button", name="Погасить")
+    if settle.count():
+        settle.first.click()
+        time.sleep(2.0)
+        shot(page, "buyer-10-debt-settled")
+    else:
+        log("⚠ нет активных долгов к погашению")
+    ctx.close()
+    return None
+
+
+# ─── ФЛОУ 5: заблокированный водитель подаёт апелляцию 289-ФЗ ─────────────
+
+
+def flow_appeal(browser):
+    log("ФЛОУ 5 — заблокированный водитель: пауза 289-ФЗ → апелляция")
+    ctx, page = login(browser, PHONE_DRIVER_LEGACY, "Доставщик")
+    page.goto(BASE + "/hours")
+    time.sleep(1.5)
+    page.wait_for_selector('text=Часы', timeout=15000)
+    shot(page, "driver-08-hours-blocked")
+
+    appeal_btn = page.get_by_role("button", name="Оспорить блокировку")
+    if appeal_btn.count() == 0:
+        appeal_btn = page.get_by_text("Оспорить блокировку")
+    if appeal_btn.count() == 0:
+        log("⚠ блокировка не найдена (уже разблокирована?)")
+        ctx.close()
+        return None
+    appeal_btn.first.click()
+    time.sleep(1.0)
+    page.wait_for_selector('textarea, input[placeholder*="лучил" i]', timeout=10000)
+    sheet = page.locator('input[placeholder*="случилось" i]')
+    if sheet.count() == 0:
+        sheet = page.locator("textarea")
+    sheet.first.fill("Смены задвоены в журнале: в эти субботы я работал на линии 9, есть записи")
+    shot(page, "driver-09-appeal-form")
+    page.get_by_role("button", name="Отправить в арбитраж").last.click()
+    time.sleep(2.5)
+    shot(page, "driver-10-appeal-submitted")
+    ctx.close()
+    return None
+
+
+# ─── ФЛОУ 6: арбитр — спор + апелляция ─────────────────────────────────────
+
+
+def flow_arbit(browser):
+    log("ФЛОУ 6 — арбитр: очередь споров, решение, апелляция 289-ФЗ")
+    ctx, page = login(browser, PHONE_ARBITRATOR, role_hint="Арбитраж рынка")
+    page.wait_for_selector('text=Апелляции 289-ФЗ', timeout=15000)
+    time.sleep(1.5)
+    shot(page, "arbitrator-01-queue-disputes")
+
+    # Спор under_review (из сида): карточка в очереди → кейс → решение
+    case = page.get_by_text("недогруз", exact=False)
+    if case.count():
+        case.first.click()
+        time.sleep(1.5)
+        shot(page, "arbitrator-02-dispute-chat")
+        favor = page.get_by_role("button", name="Прав покупатель")
+        if favor.count():
+            favor.first.click()
+            time.sleep(0.8)
+            # под-выбор последствий для брони (первый вариант — отмена брони)
+            outcome = page.get_by_role("button", name="Отменить бронь", exact=False)
+            if outcome.count():
+                outcome.first.click()
+                time.sleep(0.5)
+            page.get_by_role("button", name="Вынести решение").last.click()
+            time.sleep(2.5)
+            shot(page, "arbitrator-03-dispute-resolved")
+        else:
+            log("⚠ кнопка «Прав покупатель» не найдена (спор уже решён?)")
+    else:
+        log("⚠ спор under_review не найден (решён ранее?)")
+
+    # Вкладка «Апелляции 289-ФЗ»: сначала вернуться из кейса в очередь
+    back = page.get_by_role("button", name="К очереди")
+    if back.count():
+        back.first.click()
+        time.sleep(1.2)
+    else:
+        page.goto(BASE + "/arbitration")
+        time.sleep(1.8)
+    page.get_by_role("button", name="Апелляции 289-ФЗ").first.click()
+    time.sleep(1.8)
+    shot(page, "arbitrator-04-appeals-queue")
+    # карточка апелляции из ФЛОУ 5 — пара с ФХ «Донская долина» (легаси)
+    appeal_card = page.get_by_text("Донская долина", exact=False)
+    if appeal_card.count():
+        appeal_card.first.click()
+        time.sleep(1.5)
+        take = page.get_by_role("button", name="Взять в работу")
+        if take.count():
+            take.first.click()
+            time.sleep(2.0)
+            shot(page, "arbitrator-05-appeal-taken")
+        unblock = page.get_by_role("button", name="Снять блокировку")
+        if unblock.count():
+            unblock.first.click()
+            time.sleep(0.8)
+            page.get_by_role("button", name="Вынести решение").last.click()
+            time.sleep(2.5)
+            shot(page, "arbitrator-06-appeal-unblocked")
+        else:
+            log("⚠ «Снять блокировку» не найдена")
+    else:
+        log("⚠ апелляция из ФЛОУ 5 не найдена в очереди")
+    ctx.close()
+    return None
+
+
+# ─── ФЛОУ 7: видео цикла покупателя (опционально) ──────────────────────────
+
+
+def flow_video(browser):
+    log("ФЛОУ 7 — видео: полный цикл покупателя (30–60 с)")
+    ctx, page = login(browser, PHONE_BUYER, "Покупатель", record_video=True)
+    page.wait_for_selector('[data-testid="listings-grid"]', timeout=20000)
+    page.wait_for_selector('text=Помидоры розовые', timeout=20000)
+    time.sleep(1.5)
+    page.get_by_text("Помидоры розовые", exact=True).first.click()
+    page.wait_for_selector('text=Забронировать', timeout=15000)
+    time.sleep(1.5)
+    page.get_by_role("button", name="Забронировать").click()
+    time.sleep(2.0)
+    page.goto(BASE + "/bookings")
+    time.sleep(2.0)
+    confirm_card = page.get_by_text("Подтвердить получение")
+    if confirm_card.count():
+        confirm_card.first.click()
+        time.sleep(1.0)
+        page.get_by_role("button", name="Подтвердить получение").last.click()
+        time.sleep(2.0)
+    page.goto(BASE + "/debts")
+    time.sleep(2.5)
+    video = page.video
+    ctx.close()
+    if video:
+        out = SHOTS / "buyer-flow-video.webm"
+        video.save_as(str(out))
+        print(f"  🎥 {out}")
+    return None
+
+
+def flow_dark(browser):
+    """Тёмная тема: ключевые экраны (лента покупателя, витрина продавца)."""
+    log("ФЛОУ 8 — тёмная тема: лента и витрина")
+    ctx, page = login(browser, "+79000000017", "Покупатель", dark=True)
+    # приложение уважает системную тему; если нет — жмём переключатель
+    # (Playwright-клик по анимируемому хедеру флотает — JS-клик надёжен)
+    toggle = page.locator('[aria-label="Переключить тему"]')
+    if toggle.count():
+        try:
+            toggle.first.click(timeout=4000)
+        except Exception:
+            p_js = page.evaluate(
+                "document.querySelector('[aria-label=\"Переключить тему\"]') && document.querySelector('[aria-label=\"Переключить тему\"]').click()"
+            )
+            del p_js
+        time.sleep(1.0)
+    page.wait_for_selector('[data-testid="listings-grid"]', timeout=20000)
+    time.sleep(1.5)
+    shot(page, "dark-buyer-feed", dark=True)
+    ctx.close()
+
+    ctx, page = login(browser, "+79000000006", "Продавец", dark=True)
+    toggle = page.locator('[aria-label="Переключить тему"]')
+    if toggle.count():
+        try:
+            toggle.first.click(timeout=4000)
+        except Exception:
+            page.evaluate(
+                "document.querySelector('[aria-label=\"Переключить тему\"]') && document.querySelector('[aria-label=\"Переключить тему\"]').click()"
+            )
+        time.sleep(1.0)
+    page.wait_for_selector('text=Витрина', timeout=15000)
+    time.sleep(1.2)
+    shot(page, "dark-seller-showcase", dark=True)
+    ctx.close()
+    return None
+
+
+FLOWS = {
+    "buyer": flow_buyer,
+    "seller": flow_seller,
+    "driver": flow_driver,
+    "qr": flow_buyer_verify_qr,
+    "debtor": flow_debtor,
+    "appeal": flow_appeal,
+    "arbit": flow_arbit,
+    "video": flow_video,
+    "dark": flow_dark,
+}
+
+
+def run(selected):
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            if selected == "all":
+                # порядок важен: покупатель бронирует → продавец подтверждает;
+                # водитель доставляет → покупатель сверяет; апелляция → арбитр
+                for name in ["buyer", "seller", "driver", "qr", "debtor", "appeal", "arbit", "dark", "video"]:
+                    log(f"=== {name.upper()} ===")
+                    FLOWS[name](browser)
+            else:
+                FLOWS[selected](browser)
+        finally:
+            browser.close()
+
+
+if __name__ == "__main__":
+    selected = sys.argv[1] if len(sys.argv) > 1 else "buyer"
+    run(selected)
+    print("DONE")

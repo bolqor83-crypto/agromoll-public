@@ -271,6 +271,36 @@ describe('api-клиент (axios + JWT)', () => {
     expect((error as ApiError).code).toBe('INVALID_RESPONSE');
   });
 
+  it('v0.8.0-F: ПУСТОЕ тело /work-hours/open-session → null (нет смены), не ошибка формата', async () => {
+    // Express-адаптер Nest сериализует null-ответ контроллера в пустое
+    // тело (res.send(null) → ''); axios парсит его как ''. Это норма,
+    // а не INVALID_RESPONSE — регрессия web-стенда v0.8.0-F.
+    adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
+      respond(200, '' as unknown as null, config),
+    );
+
+    await expect(api.workHoursOpenSession()).resolves.toBeNull();
+  });
+
+  it('v0.8.0-F: json-null /work-hours/open-session → null', async () => {
+    adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
+      respond(200, null, config),
+    );
+
+    await expect(api.workHoursOpenSession()).resolves.toBeNull();
+  });
+
+  it('v0.8.0-F: мусор вместо /work-hours/open-session → INVALID_RESPONSE', async () => {
+    adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
+      respond(200, { oops: true }, config),
+    );
+
+    const error = await api.workHoursOpenSession().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe('INVALID_RESPONSE');
+  });
+
   it('валидный ответ проходит zod-валидацию без изменений', async () => {
     adapterMock.mockImplementationOnce((config: InternalAxiosRequestConfig) =>
       respond(

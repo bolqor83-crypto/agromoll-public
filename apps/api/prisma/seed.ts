@@ -8,8 +8,8 @@
  * не обязателен, ADR-038), брони во всех статусах, долги, споры,
  * блокировку 289-ФЗ с апелляцией и доставки.
  *
- * Вход на проде: AUTH_DEMO_LOGIN=true → код «0000» для любого телефона
- * (v0.8.0-C); в dev — всегда «0000» (ADR-007). Список аккаунтов — docs/DEMO.md.
+ * Вход на проде: AUTH_DEMO_LOGIN=true → код «000000» для любого телефона
+ * (v0.8.0-C); в dev — всегда «000000» (ADR-007). Список аккаунтов — docs/DEMO.md.
  *
  * Запуск: pnpm --filter @agromoll/api db:seed
  * Идемпотентен: пользователи — upsert по phone; лоты/брони/долги/споры/
@@ -252,6 +252,23 @@ async function main(): Promise<void> {
       status === 'requested' ? null : new Date(createdAt.getTime() + minutes(25));
     const deliveryConfirmedAt =
       status === 'completed' ? new Date(createdAt.getTime() + hours(3)) : null;
+    // v0.8.0-F (баг стенда): активные брони ДЕРЖАТ резерв листинга —
+    // requested/confirmed/disputed резервируют товар, completed —
+    // списан навсегда (quantityAvailable уже уменьшен). Без инкремента
+    // quantityReserved TTL-крон не мог погасить просроченную requested-
+    // бронь (releaseReservation: WHERE quantityReserved >= qty → 409).
+    if (status !== 'completed') {
+      await prisma.listing.update({
+        where: { id: listing.id },
+        data: { quantityReserved: { increment: quantity } },
+      });
+    } else {
+      // Завершённая сделка: товар давно ушёл со склада продавца.
+      await prisma.listing.update({
+        where: { id: listing.id },
+        data: { quantityAvailable: { decrement: quantity } },
+      });
+    }
     const row = await prisma.booking.create({
       data: {
         listingId: listing.id,
@@ -490,6 +507,24 @@ async function main(): Promise<void> {
       },
     });
   }
+  // v0.8.0-F: месячный итог пары — иначе блокировка НЕ ВИДНА в «Часах»
+  // (/work-hours/me строится по monthlyPairTotal; 61 ч > лимита 60 ч).
+  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  if (
+    (await prisma.monthlyPairTotal.count({
+      where: { driverId: drivers[0]!.id, sellerId: sellers[4]!.id, month: currentMonth },
+    })) === 0
+  ) {
+    await prisma.monthlyPairTotal.create({
+      data: {
+        driverId: drivers[0]!.id,
+        sellerId: sellers[4]!.id,
+        month: currentMonth,
+        totalMinutes: 3660, // 61 ч — переработка, блокировка обоснована
+        monthCounted: true,
+      },
+    });
+  }
   const appealReason = 'Фактические смены были по 40–45 часов, в учёте ошибка: две смены задвоены';
   if ((await prisma.appealCase.count({ where: { reason: appealReason } })) === 0) {
     const appeal = await prisma.appealCase.create({
@@ -551,8 +586,11 @@ async function main(): Promise<void> {
     ageHours: number,
     driverIdx?: number,
   ): Promise<void> => {
+    // v0.8.0-F: TTL-крон гасит открытые доставки (open → expired через
+    // DELIVERY_TTL_MINUTES) — повторный прогон сида должен ВОЗРОЖДАТЬ
+    // демо-доставку, поэтому гейт только по АКТИВНЫМ статусам.
     const existing = await prisma.deliveryRequest.findFirst({
-      where: { description },
+      where: { description, status: { in: ['open', 'assigned', 'in_transit'] } },
       select: { id: true },
     });
     if (existing) {
@@ -766,7 +804,7 @@ async function main(): Promise<void> {
   console.log(`  лотов: +${createdListings}, фото: +${createdPhotos}`);
   console.log('Всего в БД:', JSON.stringify(counts));
   console.log(`  демо-вход: покупатель ${BUYERS[0]!.phone}, продавец ${SELLERS[0]!.phone},`);
-  console.log(`  водитель ${DRIVERS[0]!.phone}, арбитр ${ARBITRATOR.phone} — код «0000» (см. docs/DEMO.md)`);
+  console.log(`  водитель ${DRIVERS[0]!.phone}, арбитр ${ARBITRATOR.phone} — код «000000» (см. docs/DEMO.md)`);
 }
 
 main()
