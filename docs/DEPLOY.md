@@ -1,27 +1,27 @@
-# DEPLOY.md — план деплоя публичного API
+# DEPLOY.md — деплой публичного API
 
-> Статус: v0.6.1 (ADR-022). Сейчас **web-версия на Vercel работает без
-> сервера** и показывает экран «Сервер не настроен» — это честное
-> состояние, пока API не опубликован. Документ описывает, как его
-> опубликовать.
+> Статус: v0.8.0 (ADR-040). Платформа выбрана: **Railway** (managed
+> Postgres + PostGIS, Redis, CLI-автоматизация). Точный runbook —
+> `docs/release/v0.8.0-B-railway-runbook.md`; деплой выполняется после
+> передачи `RAILWAY_TOKEN` (см. `docs/release/v0.8.0-A-env-check.md`).
 
-## Текущее состояние (вариант b — MVP)
+## Текущее состояние (v0.8.0)
 
 | Компонент | Где живёт | Статус |
 |---|---|---|
-| Web (Expo export) | Vercel, проект `agromoll-web`, https://agromoll-web.vercel.app | ✅ деплоится |
-| API (NestJS) | машина разработчика (`docker compose up` + `pnpm --filter @agromoll/api dev`) | 🔴 не публичный |
-| Postgres + PostGIS | docker-compose локально | 🔴 не публичный |
-| Redis | docker-compose локально | 🔴 не публичный |
+| Web (Expo export) | Vercel, проект `agromoll-web`, https://agromoll-web.vercel.app | ✅ автодеплой (ADR-032) |
+| API (NestJS) | Railway, проект `agromoll-api` (config-as-code `railway.json`) | 🔶 конфигурация готова, ждёт RAILWAY_TOKEN |
+| Postgres + PostGIS | Railway, плагин PostgreSQL | 🔶 вместе с API |
+| Redis | Railway, плагин Redis | 🔶 вместе с API |
 
-Почему так (быстро и безопасно, решение v0.6.1-0): публикация API —
-отдельная задача с секретами, доменами и миграциями; хотфикс прода
-не должен был на ней блокироваться. Минус очевиден: вне машины
-разработчика приложение показывает «Сервер не настроен».
+Выбор «Railway, а не Render/Vercel serverless» обоснован в ADR-040
+(кратко: долгоживущий NestJS-процесс с cron и Prisma-pool, PostGIS
+из миграции, Redis-плагин, CLI-first автоматизация).
 
 ## Что нужно, чтобы прод ожил (3 шага)
 
-1. Поднять API публично (варианты ниже).
+1. Поднять API на Railway — runbook `v0.8.0-B-railway-runbook.md`
+   (login → init → add postgres/redis → variables → up → domain).
 2. Задать адрес в Vercel: **Project `agromoll-web` → Settings →
    Environment Variables → `EXPO_PUBLIC_API_URL` = `https://<api-domain>`**
    (Environment: Production). Альтернатива — прописать значение прямо в
@@ -62,7 +62,7 @@ curl -s https://agromoll-web.vercel.app/ | grep -o 'src="[^"]*\.js"' # → пу�
 curl -s https://agromoll-web.vercel.app/<entry-чанк> | grep -c 'api-not-configured.invalid' # → 0
 ```
 
-## Вариант a-1: API в Docker на PaaS (рекомендуемый)
+## Вариант a-1: API в Docker на PaaS (выбрано в v0.8.0 — Railway, ADR-040)
 
 **Railway / Render / Fly.io** — `docker-compose.yml` репозитория уже
 описывает весь стек (postgres+postgis, redis), NestJS запускается тем же
