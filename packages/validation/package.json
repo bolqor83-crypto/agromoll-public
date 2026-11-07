@@ -1,6 +1,6 @@
 {
   "name": "@agromoll/validation",
-  "version": "0.6.2",
+  "version": "0.6.0",
   "private": true,
   "description": "Zod-схемы АгроМолл. Пока только базовая инфраструктура (см. ADR-003).",
   "main": "dist/index.js",

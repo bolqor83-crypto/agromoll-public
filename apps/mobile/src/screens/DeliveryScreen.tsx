@@ -35,6 +35,7 @@ import { api, toApiError } from '@/lib/api';
 import { errorContentFor } from '@/lib/error-content';
 import { logger } from '@/lib/logger';
 import { formatClock } from '@/lib/format';
+import { useNotificationStore } from '@/store/notifications';
 
 /** Пилюля статуса доставки. */
 function statusVariant(status: DeliveryDto['status']): 'success' | 'attention' | 'neutral' {
@@ -158,6 +159,8 @@ type DeliveryState =
 
 export default function BuyerDeliveryScreen() {
   const [state, setState] = useState<DeliveryState>({ phase: 'loading' });
+  // v0.6.0-A (ADR-031): push-сигнал — экран перечитывает данные.
+  const pushVersion = useNotificationStore((s) => s.version);
   const [refreshing, setRefreshing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -178,7 +181,7 @@ export default function BuyerDeliveryScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, pushVersion]);
 
   // Тексты ошибок — из единого маппинга (ADR-026).
   const stale =

@@ -20,6 +20,7 @@ import { listenForcedSignOut, useAuthStore } from '@/store/auth';
 import { initOutboxBridge } from '@/store/outbox';
 import { ApiNotConfiguredScreen } from '@/components/ApiNotConfiguredScreen';
 import { ConflictDialog } from '@/components/ConflictDialog';
+import { NotificationCenter } from '@/components/NotificationCenter';
 
 /**
  * v0.6.1-B: защита от дубля «приложение запущено» — React 18 в dev
@@ -59,6 +60,9 @@ function AppShell() {
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
       {/* Конфликт outbox ↔ сервер: решает человек, не молча (ADR-006) */}
       <ConflictDialog />
+      {/* Push-уведомления (v0.6.0-A, ADR-031): регистрация канала,
+          поллинг in-app, тосты + deep link. Только после входа. */}
+      {status === 'authenticated' ? <NotificationCenter /> : null}
     </>
   );
 }

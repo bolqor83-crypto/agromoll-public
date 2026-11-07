@@ -15,6 +15,8 @@ export interface BookingCardProps {
   pendingLabel?: string;
   /** Открыть модалку приёмки (v0.4.0-C, только покупатель подтверждённой брони). */
   onConfirmDelivery?: (booking: BookingDto) => void;
+  /** Эскалация в арбитраж (v0.6.0-C, ADR-033): подтверждённая/спорная/завершённая бронь. */
+  onOpenDispute?: (booking: BookingDto) => void;
 }
 
 /**
@@ -28,7 +30,13 @@ export interface BookingCardProps {
  * v0.6.1-D (ADR-026): демо-ветки убраны — «Мои брони» не показывает
  * выдуманных данных (вариант A).
  */
-export function BookingCard({ booking, counterOffer, pendingLabel, onConfirmDelivery }: BookingCardProps) {
+export function BookingCard({
+  booking,
+  counterOffer,
+  pendingLabel,
+  onConfirmDelivery,
+  onOpenDispute,
+}: BookingCardProps) {
   const [busy, setBusy] = useState<'accept' | 'cancel' | null>(null);
   // v0.6.1-E2 (ADR-027): тихая галочка на ~1 с после успешного действия.
   const [flash, setFlash] = useState(false);
@@ -37,6 +45,11 @@ export function BookingCard({ booking, counterOffer, pendingLabel, onConfirmDeli
   const canAccept = booking.status === 'counter_offered';
   // Приёмка — только покупатель подтверждённой брони (ADR-012).
   const canConfirmDelivery = booking.status === 'confirmed';
+  // Спор (v0.6.0-C, ADR-033): бронь подтверждена/спорна/завершена — есть что оспаривать.
+  const canDispute =
+    booking.status === 'confirmed' ||
+    booking.status === 'disputed' ||
+    booking.status === 'completed';
 
   const run = async (action: 'accept' | 'cancel'): Promise<void> => {
     setBusy(action);
@@ -146,6 +159,15 @@ export function BookingCard({ booking, counterOffer, pendingLabel, onConfirmDeli
       {/* Приёмка (v0.4.0-C, ADR-012): confirmed → completed/disputed. */}
       {canConfirmDelivery ? (
         <Button title="Подтвердить получение" onPress={() => onConfirmDelivery?.(booking)} />
+      ) : null}
+
+      {/* Эскалация в арбитраж (v0.6.0-C, ADR-033). */}
+      {canDispute && onOpenDispute ? (
+        <Button
+          title={booking.status === 'disputed' ? 'Продолжить спор в арбитраже' : 'Открыть спор'}
+          variant="ghost"
+          onPress={() => onOpenDispute(booking)}
+        />
       ) : null}
     </Card>
   );

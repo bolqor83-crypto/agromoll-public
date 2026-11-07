@@ -62,7 +62,17 @@ export type IdempotentOperationType =
   | 'assign_delivery'
   | 'start_delivery'
   | 'deliver_delivery'
-  | 'cancel_delivery';
+  | 'cancel_delivery'
+  // v0.6.0-C (ADR-033): арбитраж споров.
+  | 'open_dispute'
+  | 'dispute_message'
+  | 'dispute_evidence'
+  | 'assign_dispute'
+  | 'resolve_dispute'
+  // v0.6.0-E (ADR-035): апелляции на блокировки 289-ФЗ.
+  | 'open_appeal'
+  | 'assign_appeal'
+  | 'resolve_appeal';
 
 /** Пометить POST-эндпоинт идемпотентным. */
 export const Idempotent = (operationType: IdempotentOperationType): MethodDecorator =>

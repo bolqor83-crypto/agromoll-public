@@ -37,12 +37,16 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { BookingEvent, DebtEvent } from '@prisma/client';
 import type { MyReputationDto, ReputationDto, ReputationEventDto } from '@agromoll/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { REPUTATION_PUSH_THRESHOLD } from '../notifications/notifications.constants';
 import {
   RATING_MAX_PAIR_DEALS,
   RATING_MIN_DEALS,
   RATING_MIN_DEALS_REASON,
   RATING_PAIR_CAP_WEIGHT,
   RATING_PAIR_WINDOW_DAYS,
+  RATING_WEIGHT_ARBITRATION_COMPROMISE,
+  RATING_WEIGHT_ARBITRATION_LOSS,
   RATING_WEIGHT_AUTO,
   RATING_WEIGHT_DISPUTE,
   RATING_WEIGHT_MINOR,
@@ -71,6 +75,39 @@ interface WeightedEvent {
   createdAt: Date;
 }
 
+/** Закрытый кейс арбитража для расчёта штрафа (v0.6.0-C, ADR-033). */
+export interface ArbitrationCaseView {
+  resolution: 'favor_buyer' | 'favor_seller' | 'compromise' | 'no_fault' | null;
+  firstPartyId: string;
+  secondPartyId: string;
+  resolvedAt: Date | null;
+}
+
+/** Штраф арбитража для конкретного пользователя (0 — не затронут). */
+export function arbitrationPenalty(
+  userId: string,
+  arbitrationCase: ArbitrationCaseView,
+  weightLoss: number,
+  weightCompromise: number,
+): number {
+  const { resolution } = arbitrationCase;
+  if (resolution === 'favor_buyer') {
+    return arbitrationCase.secondPartyId === userId ? weightLoss : 0;
+  }
+  if (resolution === 'favor_seller') {
+    return arbitrationCase.firstPartyId === userId ? weightLoss : 0;
+  }
+  if (resolution === 'compromise') {
+    return (
+      arbitrationCase.firstPartyId === userId || arbitrationCase.secondPartyId === userId
+        ? weightCompromise
+        : 0
+    );
+  }
+  // no_fault / dismissed — вины нет, штрафа нет.
+  return 0;
+}
+
 /** Число учитываемых событий журнала в ответе /reputation/me. */
 const MY_EVENTS_TAKE = 20;
 
@@ -85,6 +122,7 @@ export class ReputationService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
     @Inject(RATING_MIN_DEALS) private readonly minDeals: number,
     @Inject(RATING_MAX_PAIR_DEALS) private readonly maxPairDeals: number,
     @Inject(RATING_PAIR_WINDOW_DAYS) private readonly pairWindowDays: number,
@@ -93,6 +131,9 @@ export class ReputationService {
     @Inject(RATING_WEIGHT_AUTO) private readonly weightAuto: number,
     @Inject(RATING_WEIGHT_DISPUTE) private readonly weightDispute: number,
     @Inject(RATING_PAIR_CAP_WEIGHT) private readonly pairCapWeight: number,
+    @Inject(RATING_WEIGHT_ARBITRATION_LOSS) private readonly weightArbitrationLoss: number,
+    @Inject(RATING_WEIGHT_ARBITRATION_COMPROMISE)
+    private readonly weightArbitrationCompromise: number,
   ) {}
 
   // ─── Вычисление из журналов (чистая функция над загруженными событиями) ──
@@ -102,7 +143,7 @@ export class ReputationService {
    * Не пишет в БД — используется и для снимка, и для чтения «на лету».
    */
   async computeForUser(userId: string): Promise<RatingComputation> {
-    const [bookingEvents, debtEvents] = await Promise.all([
+    const [bookingEvents, debtEvents, arbitrationCases] = await Promise.all([
       this.prisma.bookingEvent.findMany({
         where: {
           action: { in: ['delivery_confirmed', 'delivery_disputed', 'system_auto_confirmed'] },
@@ -118,9 +159,19 @@ export class ReputationService {
         },
         orderBy: { createdAt: 'asc' },
       }),
+      // Решения арбитража против пользователя (v0.6.0-C, ADR-033).
+      this.prisma.disputeCase.findMany({
+        where: {
+          status: 'resolved',
+          resolution: { in: ['favor_buyer', 'favor_seller', 'compromise'] },
+          OR: [{ firstPartyId: userId }, { secondPartyId: userId }],
+        },
+        select: { resolution: true, firstPartyId: true, secondPartyId: true, resolvedAt: true },
+        orderBy: { resolvedAt: 'asc' },
+      }),
     ]);
 
-    return this.computeFromEvents(userId, bookingEvents, debtEvents);
+    return this.computeFromEvents(userId, bookingEvents, debtEvents, arbitrationCases);
   }
 
   /** Чистое вычисление по загруженным событиям — ядро, тестируется unit-ами. */
@@ -130,6 +181,7 @@ export class ReputationService {
       BookingEvent & { booking: { buyerId: string; listing: { sellerId: string } } }
     >,
     debtEvents: Array<Pick<DebtEvent, 'debtId' | 'action'>>,
+    arbitrationCases: Array<ArbitrationCaseView> = [],
   ): RatingComputation {
     const weighted: WeightedEvent[] = [];
 
@@ -168,7 +220,11 @@ export class ReputationService {
       // delivery_confirmed: продавцу — вес по качеству поставки,
       // покупателю — полный вес (сделку довёл до конца, подтвердил).
       weighted.push({
-        positive: isSeller ? (flag === 'minor_issue' ? this.weightMinor : this.weightOk) : this.weightOk,
+        positive: isSeller
+          ? flag === 'minor_issue'
+            ? this.weightMinor
+            : this.weightOk
+          : this.weightOk,
         negative: 0,
         kind: 'deal',
         pairKey,
@@ -232,6 +288,22 @@ export class ReputationService {
       // resolve_confirmed — нейтрально: спор снят согласием сторон.
     }
 
+    // Решения арбитража (v0.6.0-C, ADR-033): штраф виновному. Кейс —
+    // одна единица данных в знаменателе, как и другие события спора.
+    for (const arbitrationCase of arbitrationCases) {
+      const penalty = arbitrationPenalty(
+        userId,
+        arbitrationCase,
+        this.weightArbitrationLoss,
+        this.weightArbitrationCompromise,
+      );
+      if (penalty > 0) {
+        negative += penalty;
+        total += 1;
+        disputesCount += 1;
+      }
+    }
+
     const score =
       total < this.minDeals
         ? null
@@ -245,6 +317,12 @@ export class ReputationService {
   /** Пересчитать и сохранить снимок (атомарный upsert, отдельная транзакция). */
   async recalculate(userId: string): Promise<RatingComputation> {
     const computed = await this.computeForUser(userId);
+    // Порог для мягкого уведомления (ADR-031): пересечение 3.0 сверху вниз.
+    // Сравниваем ДО upsert — прошлый снимок ещё в БД.
+    const previous = await this.prisma.reputationSnapshot.findUnique({
+      where: { userId },
+      select: { score: true },
+    });
     await this.prisma.reputationSnapshot.upsert({
       where: { userId },
       create: {
@@ -263,6 +341,25 @@ export class ReputationService {
         lastCalculatedAt: new Date(),
       },
     });
+
+    // Мягкое «Обратите внимание на качество» — только при ПЕРЕСЕЧЕНИИ
+    // порога (было ≥ 3.0, стало < 3.0): дальнейшие падения молчат,
+    // повторные уведомления — спам (ADR-031).
+    const previousScore = previous?.score ?? null;
+    if (
+      computed.score !== null &&
+      computed.score < REPUTATION_PUSH_THRESHOLD &&
+      previousScore !== null &&
+      previousScore >= REPUTATION_PUSH_THRESHOLD
+    ) {
+      await this.notifications.send({
+        userId,
+        type: 'reputation_score_dropped',
+        title: 'Рейтинг снизился',
+        body: `Ваш рейтинг опустился ниже ${REPUTATION_PUSH_THRESHOLD.toFixed(1)}. Обратите внимание на качество сделок — как его поднять, смотрите в «Моём рейтинге».`,
+        data: {},
+      });
+    }
     return computed;
   }
 
@@ -304,7 +401,12 @@ export class ReputationService {
       } else if (last.action === 'system_auto_confirmed') {
         for (const userId of [sellerId, buyerId]) {
           await this.prisma.reputationEvent.create({
-            data: { userId, action: 'auto_confirmed', delta: this.weightAuto, reason: 'auto_confirm' },
+            data: {
+              userId,
+              action: 'auto_confirmed',
+              delta: this.weightAuto,
+              reason: 'auto_confirm',
+            },
           });
         }
       } else if (last.action === 'delivery_confirmed') {
@@ -317,7 +419,12 @@ export class ReputationService {
           },
         });
         await this.prisma.reputationEvent.create({
-          data: { userId: buyerId, action: 'deal_confirmed', delta: this.weightOk, reason: 'buyer_accepted' },
+          data: {
+            userId: buyerId,
+            action: 'deal_confirmed',
+            delta: this.weightOk,
+            reason: 'buyer_accepted',
+          },
         });
       }
 
@@ -367,7 +474,12 @@ export class ReputationService {
 
       if (last.action === 'settled') {
         await this.prisma.reputationEvent.create({
-          data: { userId: debt.debtorId, action: 'deal_confirmed', delta: this.weightOk, reason: 'debt_settled' },
+          data: {
+            userId: debt.debtorId,
+            action: 'deal_confirmed',
+            delta: this.weightOk,
+            reason: 'debt_settled',
+          },
         });
       } else if (last.action === 'disputed') {
         await this.prisma.reputationEvent.create({
@@ -380,7 +492,12 @@ export class ReputationService {
         });
       } else if (last.action === 'resolve_confirmed') {
         await this.prisma.reputationEvent.create({
-          data: { userId: debt.debtorId, action: 'dispute_resolved', delta: 0, reason: 'debt_resolved_mutually' },
+          data: {
+            userId: debt.debtorId,
+            action: 'dispute_resolved',
+            delta: 0,
+            reason: 'debt_resolved_mutually',
+          },
         });
       }
 
@@ -389,6 +506,43 @@ export class ReputationService {
       this.logger.error(
         { debtId, err: error },
         'reputation: пересчёт после события долга не удался (долг не затронут)',
+      );
+    }
+  }
+
+  /**
+   * Кейс арбитража закрыт (v0.6.0-C, ADR-033): записать штрафы в журнал
+   * рейтинга и пересчитать снимки сторон. Вызывается DisputesService
+   * ПОСЛЕ транзакции решения; НЕ бросает — сбой пересчёта не откатывает
+   * решение арбитра (счёт догонит следующий триггер, штрафы считаются
+   * из закрытых кейсов идемпотентно).
+   */
+  async safeOnDisputeResolved(arbitrationCase: ArbitrationCaseView & { id: string }): Promise<void> {
+    const affected = [arbitrationCase.firstPartyId, arbitrationCase.secondPartyId];
+    try {
+      for (const userId of affected) {
+        const penalty = arbitrationPenalty(
+          userId,
+          arbitrationCase,
+          this.weightArbitrationLoss,
+          this.weightArbitrationCompromise,
+        );
+        if (penalty > 0) {
+          await this.prisma.reputationEvent.create({
+            data: {
+              userId,
+              action: 'penalty_applied',
+              delta: -penalty,
+              reason: `arbitration:${arbitrationCase.resolution}`,
+            },
+          });
+        }
+        await this.recalculate(userId);
+      }
+    } catch (error) {
+      this.logger.error(
+        { disputeId: arbitrationCase.id, err: error },
+        'reputation: пересчёт после решения арбитража не удался (решение не затронуто)',
       );
     }
   }
@@ -471,7 +625,8 @@ export class ReputationService {
 /** Prisma-строка журнала → DTO. */
 export function toReputationEventDto(event: {
   id: string;
-  action: 'deal_confirmed' | 'dispute_opened' | 'dispute_resolved' | 'auto_confirmed' | 'penalty_applied';
+  action:
+    'deal_confirmed' | 'dispute_opened' | 'dispute_resolved' | 'auto_confirmed' | 'penalty_applied';
   delta: number;
   reason: string | null;
   createdAt: Date;

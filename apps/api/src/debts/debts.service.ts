@@ -58,6 +58,7 @@ import { DEBT_OVERDUE_DAYS } from './debts.constants';
 import { DEBT_REMINDER_COOLDOWN_HOURS } from './debts.constants';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { DisputesService } from '../disputes/disputes.service';
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -132,6 +133,7 @@ export class DebtsService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly reputation: ReputationService,
+    private readonly disputes: DisputesService,
     @Inject(DEBT_REMINDER_COOLDOWN_HOURS) private readonly defaultCooldownHours: number,
   ) {}
 
@@ -333,6 +335,8 @@ export class DebtsService {
       const current = await loadDebtForUpdate(tx, debtId);
       assertIsParty(current, actorId, 'Погасить долг может только кредитор или дебитор');
       assertStatus(current, ['active'], 'settle');
+      // Арбитраж замораживает спорный долг (ADR-033).
+      await this.disputes.assertNoActiveDispute('debt', debtId, tx);
 
       const updated = await tx.debt.update({
         where: { id: debtId },
@@ -369,6 +373,8 @@ export class DebtsService {
       const current = await loadDebtForUpdate(tx, debtId);
       assertIsParty(current, actorId, 'Открыть спор может только кредитор или дебитор');
       assertStatus(current, ['active'], 'dispute');
+      // Арбитраж замораживает спорный долг (ADR-033).
+      await this.disputes.assertNoActiveDispute('debt', debtId, tx);
 
       const updated = await tx.debt.update({
         where: { id: debtId },
@@ -415,6 +421,8 @@ export class DebtsService {
       const current = await loadDebtForUpdate(tx, debtId);
       assertIsParty(current, actorId, 'Разрешить спор может только кредитор или дебитор');
       assertStatus(current, ['disputed'], 'resolve');
+      // Арбитраж замораживает спорный долг (ADR-033).
+      await this.disputes.assertNoActiveDispute('debt', debtId, tx);
 
       if (current.resolveRequestedBy === null) {
         // Первое подтверждение: ждём вторую сторону.
@@ -497,6 +505,8 @@ export class DebtsService {
         throw new ForbiddenException('Напомнить может только кредитор');
       }
       assertStatus(current, ['active'], 'reminder');
+      // Арбитраж замораживает спорный долг (ADR-033).
+      await this.disputes.assertNoActiveDispute('debt', debtId, tx);
 
       const last = await tx.debtEvent.findFirst({
         where: { debtId, action: 'reminder_sent' },

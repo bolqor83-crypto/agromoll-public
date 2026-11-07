@@ -43,22 +43,36 @@ function makeSession(overrides: Partial<WorkSession> = {}): WorkSession & {
     driver: { id: DRIVER, displayName: 'Газель Next' },
     seller: { id: SELLER, displayName: 'ФХ «Донская долина»' },
     ...overrides,
-  } as WorkSession & { driver: { id: string; displayName: string }; seller: { id: string; displayName: string } };
+  } as WorkSession & {
+    driver: { id: string; displayName: string };
+    seller: { id: string; displayName: string };
+  };
 }
 
 /** Мок PrismaService: $transaction прокидывает в tx. */
 function createPrismaMock() {
   const tx = {
     user: { findUnique: jest.fn() },
-    workSession: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-    blockedPair: { findUnique: jest.fn() },
+    workSession: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    blockedPair: { findFirst: jest.fn() },
     monthlyPairTotal: { findUnique: jest.fn(), upsert: jest.fn() },
   };
   const prismaMock = {
     user: { findUnique: jest.fn() },
     workSession: { findFirst: jest.fn() },
     monthlyPairTotal: { findMany: jest.fn(), findUnique: jest.fn(), upsert: jest.fn() },
-    blockedPair: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
+    blockedPair: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    appealCase: { findMany: jest.fn() },
     $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
   };
   return {
@@ -87,7 +101,7 @@ describe('WorkHoursService (unit)', () => {
     it('создаёт открытую сессию с месяцем старта', async () => {
       const { prisma, tx } = createPrismaMock();
       tx.user.findUnique.mockResolvedValue({ id: SELLER, displayName: 'Продавец' });
-      tx.blockedPair.findUnique.mockResolvedValue(null);
+      tx.blockedPair.findFirst.mockResolvedValue(null);
       tx.workSession.findFirst.mockResolvedValue(null);
       tx.workSession.create.mockImplementation(async ({ data }) => makeSession({ ...data }));
 
@@ -107,15 +121,13 @@ describe('WorkHoursService (unit)', () => {
       );
 
       tx.user.findUnique.mockResolvedValue(null);
-      await expect(service.startSession(DRIVER, 'ghost')).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(service.startSession(DRIVER, 'ghost')).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('заблокированная пара → 409 WORK_PAIR_BLOCKED с мягким сообщением', async () => {
       const { prisma, tx } = createPrismaMock();
       tx.user.findUnique.mockResolvedValue({ id: SELLER });
-      tx.blockedPair.findUnique.mockResolvedValue({
+      tx.blockedPair.findFirst.mockResolvedValue({
         driverId: DRIVER,
         sellerId: SELLER,
         reason: 'пауза',
@@ -136,13 +148,11 @@ describe('WorkHoursService (unit)', () => {
     it('вторая открытая смена → 409', async () => {
       const { prisma, tx } = createPrismaMock();
       tx.user.findUnique.mockResolvedValue({ id: SELLER });
-      tx.blockedPair.findUnique.mockResolvedValue(null);
+      tx.blockedPair.findFirst.mockResolvedValue(null);
       tx.workSession.findFirst.mockResolvedValue(makeSession({ id: 'open' }));
 
       const service = await createService(prisma);
-      await expect(service.startSession(DRIVER, SELLER)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(service.startSession(DRIVER, SELLER)).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -180,8 +190,12 @@ describe('WorkHoursService (unit)', () => {
 
     it('переход через 60 ч → monthCounted=true', async () => {
       const { prisma, tx } = createPrismaMock();
-      tx.workSession.findUnique.mockResolvedValue(makeSession({ startedAt: new Date(Date.now() - 60 * 60_000) }));
-      tx.workSession.update.mockImplementation(async ({ data }) => makeSession({ ...data, endedAt: new Date() }));
+      tx.workSession.findUnique.mockResolvedValue(
+        makeSession({ startedAt: new Date(Date.now() - 60 * 60_000) }),
+      );
+      tx.workSession.update.mockImplementation(async ({ data }) =>
+        makeSession({ ...data, endedAt: new Date() }),
+      );
       tx.monthlyPairTotal.findUnique.mockResolvedValue({
         totalMinutes: 59 * 60,
         monthCounted: false,
@@ -234,7 +248,8 @@ describe('WorkHoursService (unit)', () => {
             month: addMonths(MONTH, -back),
           })),
         ); // 6 месяцев counted (текущий + 5 назад)
-      prismaMock.blockedPair.findUnique.mockResolvedValue(null);
+      // Ни активной, ни снятой блокировки — создаём новую строку.
+      prismaMock.blockedPair.findFirst.mockResolvedValue(null);
       prismaMock.blockedPair.create.mockResolvedValue({});
 
       const service = await createService(prisma);
@@ -258,7 +273,7 @@ describe('WorkHoursService (unit)', () => {
           // месяц -2 пропущен (<60 ч) — серия разорвана
           { month: addMonths(MONTH, -3) },
         ]);
-      prismaMock.blockedPair.findUnique.mockResolvedValue(null);
+      prismaMock.blockedPair.findFirst.mockResolvedValue(null);
 
       const service = await createService(prisma);
       const created = await service.enforceSeriesLimit(MONTH);
@@ -270,15 +285,51 @@ describe('WorkHoursService (unit)', () => {
       const { prisma, prismaMock } = createPrismaMock();
       prismaMock.monthlyPairTotal.findMany
         .mockResolvedValueOnce([{ driverId: DRIVER, sellerId: SELLER }])
-        .mockResolvedValueOnce([5, 4, 3, 2, 1, 0].map((back) => ({ month: addMonths(MONTH, -back) })));
-      prismaMock.blockedPair.findUnique.mockResolvedValue({
+        .mockResolvedValueOnce(
+          [5, 4, 3, 2, 1, 0].map((back) => ({ month: addMonths(MONTH, -back) })),
+        );
+      // Активная блокировка уже есть (первый findFirst).
+      prismaMock.blockedPair.findFirst.mockResolvedValue({
+        id: 'block-1',
         driverId: DRIVER,
         sellerId: SELLER,
-      }); // уже заблокирована
+      });
 
       const service = await createService(prisma);
       const created = await service.enforceSeriesLimit(MONTH);
       expect(created).toBe(0);
+      expect(prismaMock.blockedPair.create).not.toHaveBeenCalled();
+      expect(prismaMock.blockedPair.update).not.toHaveBeenCalled();
+    });
+
+    it('снятая арбитром блокировка (ADR-035) → крон РЕВАЙВИТ ту же строку', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.monthlyPairTotal.findMany
+        .mockResolvedValueOnce([{ driverId: DRIVER, sellerId: SELLER }])
+        .mockResolvedValueOnce(
+          [5, 4, 3, 2, 1, 0].map((back) => ({ month: addMonths(MONTH, -back) })),
+        );
+      // Активной нет (первый findFirst → null), но есть снятая строка
+      // (второй findFirst → latest): ревайв, а не создание дубля.
+      prismaMock.blockedPair.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'block-1' });
+      prismaMock.blockedPair.update.mockResolvedValue({});
+
+      const service = await createService(prisma);
+      const created = await service.enforceSeriesLimit(MONTH);
+
+      expect(created).toBe(1);
+      expect(prismaMock.blockedPair.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'block-1' },
+          data: expect.objectContaining({
+            unblockedAt: null,
+            unblockedById: null,
+            unblockReason: null,
+          }),
+        }),
+      );
       expect(prismaMock.blockedPair.create).not.toHaveBeenCalled();
     });
   });

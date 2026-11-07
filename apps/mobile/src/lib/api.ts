@@ -20,23 +20,35 @@
  * чтения и auth-вызовы.
  */
 import axios from 'axios';
+import { randomUUID } from 'expo-crypto';
 import type { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import type {
+  AppealDetailDto,
+  AppealDto,
+  AppealsListDto,
   AuthResponseDto,
   BookingDto,
   CounterpartyDto,
   DebtDto,
   DebtsSummaryDto,
   DeliveryDto,
+  DisputeDetailDto,
+  DisputeDto,
+  DisputesListDto,
   GeoPointDto,
   ListingDto,
   MyReputationDto,
+  NotificationLogListDto,
   NotificationsListDto,
+  PushRegistrationDto,
   RefreshResponseDto,
   ReminderResultDto,
+  RegisterPushInput,
   ReputationDto,
+  UnregisterPushInput,
   UserDto,
   UserRole,
+  VapidPublicKeyDto,
   WorkHoursCheckDto,
   WorkHoursPairDto,
   WorkHoursSessionDto,
@@ -46,6 +58,9 @@ import { tokenStore } from './token-store';
 import { logger } from './logger';
 import { API_URL, IS_API_CONFIGURED } from './api-config';
 import {
+  AppealDetailResponseSchema,
+  AppealResponseSchema,
+  AppealsListResponseSchema,
   AuthResponseSchema,
   BookingsResponseSchema,
   CounterpartiesResponseSchema,
@@ -53,17 +68,24 @@ import {
   DebtsSummaryResponseSchema,
   DeliveriesResponseSchema,
   DeliveryResponseSchema,
+  DisputeDetailResponseSchema,
+  DisputeMessageResponseSchema,
+  DisputeResponseSchema,
+  DisputesListResponseSchema,
   GeoPointResponseSchema,
   GeoPointsResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
   MyReputationResponseSchema,
+  NotificationLogResponseSchema,
   NotificationsListResponseSchema,
+  PushRegistrationResponseSchema,
   RefreshResponseSchema,
   ReminderResponseSchema,
   ReputationResponseSchema,
   RequestCodeResponseSchema,
   UserResponseSchema,
+  VapidPublicKeyResponseSchema,
   WorkHoursCheckResponseSchema,
   WorkHoursPairsResponseSchema,
   WorkHoursSessionResponseSchema,
@@ -456,9 +478,57 @@ export const api = {
 
   /** Мои уведомления (in-app) + счётчик непрочитанных. */
   notifications(): Promise<NotificationsListDto> {
-    return apiRequest<NotificationsListDto>({ method: 'GET', url: '/notifications/me' }).then(
-      (d) => validateResponse(NotificationsListResponseSchema, d, 'notifications/me'),
+    return apiRequest<NotificationsListDto>({ method: 'GET', url: '/notifications/me' }).then((d) =>
+      validateResponse(NotificationsListResponseSchema, d, 'notifications/me'),
     );
+  },
+
+  // ─── Push-уведомления (v0.6.0-A, ADR-031) ─────────────────────
+
+  /** Зарегистрировать push-канал (FCM-токен или web-подписка, upsert). */
+  registerPush(input: RegisterPushInput): Promise<PushRegistrationDto> {
+    return apiRequest<PushRegistrationDto>({
+      method: 'POST',
+      url: '/notifications/register',
+      data: input,
+    }).then((d) => validateResponse(PushRegistrationResponseSchema, d, 'notifications/register'));
+  },
+
+  /** Снять регистрацию push-канала при logout (best-effort). */
+  async unregisterPush(input: UnregisterPushInput): Promise<void> {
+    try {
+      await apiRequest<PushRegistrationDto>({
+        method: 'DELETE',
+        url: '/notifications/unregister',
+        data: input,
+      });
+    } catch (error) {
+      // Выход не должен блокироваться сетью (как logout, ADR-008).
+      logger.warn('api', 'unregister push не удался (продолжаем выход)', {
+        error: toApiError(error).message,
+      });
+    }
+  },
+
+  /** Журнал push-доставок (отладка «не пришло»). */
+  notificationLog(): Promise<NotificationLogListDto> {
+    return apiRequest<NotificationLogListDto>({ method: 'GET', url: '/notifications/log' }).then(
+      (d) => validateResponse(NotificationLogResponseSchema, d, 'notifications/log'),
+    );
+  },
+
+  /** Публичный VAPID-ключ сервера (null — web push не настроен). */
+  async vapidPublicKey(): Promise<string | null> {
+    try {
+      const data = await apiRequest<VapidPublicKeyDto>({
+        method: 'GET',
+        url: '/notifications/vapid-public',
+      });
+      return validateResponse(VapidPublicKeyResponseSchema, data, 'notifications/vapid-public')
+        .publicKey;
+    } catch {
+      return null;
+    }
   },
 
   // ─── Публичный рейтинг (v0.5.0, ADR-013) ──────────────────────
@@ -634,7 +704,11 @@ export const api = {
     return apiRequest<WorkHoursSessionDto | null>({
       method: 'GET',
       url: '/work-hours/open-session',
-    }).then((d) => (d === null ? null : validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/open-session')));
+    }).then((d) =>
+      d === null
+        ? null
+        : validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/open-session'),
+    );
   },
 
   /** Можно ли паре работать (блокировка, часы, серия). */
@@ -662,6 +736,148 @@ export const api = {
       data: {},
     }).then((d) =>
       validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/sessions/:id/end'),
+    );
+  },
+
+  // ─── Арбитраж споров (v0.6.0-C, ADR-033) ─────────────────────
+  // Спор — онлайн-процедура: стороны договариваются через арбитра,
+  // офлайн-очередь здесь путает (риск «спор улетел из лифта»).
+  // Идемпотентность ретраев — X-Idempotency-Key (ADR-006).
+
+  /** Открыть спор по объекту (бронь/доставка/долг). Только сторона. */
+  openDispute(input: {
+    type: 'booking' | 'delivery' | 'debt';
+    referenceId: string;
+    reason: string;
+  }): Promise<DisputeDto> {
+    return apiRequest<DisputeDto>({
+      method: 'POST',
+      url: '/disputes',
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(DisputeResponseSchema, d, 'disputes (POST)'));
+  },
+
+  /** Мои споры (кейсы, где я сторона). */
+  myDisputes(): Promise<DisputesListDto> {
+    return apiRequest<DisputesListDto>({ method: 'GET', url: '/disputes' }).then((d) =>
+      validateResponse(DisputesListResponseSchema, d, 'disputes'),
+    );
+  },
+
+  /** Детали кейса: переписка + доказательства (служебные скрыты). */
+  dispute(disputeId: string): Promise<DisputeDetailDto> {
+    return apiRequest<DisputeDetailDto>({ method: 'GET', url: `/disputes/${disputeId}` }).then(
+      (d) => validateResponse(DisputeDetailResponseSchema, d, 'disputes/:id'),
+    );
+  },
+
+  /** Сообщение в кейсе (только активный). */
+  sendDisputeMessage(
+    disputeId: string,
+    body: string,
+    isInternal = false,
+  ): Promise<DisputeDetailDto['messages'][number]> {
+    return apiRequest<DisputeDetailDto['messages'][number]>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/messages`,
+      data: { body, isInternal },
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(DisputeMessageResponseSchema, d, 'disputes/:id/messages'));
+  },
+
+  /** Взять спор в работу (только арбитр): open → under_review. */
+  assignDispute(disputeId: string): Promise<DisputeDto> {
+    return apiRequest<DisputeDto>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/assign`,
+      data: {},
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(DisputeResponseSchema, d, 'disputes/:id/assign'));
+  },
+
+  /** Решение арбитра: судьба объекта + репутация сторон. */
+  resolveDispute(
+    disputeId: string,
+    input: {
+      outcome: 'favor_buyer' | 'favor_seller' | 'compromise' | 'no_fault' | 'dismiss';
+      notes?: string;
+      bookingOutcome?: 'cancel' | 'complete' | 'complete_minor';
+      debtOutcome?: 'cancel' | 'restore_active' | 'settle_adjusted';
+      adjustedAmount?: number;
+      deliveryOutcome?: 'none' | 'cancel';
+    },
+  ): Promise<DisputeDetailDto> {
+    return apiRequest<DisputeDetailDto>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/resolve`,
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(DisputeDetailResponseSchema, d, 'disputes/:id/resolve'));
+  },
+
+  /** Очередь арбитража (только арбитр): активные кейсы. */
+  disputeQueue(): Promise<DisputesListDto> {
+    return apiRequest<DisputesListDto>({ method: 'GET', url: '/disputes/queue' }).then((d) =>
+      validateResponse(DisputesListResponseSchema, d, 'disputes/queue'),
+    );
+  },
+
+  // ─── Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035) ───────
+  // Обжалование — онлайн-процедура, как и споры: арбитру нужна
+  // суть жалобы, «апелляция из лифта» без объяснений бесполезна.
+
+  /** Открыть апелляцию на активную блокировку пары. Только сторона пары. */
+  openAppeal(input: { blockedPairId: string; reason: string }): Promise<AppealDto> {
+    return apiRequest<AppealDto>({
+      method: 'POST',
+      url: '/appeals',
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(AppealResponseSchema, d, 'appeals (POST)'));
+  },
+
+  /** Мои апелляции: поданные мной и по моим парам. */
+  myAppeals(): Promise<AppealsListDto> {
+    return apiRequest<AppealsListDto>({ method: 'GET', url: '/appeals/mine' }).then((d) =>
+      validateResponse(AppealsListResponseSchema, d, 'appeals/mine'),
+    );
+  },
+
+  /** Детали кейса + история месяцев часов пары (доказательство). */
+  appeal(appealId: string): Promise<AppealDetailDto> {
+    return apiRequest<AppealDetailDto>({ method: 'GET', url: `/appeals/${appealId}` }).then((d) =>
+      validateResponse(AppealDetailResponseSchema, d, 'appeals/:id'),
+    );
+  },
+
+  /** Взять апелляцию в работу (только арбитр): open → under_review. */
+  assignAppeal(appealId: string): Promise<AppealDto> {
+    return apiRequest<AppealDto>({
+      method: 'POST',
+      url: `/appeals/${appealId}/assign`,
+      data: {},
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(AppealResponseSchema, d, 'appeals/:id/assign'));
+  },
+
+  /** Решение арбитра: снять блокировку или отклонить апелляцию. */
+  resolveAppeal(
+    appealId: string,
+    input: { decision: 'unblock' | 'reject'; notes?: string },
+  ): Promise<AppealDetailDto> {
+    return apiRequest<AppealDetailDto>({
+      method: 'POST',
+      url: `/appeals/${appealId}/resolve`,
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(AppealDetailResponseSchema, d, 'appeals/:id/resolve'));
+  },
+
+  /** Очередь апелляций (только арбитр): активные кейсы. */
+  appealQueue(): Promise<AppealsListDto> {
+    return apiRequest<AppealsListDto>({ method: 'GET', url: '/appeals/queue' }).then((d) =>
+      validateResponse(AppealsListResponseSchema, d, 'appeals/queue'),
     );
   },
 

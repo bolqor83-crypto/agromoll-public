@@ -54,5 +54,18 @@ export const RATING_PAIR_CAP_WEIGHT = 'RATING_PAIR_CAP_WEIGHT';
 /** Значение по умолчанию: 0.3 — сделка считается, но почти не двигает score. */
 export const DEFAULT_RATING_PAIR_CAP_WEIGHT = 0.3;
 
+/** Штраф арбитража «против стороны» (v0.6.0-C, ADR-033):
+ * favor_buyer → продавцу, favor_seller → покупателю. */
+export const RATING_WEIGHT_ARBITRATION_LOSS = 'RATING_WEIGHT_ARBITRATION_LOSS';
+
+/** Значение по умолчанию: 1.0 — решение арбитра против стороны (по модулю). */
+export const DEFAULT_RATING_WEIGHT_ARBITRATION_LOSS = 1.0;
+
+/** Штраф арбитража при компромиссе (ADR-033): обеим сторонам. */
+export const RATING_WEIGHT_ARBITRATION_COMPROMISE = 'RATING_WEIGHT_ARBITRATION_COMPROMISE';
+
+/** Значение по умолчанию: 0.5 — обоюдная вина, обоюдный штраф (по модулю). */
+export const DEFAULT_RATING_WEIGHT_ARBITRATION_COMPROMISE = 0.5;
+
 /** Причина отсутствия рейтинга в API-ответе (порог не достигнут). */
 export const RATING_MIN_DEALS_REASON = 'min_deals_not_reached' as const;

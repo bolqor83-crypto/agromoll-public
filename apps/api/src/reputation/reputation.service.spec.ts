@@ -8,7 +8,8 @@
  */
 import { Test } from '@nestjs/testing';
 import type { BookingEvent, DebtEvent } from '@prisma/client';
-import { ReputationService } from './reputation.service';
+import { ReputationService, arbitrationPenalty } from './reputation.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Значения ENV по умолчанию (спецификация v0.5.0-A). */
@@ -20,6 +21,9 @@ const WEIGHT_MINOR = 0.5;
 const WEIGHT_AUTO = 0.3;
 const WEIGHT_DISPUTE = 1.0;
 const PAIR_CAP = 0.3;
+// v0.6.0-C (ADR-033): штрафы арбитража.
+const WEIGHT_ARBITRATION_LOSS = 1.0;
+const WEIGHT_ARBITRATION_COMPROMISE = 0.5;
 
 const SELLER = 'seller-1';
 const BUYER = 'buyer-1';
@@ -70,6 +74,8 @@ interface PrismaMock {
   booking: { findUniqueOrThrow: jest.Mock };
   debt: { findUniqueOrThrow: jest.Mock };
   user: { findUnique: jest.Mock };
+  /** v0.6.0-C (ADR-033): кейсы арбитража для штрафов. */
+  disputeCase: { findMany: jest.Mock };
 }
 
 function makeService(): { service: ReputationService; prisma: PrismaMock } {
@@ -78,12 +84,17 @@ function makeService(): { service: ReputationService; prisma: PrismaMock } {
     debtEvent: { findMany: jest.fn() },
     reputationSnapshot: { upsert: jest.fn(), findUnique: jest.fn() },
     reputationEvent: { create: jest.fn(), findMany: jest.fn() },
+    // v0.6.0-C: кейсы арбитража в расчёте штрафа (ADR-033).
+    disputeCase: { findMany: jest.fn().mockResolvedValue([]) },
     booking: { findUniqueOrThrow: jest.fn() },
     debt: { findUniqueOrThrow: jest.fn() },
     user: { findUnique: jest.fn() },
   };
+  // v0.6.0-A: мок push-уведомлений (ADR-031) — порог 3.0 шлёт мягкий push.
+  const notifications = { send: jest.fn().mockResolvedValue(undefined) };
   const service = new ReputationService(
     prisma as unknown as PrismaService,
+    notifications as unknown as NotificationsService,
     MIN_DEALS,
     MAX_PAIR_DEALS,
     PAIR_WINDOW_DAYS,
@@ -92,13 +103,20 @@ function makeService(): { service: ReputationService; prisma: PrismaMock } {
     WEIGHT_AUTO,
     WEIGHT_DISPUTE,
     PAIR_CAP,
+    WEIGHT_ARBITRATION_LOSS,
+    WEIGHT_ARBITRATION_COMPROMISE,
   );
   return { service, prisma };
 }
 
 /** n успешных сделок (rated = чей рейтинг считаем: продавец или покупатель). */
-function okDeals(n: number, opts: { buyerId?: string; sellerId?: string } = {}): RatedBookingEvent[] {
-  return Array.from({ length: n }, () => dealEvent('delivery_confirmed', { qualityFlag: 'ok', ...opts }));
+function okDeals(
+  n: number,
+  opts: { buyerId?: string; sellerId?: string } = {},
+): RatedBookingEvent[] {
+  return Array.from({ length: n }, () =>
+    dealEvent('delivery_confirmed', { qualityFlag: 'ok', ...opts }),
+  );
 }
 
 describe('ReputationService.computeFromEvents (веса)', () => {
@@ -124,7 +142,9 @@ describe('ReputationService.computeFromEvents (веса)', () => {
   it('minor_issue продавцу — вес 0.5: 4 мелких + 1 ok → 3.0', () => {
     const { service } = makeService();
     const events = [
-      ...Array.from({ length: 4 }, () => dealEvent('delivery_confirmed', { qualityFlag: 'minor_issue' })),
+      ...Array.from({ length: 4 }, () =>
+        dealEvent('delivery_confirmed', { qualityFlag: 'minor_issue' }),
+      ),
       dealEvent('delivery_confirmed', { qualityFlag: 'ok' }),
     ];
     const result = service.computeFromEvents(SELLER, events, []);
@@ -243,6 +263,124 @@ describe('ReputationService.computeFromEvents (анти-накрутка)', () =
     const { service } = makeService();
     const result = service.computeFromEvents(SELLER, okDeals(10), []);
     expect(result.score).toBe(5);
+  });
+});
+
+
+describe('ReputationService.computeFromEvents (арбитраж, v0.6.0-C)', () => {
+  /** Кейс арбитража с фиксированными сторонами. */
+  const case_ = (
+    resolution: 'favor_buyer' | 'favor_seller' | 'compromise' | 'no_fault',
+  ) => ({
+    resolution,
+    firstPartyId: BUYER,
+    secondPartyId: SELLER,
+    resolvedAt: new Date(),
+  });
+
+  it('favor_buyer — штраф продавцу: 5 сделок + 1 решение → 5*(5-1)/6 ≈ 3.3', () => {
+    const { service } = makeService();
+    const result = service.computeFromEvents(SELLER, okDeals(5), [], [case_('favor_buyer')]);
+    expect(result.score).toBe(3.3);
+    expect(result.disputesCount).toBe(1);
+    expect(result.totalWeight).toBe(6);
+  });
+
+  it('favor_buyer — покупателя решение не задевает (его score не меняется)', () => {
+    const { service } = makeService();
+    const result = service.computeFromEvents(BUYER, okDeals(5), [], [case_('favor_buyer')]);
+    expect(result.score).toBe(5);
+    expect(result.disputesCount).toBe(0);
+    expect(result.totalWeight).toBe(5);
+  });
+
+  it('favor_seller — штраф покупателю: 5 сделок + 1 решение → 3.3', () => {
+    const { service } = makeService();
+    const result = service.computeFromEvents(BUYER, okDeals(5), [], [case_('favor_seller')]);
+    expect(result.score).toBe(3.3);
+  });
+
+  it('compromise — обеим сторонам по −0.5: 5 сделок + компромисс → 5*(5-0.5)/6 ≈ 3.8', () => {
+    const { service } = makeService();
+    const sellerResult = service.computeFromEvents(SELLER, okDeals(5), [], [case_('compromise')]);
+    const buyerResult = service.computeFromEvents(BUYER, okDeals(5), [], [case_('compromise')]);
+    expect(sellerResult.score).toBe(3.8);
+    expect(buyerResult.score).toBe(3.8);
+  });
+
+  it('no_fault — никого не штрафует: score не меняется', () => {
+    const { service } = makeService();
+    const result = service.computeFromEvents(SELLER, okDeals(5), [], [case_('no_fault')]);
+    expect(result.score).toBe(5);
+    expect(result.disputesCount).toBe(0);
+    expect(result.totalWeight).toBe(5);
+  });
+
+  it('arbitrationPenalty: чистая функция весов по решениям', () => {
+    expect(arbitrationPenalty(SELLER, case_('favor_buyer'), 1, 0.5)).toBe(1);
+    expect(arbitrationPenalty(BUYER, case_('favor_buyer'), 1, 0.5)).toBe(0);
+    expect(arbitrationPenalty(BUYER, case_('favor_seller'), 1, 0.5)).toBe(1);
+    expect(arbitrationPenalty(SELLER, case_('favor_seller'), 1, 0.5)).toBe(0);
+    expect(arbitrationPenalty(BUYER, case_('compromise'), 1, 0.5)).toBe(0.5);
+    expect(arbitrationPenalty(SELLER, case_('no_fault'), 1, 0.5)).toBe(0);
+  });
+});
+
+describe('ReputationService.safeOnDisputeResolved (триггер, v0.6.0-C)', () => {
+  it('пишет penalty_applied виновному и пересчитывает обоих', async () => {
+    const { service, prisma } = makeService();
+    prisma.bookingEvent.findMany.mockResolvedValue([]);
+    prisma.debtEvent.findMany.mockResolvedValue([]);
+    await service.safeOnDisputeResolved({
+      id: 'dispute-1',
+      resolution: 'favor_buyer',
+      firstPartyId: BUYER,
+      secondPartyId: SELLER,
+      resolvedAt: new Date(),
+    });
+    // Штраф — только продавцу (второй стороне)
+    expect(prisma.reputationEvent.create).toHaveBeenCalledTimes(1);
+    expect(prisma.reputationEvent.create).toHaveBeenCalledWith({
+      data: {
+        userId: SELLER,
+        action: 'penalty_applied',
+        delta: -1,
+        reason: 'arbitration:favor_buyer',
+      },
+    });
+    // Пересчёт — обоим
+    expect(prisma.reputationSnapshot.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('no_fault — без штрафов, только пересчёт', async () => {
+    const { service, prisma } = makeService();
+    prisma.bookingEvent.findMany.mockResolvedValue([]);
+    prisma.debtEvent.findMany.mockResolvedValue([]);
+    await service.safeOnDisputeResolved({
+      id: 'dispute-2',
+      resolution: 'no_fault',
+      firstPartyId: BUYER,
+      secondPartyId: SELLER,
+      resolvedAt: new Date(),
+    });
+    expect(prisma.reputationEvent.create).not.toHaveBeenCalled();
+    expect(prisma.reputationSnapshot.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('сбой пересчёта не бросает наружу (решение арбитра не откатывается)', async () => {
+    const { service, prisma } = makeService();
+    prisma.bookingEvent.findMany.mockResolvedValue([]);
+    prisma.debtEvent.findMany.mockResolvedValue([]);
+    prisma.reputationSnapshot.upsert.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      service.safeOnDisputeResolved({
+        id: 'dispute-3',
+        resolution: 'compromise',
+        firstPartyId: BUYER,
+        secondPartyId: SELLER,
+        resolvedAt: new Date(),
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -444,6 +582,7 @@ describe('ReputationService (DI)', () => {
           provide: PrismaService,
           useValue: {},
         },
+        { provide: NotificationsService, useValue: { send: jest.fn() } },
         { provide: 'RATING_MIN_DEALS', useValue: MIN_DEALS },
         { provide: 'RATING_MAX_PAIR_DEALS', useValue: MAX_PAIR_DEALS },
         { provide: 'RATING_PAIR_WINDOW_DAYS', useValue: PAIR_WINDOW_DAYS },
@@ -452,6 +591,11 @@ describe('ReputationService (DI)', () => {
         { provide: 'RATING_WEIGHT_AUTO', useValue: WEIGHT_AUTO },
         { provide: 'RATING_WEIGHT_DISPUTE', useValue: WEIGHT_DISPUTE },
         { provide: 'RATING_PAIR_CAP_WEIGHT', useValue: PAIR_CAP },
+        { provide: 'RATING_WEIGHT_ARBITRATION_LOSS', useValue: WEIGHT_ARBITRATION_LOSS },
+        {
+          provide: 'RATING_WEIGHT_ARBITRATION_COMPROMISE',
+          useValue: WEIGHT_ARBITRATION_COMPROMISE,
+        },
         ReputationService,
       ],
     }).compile();

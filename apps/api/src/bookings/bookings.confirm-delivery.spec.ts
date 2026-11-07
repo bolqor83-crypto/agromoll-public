@@ -18,6 +18,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { DisputesService } from '../disputes/disputes.service';
 
 const BUYER = 'buyer-1';
 const SELLER = 'seller-1';
@@ -96,6 +97,13 @@ async function createService(
       { provide: NotificationsService, useValue: notifications },
       { provide: WorkHoursService, useValue: { endSession: jest.fn() } },
       { provide: ReputationService, useValue: { safeOnBookingDelivery: jest.fn() } },
+      {
+        provide: DisputesService,
+        useValue: {
+          assertNoActiveDispute: jest.fn().mockResolvedValue(undefined),
+          hasActiveDispute: jest.fn().mockResolvedValue(false),
+        },
+      },
       BookingsService,
     ],
   }).compile();
@@ -236,6 +244,13 @@ describe('BookingsService.confirmDelivery (unit, v0.4.0-C)', () => {
         { provide: NotificationsService, useValue: notifications },
         { provide: WorkHoursService, useValue: workHours },
         { provide: ReputationService, useValue: { safeOnBookingDelivery: jest.fn() } },
+        {
+          provide: DisputesService,
+          useValue: {
+            assertNoActiveDispute: jest.fn().mockResolvedValue(undefined),
+            hasActiveDispute: jest.fn().mockResolvedValue(false),
+          },
+        },
         BookingsService,
       ],
     }).compile();

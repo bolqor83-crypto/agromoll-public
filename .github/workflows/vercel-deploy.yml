@@ -1,0 +1,102 @@
+# Автодеплой web-версии на Vercel (v0.6.0-B, ADR-032).
+#
+# Триггер: push в main (после мерджа PR). Каждый мердж обновляет
+# https://agromoll-web.vercel.app без ручных действий.
+#
+# Секрет VERCEL_TOKEN добавляется ОДИН раз вручную:
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name: VERCEL_TOKEN, Value: vcp_... (Vercel → Settings → Tokens)
+# Без секрета workflow падает с понятным сообщением — деплой не «тихо
+# пропадает» (см. шаг «Секрет VERCEL_TOKEN»).
+#
+# Откат плохого деплоя:
+#   npx vercel rollback agromoll-web --token=$VERCEL_TOKEN
+#   (или в консоли: Deployments → предыдущий → … → Promote to Production).
+
+name: Deploy (Vercel)
+
+on:
+  push:
+    branches: [main]
+  # Ручной запуск из вкладки Actions (полезно при сбое CDN-проверки).
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: build → deploy → smoke-check
+    runs-on: ubuntu-latest
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      PROD_URL: https://agromoll-web.vercel.app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Секрет VERCEL_TOKEN
+        # Понятное сообщение вместо загадочного 401 от CLI на шаге деплоя:
+        # секрет добавляется вручную, агент/CI создать его сам не может.
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+            echo "::error::VERCEL_TOKEN not configured. Add it in Settings → Secrets and variables → Actions → New repository secret (Name: VERCEL_TOKEN)."
+            exit 1
+          fi
+          echo "VERCEL_TOKEN найден — продолжаем."
+
+      - name: Установка pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Установка Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
+
+      - name: 'Сборка (гейт качества — тот же turbo build, что в CI)'
+        run: pnpm turbo run build
+
+      - name: Линк проекта agromoll-web (API по токену)
+        # orgId/projectId не храним секретами — Vercel API отдаёт их по
+        # одному токену, лишние секреты не нужны.
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          RESPONSE=$(curl -sS -f -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v1/projects/agromoll-web")
+          ORG_ID=$(echo "$RESPONSE" | jq -r '.accountId')
+          PROJECT_ID=$(echo "$RESPONSE" | jq -r '.id')
+          if [ "$ORG_ID" = "null" ] || [ "$PROJECT_ID" = "null" ] || [ -z "$PROJECT_ID" ]; then
+            echo "::error::Проект agromoll-web не найден по токену. Проверьте VERCEL_TOKEN и название проекта."
+            exit 1
+          fi
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$ORG_ID" "$PROJECT_ID" > .vercel/project.json
+          echo "Проект найден: org=$ORG_ID project=$PROJECT_ID"
+
+      # rootDirectory проекта = apps/mobile — CLI запускаем из корня репо:
+      # он сам подставит путь (из apps/mobile путь удваивается).
+      - name: Деплой в прод
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+
+      - name: 'Smoke-проверка (200 от главной)'
+        # CDN может отдавать 200 не сразу — несколько попыток с паузой.
+        run: |
+          for i in 1 2 3 4 5 6; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL" || echo 000)
+            if [ "$CODE" = "200" ]; then
+              echo "✓ $PROD_URL отвечает 200"
+              exit 0
+            fi
+            echo "попытка $i: HTTP $CODE — ждём 5 с"
+            sleep 5
+          done
+          echo "::error::$PROD_URL не ответил 200 за 30 с. Возможен откат: vercel rollback agromoll-web (ADR-032)."
+          exit 1

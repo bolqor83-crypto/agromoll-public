@@ -32,4 +32,18 @@ module.exports = [
       },
     },
   },
+  {
+    // Service worker (v0.6.0-A, ADR-031): глобалы SW-скоупа — self,
+    // clients, PushManager-события. Живёт в public/, в бандл Expo
+    // попадает как статика (не трансформируется Metro).
+    files: ['public/**/*.js'],
+    languageOptions: {
+      globals: {
+        self: 'readonly',
+        clients: 'readonly',
+        importScripts: 'readonly',
+        skipWaiting: 'readonly',
+      },
+    },
+  },
 ];

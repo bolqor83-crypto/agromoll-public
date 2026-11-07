@@ -18,4 +18,5 @@ export * from './components/ErrorState';
 export * from './components/AnimatedNumber';
 export * from './components/SuccessCheck';
 export * from './components/ShakeField';
+export * from './components/Toast';
 export * from './components/ProgressBar';

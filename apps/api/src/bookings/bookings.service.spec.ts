@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { DisputesService } from '../disputes/disputes.service';
 
 /** Минимальный листинг для тестов. */
 function makeListing(overrides: Partial<Listing> = {}): Listing {
@@ -109,6 +110,13 @@ async function createService(prisma: PrismaService, ttlMinutes = 30): Promise<Bo
       { provide: NotificationsService, useValue: { send: jest.fn() } },
       { provide: WorkHoursService, useValue: { endSession: jest.fn() } },
       { provide: ReputationService, useValue: { safeOnBookingDelivery: jest.fn() } },
+      {
+        provide: DisputesService,
+        useValue: {
+          assertNoActiveDispute: jest.fn().mockResolvedValue(undefined),
+          hasActiveDispute: jest.fn().mockResolvedValue(false),
+        },
+      },
       BookingsService,
     ],
   }).compile();

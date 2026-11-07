@@ -12,7 +12,9 @@
  *  - MonthlyPairTotal — материализованный помесячный счётчик пары
  *    (unique driver+seller+month), monthCounted = ≥ лимита часов;
  *  - BlockedPair — активная блокировка пары: новые сессии → 409
- *    с мягким сообщением (без «вы нарушили закон»).
+ *    с мягким сообщением (без «вы нарушили закон»). Снятая арбитром
+ *    блокировка не удаляется, а помечается unblockedAt — история
+ *    разблоков и апелляции — в AppealCase (v0.6.0-E, ADR-035).
  *
  * Серия: цепочка месяцев подряд с monthCounted=true, включая текущий.
  * <60 ч в месяце — серия сбрасывается (история не пересчитывается —
@@ -31,10 +33,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+// value-import: Prisma.PrismaClientKnownRequestError участвует в instanceof
+// (ловим P2002 гонки крона, ADR-035); типы — Prisma.TransactionClient.
+import { Prisma } from '@prisma/client';
 // value-import: класс участвует в DI (см. ADR-008/v0.3.0 — Function at index).
 import { PrismaService } from '../prisma/prisma.service';
 import type {
+  AppealShortDto,
   WorkHoursCheckDto,
   WorkHoursPairDto,
   WorkHoursSessionDto,
@@ -118,9 +123,7 @@ export class WorkHoursService {
         where: { driverId, endedAt: null },
       });
       if (open) {
-        throw new ConflictException(
-          'У вас уже есть открытая смена — сначала завершите её',
-        );
+        throw new ConflictException('У вас уже есть открытая смена — сначала завершите её');
       }
 
       const now = new Date();
@@ -208,7 +211,13 @@ export class WorkHoursService {
 
     await tx.monthlyPairTotal.upsert({
       where: { driverId_sellerId_month: { driverId, sellerId, month } },
-      create: { driverId, sellerId, month, totalMinutes, monthCounted: totalMinutes >= this.monthlyLimitMinutes },
+      create: {
+        driverId,
+        sellerId,
+        month,
+        totalMinutes,
+        monthCounted: totalMinutes >= this.monthlyLimitMinutes,
+      },
       update: { totalMinutes, monthCounted: totalMinutes >= this.monthlyLimitMinutes },
     });
   }
@@ -246,7 +255,9 @@ export class WorkHoursService {
 
     // Серия месяцев подряд (включая текущий) — одним запросом на все пары.
     const history = await this.prisma.monthlyPairTotal.findMany({
-      where: isDriver ? { driverId: userId, monthCounted: true } : { sellerId: userId, monthCounted: true },
+      where: isDriver
+        ? { driverId: userId, monthCounted: true }
+        : { sellerId: userId, monthCounted: true },
       select: { driverId: true, sellerId: true, month: true },
     });
     const countedMonths = new Map<string, Set<string>>();
@@ -258,10 +269,35 @@ export class WorkHoursService {
     }
 
     const blocked = await this.prisma.blockedPair.findMany({
-      where: isDriver ? { driverId: userId } : { sellerId: userId },
-      select: { driverId: true, sellerId: true },
+      where: {
+        unblockedAt: null,
+        ...(isDriver ? { driverId: userId } : { sellerId: userId }),
+      },
+      select: { id: true, driverId: true, sellerId: true },
     });
-    const blockedSet = new Set(blocked.map((b) => pairKey(b.driverId, b.sellerId)));
+    const blockByPair = new Map(blocked.map((b) => [pairKey(b.driverId, b.sellerId), b] as const));
+
+    // Активные апелляции на эти блокировки (ADR-035): бейдж «обжалуется»
+    // в строке пары + блокировка кнопки повторной подачи.
+    const appealByBlockId = new Map<string, AppealShortDto>();
+    if (blocked.length > 0) {
+      const appeals = await this.prisma.appealCase.findMany({
+        where: {
+          blockedPairId: { in: blocked.map((b) => b.id) },
+          status: { in: ['open', 'under_review'] },
+        },
+        select: { id: true, blockedPairId: true, status: true },
+        orderBy: { openedAt: 'desc' },
+      });
+      for (const appeal of appeals) {
+        if (!appealByBlockId.has(appeal.blockedPairId)) {
+          appealByBlockId.set(appeal.blockedPairId, {
+            id: appeal.id,
+            status: appeal.status,
+          });
+        }
+      }
+    }
 
     const openSession = await this.prisma.workSession.findFirst({
       where: isDriver ? { driverId: userId, endedAt: null } : { sellerId: userId, endedAt: null },
@@ -271,7 +307,9 @@ export class WorkHoursService {
     return totals.map((total) => {
       const counterpart = isDriver ? total.seller : total.driver;
       const key = pairKey(total.driverId, total.sellerId);
-      const openForPair = openSession && pairKey(openSession.driverId, openSession.sellerId) === key;
+      const openForPair =
+        openSession && pairKey(openSession.driverId, openSession.sellerId) === key;
+      const block = blockByPair.get(key) ?? null;
       return {
         counterpartId: counterpart.id,
         counterpartName: counterpart.displayName,
@@ -279,7 +317,9 @@ export class WorkHoursService {
         totalMinutes: total.totalMinutes,
         monthCounted: total.monthCounted,
         series: countSeries(countedMonths.get(key), month),
-        blocked: blockedSet.has(key),
+        blocked: block !== null,
+        blockedPairId: block?.id ?? null,
+        appeal: block ? (appealByBlockId.get(block.id) ?? null) : null,
         activeSessionId: openForPair ? openSession.id : null,
       };
     });
@@ -296,8 +336,9 @@ export class WorkHoursService {
       this.prisma.monthlyPairTotal.findUnique({
         where: { driverId_sellerId_month: { driverId, sellerId, month } },
       }),
-      this.prisma.blockedPair.findUnique({
-        where: { driverId_sellerId: { driverId, sellerId } },
+      // Активная блокировка: снятая арбитром (ADR-035) не считается.
+      this.prisma.blockedPair.findFirst({
+        where: { driverId, sellerId, unblockedAt: null },
       }),
     ]);
 
@@ -344,18 +385,9 @@ export class WorkHoursService {
         continue;
       }
 
-      // Одна активная блокировка на пару (unique): создаём только новую.
-      const existing = await this.prisma.blockedPair.findUnique({
-        where: { driverId_sellerId: { driverId: pair.driverId, sellerId: pair.sellerId } },
-      });
-      if (!existing) {
-        await this.prisma.blockedPair.create({
-          data: {
-            driverId: pair.driverId,
-            sellerId: pair.sellerId,
-            reason: WORK_PAIR_BLOCKED_MESSAGE,
-          },
-        });
+      // Активная блокировка одна на пару (частичный unique, ADR-035).
+      const blockedNow = await this.blockPairIfNotBlocked(pair.driverId, pair.sellerId);
+      if (blockedNow) {
         created += 1;
         this.logger.warn(
           { driverId: pair.driverId, sellerId: pair.sellerId, month, series: this.monthsSeries },
@@ -392,20 +424,66 @@ export class WorkHoursService {
     if (!isSeriesComplete(new Set(months.map((m) => m.month)), month, this.monthsSeries)) {
       return false;
     }
-    const existing = await this.prisma.blockedPair.findUnique({
-      where: { driverId_sellerId: { driverId, sellerId } },
+    const blockedNow = await this.blockPairIfNotBlocked(driverId, sellerId);
+    if (blockedNow) {
+      this.logger.warn(
+        { driverId, sellerId, month, series: this.monthsSeries },
+        'work-hours:pair blocked after delivery (289-ФЗ, серия закрыта)',
+      );
+    }
+    return blockedNow;
+  }
+
+  /**
+   * Заблокировать пару, если активной блокировки нет (крон серий и
+   * закрывающая проверка доставки). Возвращает true, если пара стала
+   * заблокированной СЕЙЧАС.
+   *
+   * Снятая арбитром блокировка (ADR-035) «оживляется»: та же строка
+   * получает свежий blockedAt/reason, unblockedAt сбрасывается —
+   * истории разблоков в AppealCase ничего не теряется. Если строки
+   * нет вовсе — создаём. Гонку двух параллельных кронов ловит
+   * частичный unique-индекс (P2002 → «уже заблокирована», не ошибка).
+   */
+  private async blockPairIfNotBlocked(driverId: string, sellerId: string): Promise<boolean> {
+    const active = await this.prisma.blockedPair.findFirst({
+      where: { driverId, sellerId, unblockedAt: null },
+      select: { id: true },
     });
-    if (existing) {
+    if (active) {
       return false;
     }
-    await this.prisma.blockedPair.create({
-      data: { driverId, sellerId, reason: WORK_PAIR_BLOCKED_MESSAGE },
+
+    const latest = await this.prisma.blockedPair.findFirst({
+      where: { driverId, sellerId },
+      orderBy: { blockedAt: 'desc' },
+      select: { id: true },
     });
-    this.logger.warn(
-      { driverId, sellerId, month, series: this.monthsSeries },
-      'work-hours:pair blocked after delivery (289-ФЗ, серия закрыта)',
-    );
-    return true;
+    const data = {
+      unblockedAt: null,
+      unblockedById: null,
+      unblockReason: null,
+      blockedAt: new Date(),
+      reason: WORK_PAIR_BLOCKED_MESSAGE,
+    };
+
+    try {
+      if (latest) {
+        await this.prisma.blockedPair.update({ where: { id: latest.id }, data });
+      } else {
+        await this.prisma.blockedPair.create({
+          data: { driverId, sellerId, reason: WORK_PAIR_BLOCKED_MESSAGE },
+        });
+      }
+      return true;
+    } catch (error) {
+      // Параллельный крон заблокировал пару мгновением раньше —
+      // это успех, а не ошибка (крон идемпотентен).
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /** Есть ли у пользователя роль (роли переключаемые — смотрим текущую). */
@@ -455,14 +533,16 @@ function isSeriesComplete(counted: Set<string>, month: string, seriesLength: num
   return true;
 }
 
-/** Пара заблокирована? → 409 с кодом и мягким сообщением (fail-closed). */
+/** Пара заблокирована? → 409 с кодом и мягким сообщением (fail-closed).
+ *  Считаем только АКТИВНУЮ блокировку: снятая арбитром (ADR-035)
+ *  пару работать не мешает. */
 async function assertPairNotBlocked(
   tx: TransactionClient,
   driverId: string,
   sellerId: string,
 ): Promise<void> {
-  const blocked = await tx.blockedPair.findUnique({
-    where: { driverId_sellerId: { driverId, sellerId } },
+  const blocked = await tx.blockedPair.findFirst({
+    where: { driverId, sellerId, unblockedAt: null },
   });
   if (blocked && (blocked.unblockAt === null || blocked.unblockAt.getTime() > Date.now())) {
     throw new ConflictException({

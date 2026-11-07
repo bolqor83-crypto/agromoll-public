@@ -19,6 +19,16 @@ import {
   UpdateListingSchema,
   UserResponseSchema,
   UserRoleSchema,
+  DisputeEvidenceSchema,
+  DisputeMessageSchema,
+  DISPUTE_EVIDENCE_MAX_BYTES,
+  OpenDisputeSchema,
+  ResolveDisputeSchema,
+  UpdateRoleSchema,
+  AppealDetailResponseSchema,
+  AppealResponseSchema,
+  OpenAppealSchema,
+  ResolveAppealSchema,
 } from './index';
 
 describe('@agromoll/validation', () => {
@@ -153,12 +163,12 @@ describe('@agromoll/validation', () => {
       expect(CreateDebtSchema.safeParse({ debtorId, amount: 100, currency: 'USD' }).success).toBe(
         false,
       );
-      expect(
-        CreateDebtSchema.safeParse({ debtorId, amount: 100, unknownField: 1 }).success,
-      ).toBe(false);
-      expect(CreateDebtSchema.safeParse({ debtorId, amount: 100, listingId: 'не-uuid' }).success).toBe(
+      expect(CreateDebtSchema.safeParse({ debtorId, amount: 100, unknownField: 1 }).success).toBe(
         false,
       );
+      expect(
+        CreateDebtSchema.safeParse({ debtorId, amount: 100, listingId: 'не-uuid' }).success,
+      ).toBe(false);
     });
   });
 
@@ -307,6 +317,142 @@ describe('@agromoll/validation', () => {
           code: 'IDEMPOTENCY_IN_PROGRESS',
         }).success,
       ).toBe(true);
+    });
+  });
+
+  describe('арбитраж споров (v0.6.0-C, ADR-033)', () => {
+    const baseOpen = {
+      type: 'booking',
+      referenceId: '4f2e6c1a-7b3d-4e5f-9a01-2c3d4e5f6a7b',
+      reason: 'Товар не соответствовал заказу',
+    };
+
+    it('OpenDisputeSchema: форма открытия спора', () => {
+      expect(OpenDisputeSchema.safeParse(baseOpen).success).toBe(true);
+      // Причина короче 10 символов — не пишем в арбитраж односложные жалобы
+      expect(OpenDisputeSchema.safeParse({ ...baseOpen, reason: 'мало' }).success).toBe(false);
+      expect(OpenDisputeSchema.safeParse({ ...baseOpen, referenceId: 'not-uuid' }).success).toBe(
+        false,
+      );
+      expect(OpenDisputeSchema.safeParse({ ...baseOpen, type: 'listing' }).success).toBe(false);
+      expect(OpenDisputeSchema.safeParse({ ...baseOpen, extra: 1 }).success).toBe(false);
+    });
+
+    it('DisputeMessageSchema: тело + isInternal по умолчанию false', () => {
+      const parsed = DisputeMessageSchema.parse({ body: 'Прикладываю фото' });
+      expect(parsed.isInternal).toBe(false);
+      expect(DisputeMessageSchema.safeParse({ body: '' }).success).toBe(false);
+      expect(DisputeMessageSchema.safeParse({ body: 'x'.repeat(2001) }).success).toBe(false);
+    });
+
+    it('DisputeEvidenceSchema: base64 ≤ 2 МБ', () => {
+      const ok = { fileName: 'photo.jpg', mimeType: 'image/jpeg', dataBase64: 'aGVsbG8gd29ybGQ=' };
+      expect(DisputeEvidenceSchema.safeParse(ok).success).toBe(true);
+      // base64-строка длиннее лимита ~2.8 млн символов — файл > 2 МБ
+      const huge = { ...ok, dataBase64: 'A'.repeat(DISPUTE_EVIDENCE_MAX_BYTES * 2) };
+      expect(DisputeEvidenceSchema.safeParse(huge).success).toBe(false);
+      expect(DisputeEvidenceSchema.safeParse({ ...ok, mimeType: 'не-mime' }).success).toBe(false);
+    });
+
+    it('ResolveDisputeSchema: решения и судьба объекта', () => {
+      // Компромисс по долгу с уменьшенной суммой
+      expect(
+        ResolveDisputeSchema.safeParse({
+          outcome: 'compromise',
+          debtOutcome: 'settle_adjusted',
+          adjustedAmount: 5000,
+        }).success,
+      ).toBe(true);
+      // settle_adjusted без суммы — нельзя
+      expect(
+        ResolveDisputeSchema.safeParse({ outcome: 'compromise', debtOutcome: 'settle_adjusted' })
+          .success,
+      ).toBe(false);
+      // adjustedAmount без settle_adjusted — нельзя
+      expect(
+        ResolveDisputeSchema.safeParse({
+          outcome: 'favor_buyer',
+          debtOutcome: 'cancel',
+          adjustedAmount: 100,
+        }).success,
+      ).toBe(false);
+      // no_fault с судьбой объекта — нельзя (объект размораживается как есть)
+      expect(
+        ResolveDisputeSchema.safeParse({ outcome: 'no_fault', bookingOutcome: 'cancel' }).success,
+      ).toBe(false);
+      // dismiss без всего — можно
+      expect(ResolveDisputeSchema.safeParse({ outcome: 'dismiss' }).success).toBe(true);
+    });
+
+    it('UpdateRoleSchema: арбитром стать нельзя (ADR-033)', () => {
+      expect(UpdateRoleSchema.safeParse({ role: 'buyer' }).success).toBe(true);
+      expect(UpdateRoleSchema.safeParse({ role: 'seller' }).success).toBe(true);
+      expect(UpdateRoleSchema.safeParse({ role: 'driver' }).success).toBe(true);
+      // Самоназначение арбитром — конфликт интересов
+      expect(UpdateRoleSchema.safeParse({ role: 'arbitrator' }).success).toBe(false);
+    });
+  });
+
+  describe('апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035)', () => {
+    const baseOpen = {
+      blockedPairId: '4f2e6c1a-7b3d-4e5f-9a01-2c3d4e5f6a7b',
+      reason: 'Часы считались неверно: смены закрывались дважды',
+    };
+
+    it('OpenAppealSchema: форма открытия апелляции', () => {
+      expect(OpenAppealSchema.safeParse(baseOpen).success).toBe(true);
+      // Суть короче 10 символов — не пишем односложные жалобы
+      expect(OpenAppealSchema.safeParse({ ...baseOpen, reason: 'мало' }).success).toBe(false);
+      expect(OpenAppealSchema.safeParse({ ...baseOpen, blockedPairId: 'not-uuid' }).success).toBe(
+        false,
+      );
+      // Лишние поля запрещены (strict)
+      expect(OpenAppealSchema.safeParse({ ...baseOpen, extra: 1 }).success).toBe(false);
+    });
+
+    it('ResolveAppealSchema: решение арбитра', () => {
+      expect(ResolveAppealSchema.safeParse({ decision: 'unblock' }).success).toBe(true);
+      expect(
+        ResolveAppealSchema.safeParse({ decision: 'reject', notes: 'Серия действительно закрыта' })
+          .success,
+      ).toBe(true);
+      // Неизвестное решение и лишние поля — нельзя
+      expect(ResolveAppealSchema.safeParse({ decision: 'maybe' }).success).toBe(false);
+      expect(ResolveAppealSchema.safeParse({ decision: 'unblock', extra: 1 }).success).toBe(false);
+    });
+
+    it('AppealResponseSchema/Detail: статусы и история месяцев', () => {
+      const party = { id: 'u-1', displayName: 'Иван', role: 'driver' } as const;
+      const base = {
+        id: 'a-1',
+        blockedPairId: 'b-1',
+        driver: party,
+        seller: { id: 'u-2', displayName: 'Мария', role: 'seller' } as const,
+        appellant: party,
+        reason: 'Часы задвоились',
+        status: 'open',
+        openedAt: '2026-11-10T10:00:00.000Z',
+        assignedTo: null,
+        assignedAt: null,
+        resolvedAt: null,
+        notes: null,
+      };
+      expect(AppealResponseSchema.safeParse(base).success).toBe(true);
+      // Неизвестный статус — нельзя
+      expect(AppealResponseSchema.safeParse({ ...base, status: 'closed' }).success).toBe(false);
+      // Детали с месяцами часов — доказательство арбитра
+      expect(
+        AppealDetailResponseSchema.safeParse({
+          ...base,
+          months: [{ month: '2026-11', totalMinutes: 3600, monthCounted: true }],
+        }).success,
+      ).toBe(true);
+      expect(
+        AppealDetailResponseSchema.safeParse({
+          ...base,
+          months: [{ month: '2026-1', totalMinutes: 3600, monthCounted: true }],
+        }).success,
+      ).toBe(false);
     });
   });
 });

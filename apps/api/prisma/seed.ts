@@ -55,6 +55,21 @@ async function main(): Promise<void> {
     },
   });
 
+  // v0.6.0-C (ADR-033): демо-арбитр. Роль не переключается сама —
+  // арбитром назначают (сид/вручную), чтобы исключить конфликт интересов.
+  await prisma.user.upsert({
+    where: { id: DEMO_ACCOUNTS.arbitrator.id },
+    update: {},
+    create: {
+      id: DEMO_ACCOUNTS.arbitrator.id,
+      role: 'arbitrator',
+      displayName: DEMO_ACCOUNTS.arbitrator.displayName,
+      phone: '+79611230004',
+      phoneVerified: true,
+      reputationScore: 5,
+    },
+  });
+
   const listings: Array<{
     title: string;
     category: 'vegetables' | 'fruits' | 'grocery' | 'snacks' | 'other';
@@ -212,6 +227,25 @@ async function main(): Promise<void> {
       update: {},
     });
     console.log('  часов:     1 смена (3 ч у продавца)');
+  }
+
+  // ─── Демо-блокировка 289-ФЗ (v0.6.0-E, ADR-035) ────────────────────
+  // Показываем флоу обжалования: пара «водитель — продавец» заблокирована
+  // (серия месяцев закрылась). На экране «Мои часы» — карточка паузы с
+  // кнопкой «Оспорить блокировку» → арбитраж. Новые смены пары — мягкий
+  // 409; смена с другим продавцом работает как обычно.
+  const existingBlock = await prisma.blockedPair.findFirst({
+    where: { driverId: DEMO_ACCOUNTS.driver.id, sellerId: seller.id, unblockedAt: null },
+  });
+  if (!existingBlock) {
+    await prisma.blockedPair.create({
+      data: {
+        driverId: DEMO_ACCOUNTS.driver.id,
+        sellerId: seller.id,
+        reason: 'По 289-ФЗ нужна пауза: 6 месяцев подряд по 60+ часов',
+      },
+    });
+    console.log('  блокировка: пара водитель—продавец (демо апелляции, ADR-035)');
   }
 
   console.log('Сид завершён:');

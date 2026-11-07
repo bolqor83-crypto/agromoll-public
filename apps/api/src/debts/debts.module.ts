@@ -10,6 +10,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReputationModule } from '../reputation/reputation.module';
+import { DisputesModule } from '../disputes/disputes.module';
 import {
   DEBT_REMINDER_COOLDOWN_HOURS,
   DEFAULT_DEBT_REMINDER_COOLDOWN_HOURS,
@@ -18,7 +19,7 @@ import { DebtsController } from './debts.controller';
 import { DebtsService } from './debts.service';
 
 @Module({
-  imports: [NotificationsModule, ReputationModule],
+  imports: [NotificationsModule, ReputationModule, DisputesModule],
   controllers: [DebtsController],
   providers: [
     DebtsService,

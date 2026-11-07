@@ -50,6 +50,9 @@ export default function RolePickerScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const changeRole = useAuthStore((s) => s.changeRole);
+  // v0.6.0-C (ADR-033): арбитру — рабочее место арбитража, а не выбор
+  // рыночной роли (переключение лишило бы его права рассматривать споры).
+  const isArbitrator = user?.role === 'arbitrator';
 
   const openRole = async (option: RoleOption): Promise<void> => {
     // Онбординг виден один раз; при ошибке чтения флага — не показываем
@@ -87,7 +90,7 @@ export default function RolePickerScreen() {
         Роль сохраняется в профиле и действует сразу после выбора:
       </Text>
       <View style={{ gap: spacing.md }}>
-        {OPTIONS.map((option) => (
+        {isArbitrator ? null : OPTIONS.map((option) => (
           <Card
             key={option.role}
             onPress={() => handleSelect(option)}
@@ -108,6 +111,48 @@ export default function RolePickerScreen() {
           </Card>
         ))}
       </View>
+
+      {/* Арбитраж — рабочее место арбитра (v0.6.0-C, ADR-033). */}
+      {isArbitrator ? (
+        <Card
+          onPress={() => router.push('/arbitration')}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.md,
+            marginTop: spacing.sm,
+          }}
+        >
+          <Icon name="scale-outline" size={28} color="primary" />
+          <View style={{ flex: 1 }}>
+            <Text variant="title">Арбитраж рынка</Text>
+            <Text variant="caption" color="secondary">
+              Очередь споров, решения, репутация сторон
+            </Text>
+          </View>
+          <Icon name="chevron-forward-outline" size={20} color="muted" />
+        </Card>
+      ) : null}
+
+      {/* Споры — мои кейсы арбитража (v0.6.0-C, ADR-033). */}
+      <Card
+        onPress={() => router.push('/disputes')}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: spacing.md,
+          marginTop: spacing.sm,
+        }}
+      >
+        <Icon name="alert-circle-outline" size={28} color="primary" />
+        <View style={{ flex: 1 }}>
+          <Text variant="title">Споры</Text>
+          <Text variant="caption" color="secondary">
+            Кейсы, где вы сторона: решает нейтральный арбитр
+          </Text>
+        </View>
+        <Icon name="chevron-forward-outline" size={20} color="muted" />
+      </Card>
 
       {/* Мой рейтинг — вход с любой роли (v0.5.0, ADR-013). */}
       <Card

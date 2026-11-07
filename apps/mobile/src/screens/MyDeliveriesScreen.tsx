@@ -35,6 +35,7 @@ import { api, toApiError } from '@/lib/api';
 import { errorContentFor } from '@/lib/error-content';
 import { logger } from '@/lib/logger';
 import { formatClock } from '@/lib/format';
+import { useNotificationStore } from '@/store/notifications';
 
 /** Статусная пилюля доставки. */
 function statusVariant(status: DeliveryDto['status']): 'success' | 'attention' | 'neutral' {
@@ -253,6 +254,8 @@ type MyDeliveriesState =
 export default function DeliveriesScreen() {
   const router = useRouter();
   const [state, setState] = useState<MyDeliveriesState>({ phase: 'loading' });
+  // v0.6.0-A (ADR-031): push-сигнал — экран перечитывает данные.
+  const pushVersion = useNotificationStore((s) => s.version);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
@@ -271,7 +274,7 @@ export default function DeliveriesScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, pushVersion]);
 
   const handleRefresh = useCallback((): void => {
     setRefreshing(true);

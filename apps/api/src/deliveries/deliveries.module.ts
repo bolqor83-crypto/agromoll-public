@@ -7,17 +7,16 @@
  */
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { DisputesModule } from '../disputes/disputes.module';
 import { WorkHoursModule } from '../work-hours/work-hours.module';
-import {
-  DEFAULT_DELIVERY_TTL_MINUTES,
-  DELIVERY_TTL_MINUTES,
-} from './deliveries.constants';
+import { DEFAULT_DELIVERY_TTL_MINUTES, DELIVERY_TTL_MINUTES } from './deliveries.constants';
 import { DeliveriesController } from './deliveries.controller';
 import { DeliveriesService } from './deliveries.service';
 import { DeliveryTtlCron } from './delivery-ttl.cron';
 
 @Module({
-  imports: [WorkHoursModule],
+  imports: [WorkHoursModule, NotificationsModule, DisputesModule],
   controllers: [DeliveriesController],
   providers: [
     DeliveriesService,

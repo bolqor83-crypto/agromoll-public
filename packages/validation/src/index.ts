@@ -1,13 +1,25 @@
 import { z } from 'zod';
 import {
+  APPEAL_DECISIONS,
+  APPEAL_STATUSES,
   BOOKING_ACTIONS,
   DELIVERY_STATUSES,
   BOOKING_STATUSES,
   DEBT_ACTIONS,
   DEBT_STATUSES,
+  DEVICE_PLATFORMS,
+  DISPUTE_BOOKING_OUTCOMES,
+  DISPUTE_DEBT_OUTCOMES,
+  DISPUTE_DELIVERY_OUTCOMES,
+  DISPUTE_OUTCOMES,
+  DISPUTE_RESOLUTIONS,
+  DISPUTE_STATUSES,
+  DISPUTE_TYPES,
   LISTING_CATEGORIES,
   LISTING_STATUSES,
   LISTING_UNITS,
+  MARKET_ROLES,
+  NOTIFICATION_CHANNELS,
   NOTIFICATION_TYPES,
   GEO_POINT_KINDS,
   GEO_VEHICLE_TYPES,
@@ -188,10 +200,14 @@ export const LogoutSchema = z.object({
 
 export type LogoutInput = z.infer<typeof LogoutSchema>;
 
-/** Смена роли: PATCH /users/me/role (любая роль на выбор). */
+/** Смена роли: PATCH /users/me/role (рыночные роли на выбор).
+ *
+ * arbitrator недоступен для самоназначения (ADR-033): арбитра назначают
+ * вручную — иначе любой мог бы «рассмотреть» собственный спор.
+ */
 export const UpdateRoleSchema = z
   .object({
-    role: UserRoleSchema,
+    role: z.enum(MARKET_ROLES),
   })
   .strict();
 
@@ -449,7 +465,6 @@ export const MyReputationResponseSchema = ReputationResponseSchema.extend({
 
 export type MyReputationResponse = z.infer<typeof MyReputationResponseSchema>;
 
-
 // ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────────────
 
 /** Вид геозоны. */
@@ -505,7 +520,9 @@ export const GeoPointsResponseSchema = z.array(GeoPointResponseSchema);
 export const CreateGeoPointSchema = z
   .object({
     kind: z.enum(['buyer_point', 'seller_line'], {
-      errorMap: () => ({ message: 'Здесь только buyer_point или seller_line; коридоры — POST /geo/corridors' }),
+      errorMap: () => ({
+        message: 'Здесь только buyer_point или seller_line; коридоры — POST /geo/corridors',
+      }),
     }),
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),
@@ -708,6 +725,338 @@ export const NotificationsListResponseSchema = z
 
 export type NotificationsListResponse = z.infer<typeof NotificationsListResponseSchema>;
 
+// ─── Push-уведомления (v0.6.0-A, ADR-031) ───────────────────────────────────
+
+/** Платформа устройства push. */
+export const DevicePlatformSchema = z.enum(DEVICE_PLATFORMS);
+
+/**
+ * POST /notifications/register — регистрация push-канала (идемпотентна).
+ *
+ * Дискриминированное объединение по platform: native (ios/android)
+ * регистрирует FCM-токен, web — подписку Web Push (endpoint + ключи
+ * шифрования RFC 8291). Сервер делает upsert по token/endpoint.
+ */
+export const RegisterPushSchema = z.discriminatedUnion('platform', [
+  z
+    .object({
+      platform: z.enum(['ios', 'android']),
+      /** FCM/Expo-токен устройства (непустая строка). */
+      token: z.string().trim().min(16, 'Токен устройства слишком короткий').max(4096),
+    })
+    .strict(),
+  z
+    .object({
+      platform: z.literal('web'),
+      /** URL Push-сервиса браузера. */
+      endpoint: z.string().trim().url('endpoint должен быть URL').max(2048),
+      /** Клиентский открытый ключ (base64url, RFC 8291). */
+      p256dh: z.string().trim().min(16).max(512),
+      /** Секрет аутентификации (base64url, RFC 8291). */
+      auth: z.string().trim().min(8).max(512),
+    })
+    .strict(),
+]);
+
+export type RegisterPushInput = z.infer<typeof RegisterPushSchema>;
+
+/**
+ * DELETE /notifications/unregister — снятие регистрации при logout.
+ * Тело — что снимать: FCM-токен или endpoint веб-подписки.
+ */
+export const UnregisterPushSchema = z
+  .object({
+    token: z.string().trim().min(16).max(4096).optional(),
+    endpoint: z.string().trim().url().max(2048).optional(),
+  })
+  .refine((v) => Boolean(v.token ?? v.endpoint), {
+    message: 'Укажите token или endpoint',
+  });
+
+export type UnregisterPushInput = z.infer<typeof UnregisterPushSchema>;
+
+/** Ответ POST /notifications/register и DELETE /notifications/unregister. */
+export const PushRegistrationResponseSchema = z.object({ registered: z.boolean() });
+
+/** Строка журнала push-доставок. */
+const NotificationLogItemSchema = z
+  .object({
+    id: z.string().min(1),
+    channel: z.enum(NOTIFICATION_CHANNELS),
+    title: z.string().min(1),
+    body: z.string().min(1),
+    status: z.enum(['sent', 'failed', 'delivered']),
+    error: z.string().nullable(),
+    createdAt: IsoDateString,
+  })
+  .passthrough();
+
+/** Ответ GET /notifications/log — история push-доставок (только свои). */
+export const NotificationLogResponseSchema = z
+  .object({ items: z.array(NotificationLogItemSchema) })
+  .passthrough();
+
+/** Ответ GET /notifications/vapid-public. */
+export const VapidPublicKeyResponseSchema = z.object({ publicKey: z.string().nullable() });
+
+// ─── Арбитраж споров (v0.6.0-C, ADR-033) ───────────────────────────────────
+
+/** Тип спорного объекта. */
+export const DisputeTypeSchema = z.enum(DISPUTE_TYPES);
+
+/** Итог решения арбитра (resolve): решение по существу или dismiss. */
+export const DisputeOutcomeSchema = z.enum(DISPUTE_OUTCOMES);
+
+/** Максимальный размер доказательства: 2 МБ ДО base64 (ADR-033).
+ * Сам base64-хвост длиннее ~33% — лимит проверяем по декодированной длине. */
+export const DISPUTE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Максимальная длина base64-строки для 2 МБ (с запасом на padding). */
+const DISPUTE_EVIDENCE_MAX_BASE64_LENGTH = Math.ceil((DISPUTE_EVIDENCE_MAX_BYTES / 3) * 4) + 4;
+
+/**
+ * Открыть спор: POST /disputes.
+ *
+ * reason — суть претензии; попадает первым сообщением в переписку кейса
+ * и виден арбитру в очереди. Проверка «пользователь — сторона объекта»
+ * — в сервисе (по типу объекта), здесь только форма.
+ */
+export const OpenDisputeSchema = z
+  .object({
+    type: DisputeTypeSchema,
+    referenceId: z.string().uuid('referenceId должен быть UUID'),
+    reason: z.string().trim().min(10, 'Опишите суть спора (минимум 10 символов)').max(2000),
+  })
+  .strict();
+
+export type OpenDisputeInput = z.infer<typeof OpenDisputeSchema>;
+
+/** Сообщение в кейсе: POST /disputes/:id/messages. */
+export const DisputeMessageSchema = z
+  .object({
+    body: z.string().trim().min(1, 'Сообщение не может быть пустым').max(2000),
+    /** Служебная заметка — только арбитру (проверка роли в сервисе). */
+    isInternal: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export type DisputeMessageInput = z.infer<typeof DisputeMessageSchema>;
+
+/**
+ * Доказательство: POST /disputes/:id/evidence.
+ *
+ * Файл приходит base64-строкой (JSON), ≤ 2 МБ декодированного размера;
+ * хранение в БД — MVP-решение, S3 — v0.7.0 (ADR-033).
+ */
+export const DisputeEvidenceSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(255),
+    mimeType: z
+      .string()
+      .trim()
+      .regex(/^[\w.+-]+\/[\w.+-]+$/, 'mimeType вида image/jpeg'),
+    dataBase64: z
+      .string()
+      .min(8, 'Пустой файл')
+      .max(DISPUTE_EVIDENCE_MAX_BASE64_LENGTH, 'Файл больше 2 МБ'),
+  })
+  .strict();
+
+export type DisputeEvidenceInput = z.infer<typeof DisputeEvidenceSchema>;
+
+/**
+ * Решение арбитра: POST /disputes/:id/resolve.
+ *
+ * bookingOutcome/debtOutcome обязательны ДЛЯ СООТВЕТСТВУЮЩЕГО типа кейса
+ * (кроме no_fault/dismiss — объект размораживается без наших вмешательств);
+ * перекрёстные поля (bookingOutcome в долговом споре) — ошибка схемы.
+ */
+export const ResolveDisputeSchema = z
+  .object({
+    outcome: DisputeOutcomeSchema,
+    notes: z.string().trim().max(2000).optional(),
+    /** Судьба брони (кейс type=booking). */
+    bookingOutcome: z.enum(DISPUTE_BOOKING_OUTCOMES).optional(),
+    /** Судьба долга (кейс type=debt). */
+    debtOutcome: z.enum(DISPUTE_DEBT_OUTCOMES).optional(),
+    /** Новая сумма долга: обязательна при debtOutcome=settle_adjusted. */
+    adjustedAmount: z.number().positive().max(1_000_000).optional(),
+    /** Судьба доставки (кейс type=delivery): none — оставить сторонам. */
+    deliveryOutcome: z.enum(DISPUTE_DELIVERY_OUTCOMES).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const isFinal = value.outcome !== 'no_fault' && value.outcome !== 'dismiss';
+    if (!isFinal) {
+      // Вины нет / кейс отклонён — судьбу объекта решают сами стороны.
+      for (const key of [
+        'bookingOutcome',
+        'debtOutcome',
+        'adjustedAmount',
+        'deliveryOutcome',
+      ] as const) {
+        if (value[key] !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'При no_fault/dismiss судьба объекта не указывается',
+          });
+        }
+      }
+      return;
+    }
+    if (value.bookingOutcome !== undefined && value.debtOutcome !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['bookingOutcome'],
+        message: 'Укажите bookingOutcome ИЛИ debtOutcome, не оба',
+      });
+    }
+    if (value.debtOutcome === 'settle_adjusted' && value.adjustedAmount === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['adjustedAmount'],
+        message: 'При settle_adjusted укажите новую сумму долга',
+      });
+    }
+    if (value.debtOutcome !== 'settle_adjusted' && value.adjustedAmount !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['adjustedAmount'],
+        message: 'adjustedAmount допустим только при settle_adjusted',
+      });
+    }
+  });
+
+export type ResolveDisputeInput = z.infer<typeof ResolveDisputeSchema>;
+
+// ─── Ответы API арбитража (v0.6.0-C, ADR-033) ──────────────────────────────
+
+/** Участник кейса в DTO. */
+export const DisputePartyResponseSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  role: UserRoleSchema,
+});
+
+/** Сообщение кейса в DTO (isInternal уже отфильтрованы для не-арбитра). */
+export const DisputeMessageResponseSchema = z.object({
+  id: z.string().min(1),
+  author: DisputePartyResponseSchema,
+  body: z.string().min(1),
+  isInternal: z.boolean(),
+  createdAt: IsoDateString,
+});
+
+/** Доказательство в DTO — только метаданные. */
+export const DisputeEvidenceResponseSchema = z.object({
+  id: z.string().min(1),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  uploadedBy: DisputePartyResponseSchema,
+  createdAt: IsoDateString,
+});
+
+/** Кейс арбитража в DTO (список). */
+export const DisputeResponseSchema = z.object({
+  id: z.string().min(1),
+  type: DisputeTypeSchema,
+  referenceId: z.string().min(1),
+  subject: z.string().min(1),
+  status: z.enum(DISPUTE_STATUSES),
+  firstParty: DisputePartyResponseSchema,
+  secondParty: DisputePartyResponseSchema,
+  openedBy: DisputePartyResponseSchema,
+  openedAt: IsoDateString,
+  assignedTo: DisputePartyResponseSchema.nullable(),
+  assignedAt: IsoDateString.nullable(),
+  resolution: z.enum(DISPUTE_RESOLUTIONS).nullable(),
+  resolvedAt: IsoDateString.nullable(),
+  notes: z.string().nullable(),
+  messagesCount: z.number().int().nonnegative(),
+  evidenceCount: z.number().int().nonnegative(),
+});
+
+/** Кейс с перепиской (GET /disputes/:id). */
+export const DisputeDetailResponseSchema = DisputeResponseSchema.extend({
+  messages: z.array(DisputeMessageResponseSchema),
+  evidence: z.array(DisputeEvidenceResponseSchema),
+});
+
+/** Ответ GET /disputes и GET /disputes/queue. */
+export const DisputesListResponseSchema = z
+  .object({ items: z.array(DisputeResponseSchema) })
+  .passthrough();
+
+// ─── Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035) ────────────────────
+
+/** Решение арбитра по апелляции (resolve). */
+export const AppealDecisionSchema = z.enum(APPEAL_DECISIONS);
+
+/**
+ * Открыть апелляцию: POST /appeals.
+ *
+ * blockedPairId — активная блокировка пары (id приходит в строке пары
+ * «Мои часы»); reason — почему блокировка ошибочна. Проверка «пользователь
+ * — сторона пары» в сервисе, здесь только форма.
+ */
+export const OpenAppealSchema = z
+  .object({
+    blockedPairId: z.string().uuid('blockedPairId должен быть UUID'),
+    reason: z.string().trim().min(10, 'Опишите суть апелляции (минимум 10 символов)').max(2000),
+  })
+  .strict();
+
+export type OpenAppealInput = z.infer<typeof OpenAppealSchema>;
+
+/**
+ * Решение по апелляции: POST /appeals/:id/resolve.
+ *
+ * unblock — блокировка снимается в той же транзакции, reject — остаётся.
+ * notes — публичное обоснование (для сторон пары).
+ */
+export const ResolveAppealSchema = z
+  .object({
+    decision: AppealDecisionSchema,
+    notes: z.string().trim().max(2000).optional(),
+  })
+  .strict();
+
+export type ResolveAppealInput = z.infer<typeof ResolveAppealSchema>;
+
+/** Апелляция в DTO (список). */
+export const AppealResponseSchema = z.object({
+  id: z.string().min(1),
+  blockedPairId: z.string().min(1),
+  driver: DisputePartyResponseSchema,
+  seller: DisputePartyResponseSchema,
+  appellant: DisputePartyResponseSchema,
+  reason: z.string().min(1),
+  status: z.enum(APPEAL_STATUSES),
+  openedAt: IsoDateString,
+  assignedTo: DisputePartyResponseSchema.nullable(),
+  assignedAt: IsoDateString.nullable(),
+  resolvedAt: IsoDateString.nullable(),
+  notes: z.string().nullable(),
+});
+
+/** Кейс с историей часов пары (GET /appeals/:id). */
+export const AppealDetailResponseSchema = AppealResponseSchema.extend({
+  months: z.array(
+    z.object({
+      month: z.string().regex(/^\d{4}-\d{2}$/),
+      totalMinutes: z.number().int().nonnegative(),
+      monthCounted: z.boolean(),
+    }),
+  ),
+});
+
+/** Ответ GET /appeals/mine и GET /appeals/queue. */
+export const AppealsListResponseSchema = z
+  .object({ items: z.array(AppealResponseSchema) })
+  .passthrough();
+
 /** Ответ эндпоинтов рабочих сессий (v0.4.0, ADR-011). */
 export const WorkHoursSessionResponseSchema = z
   .object({
@@ -736,6 +1085,9 @@ export const WorkHoursPairsResponseSchema = z.array(
       monthCounted: z.boolean(),
       series: z.number().int().nonnegative(),
       blocked: z.boolean(),
+      // v0.6.0-E (ADR-035): активная блокировка и её апелляция.
+      blockedPairId: z.string().nullable(),
+      appeal: z.object({ id: z.string().min(1), status: z.enum(APPEAL_STATUSES) }).nullable(),
       activeSessionId: z.string().nullable(),
     })
     .passthrough(),
@@ -795,7 +1147,12 @@ export const apiEnvSchema = z.object({
   /** Месяцев подряд с ≥лимитом до блокировки пары (ADR-011). */
   WORK_MONTHS_SERIES: z.coerce.number().int().positive().max(24).default(6),
   /** Окно авто-подтверждения приёмки в часах (ADR-012). */
-  BOOKING_AUTO_CONFIRM_HOURS: z.coerce.number().int().positive().max(24 * 30).default(24),
+  BOOKING_AUTO_CONFIRM_HOURS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(24 * 30)
+    .default(24),
   /** Публичный рейтинг (ADR-013): минимум взвешенных событий для score. */
   RATING_MIN_DEALS: z.coerce.number().int().positive().max(1000).default(5),
   /** Анти-накрутка (ADR-013): сделок пары в окне, выше — вес 0.3. */
@@ -805,7 +1162,12 @@ export const apiEnvSchema = z.object({
   /** Радиус поиска «рядом» по умолчанию в метрах (ADR-014). */
   DEFAULT_GEO_RADIUS_METERS: z.coerce.number().int().min(10).max(5000).default(2000),
   /** TTL открытого запроса доставки в минутах (ADR-015). */
-  DELIVERY_TTL_MINUTES: z.coerce.number().int().positive().max(24 * 60).default(60),
+  DELIVERY_TTL_MINUTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(24 * 60)
+    .default(60),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

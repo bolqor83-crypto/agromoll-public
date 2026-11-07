@@ -13,6 +13,7 @@ import { BookingsService } from './bookings.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WorkHoursModule } from '../work-hours/work-hours.module';
 import { ReputationModule } from '../reputation/reputation.module';
+import { DisputesModule } from '../disputes/disputes.module';
 
 /**
  * Модуль броней v0.2.0 + v0.4.0-C (приёмка, ADR-012).
@@ -21,11 +22,13 @@ import { ReputationModule } from '../reputation/reputation.module';
  *   + confirm-delivery (приёмка) + авто-подтверждение;
  * - BookingTtlCron — гашение просроченных запросов каждую минуту;
  * - BookingAutoConfirmCron — завершение «забытых» приёмок ежечасно;
+ * - DisputesModule (v0.6.0-C, ADR-033) — заморозка спорных броней
+ *   (переходы и кроны молча пропускают брони под арбитражем);
  * - TTL и окно авто-подтверждения — ENV (BOOKING_TTL_MINUTES,
  *   BOOKING_AUTO_CONFIRM_HOURS).
  */
 @Module({
-  imports: [NotificationsModule, WorkHoursModule, ReputationModule],
+  imports: [NotificationsModule, WorkHoursModule, ReputationModule, DisputesModule],
   controllers: [BookingsController],
   providers: [
     BookingsService,

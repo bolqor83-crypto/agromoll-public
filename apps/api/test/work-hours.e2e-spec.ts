@@ -56,7 +56,9 @@ describe('Work hours 289-ФЗ (e2e, HTTP)', () => {
 
   it('сессия → завершение → MonthlyPairTotal растёт; 60 ч → monthCounted', async () => {
     // короткая сессия — минута-две реального времени
-    const started = await post(driver, '/work-hours/sessions').send({ sellerId: seller.id }).expect(201);
+    const started = await post(driver, '/work-hours/sessions')
+      .send({ sellerId: seller.id })
+      .expect(201);
     expect(started.body).toMatchObject({
       driverId: driver.id,
       sellerId: seller.id,
@@ -132,8 +134,10 @@ describe('Work hours 289-ФЗ (e2e, HTTP)', () => {
     const created = await workHours.enforceSeriesLimit();
     expect(created).toBe(1);
 
-    const blocked = await prisma.blockedPair.findUniqueOrThrow({
-      where: { driverId_sellerId: { driverId: driver.id, sellerId: seller.id } },
+    // v0.6.0-E (ADR-035): compound unique у blocked_pairs заменён частичным
+    // индексом — читаем активную блокировку через findFirst.
+    const blocked = await prisma.blockedPair.findFirstOrThrow({
+      where: { driverId: driver.id, sellerId: seller.id, unblockedAt: null },
     });
     expect(blocked.reason).toContain('289-ФЗ');
 
@@ -204,9 +208,13 @@ describe('Work hours 289-ФЗ (e2e, HTTP)', () => {
     expect(sellerView.body[0].counterpartId).toBe(driver.id);
 
     // открытая сессия видна в паре
-    const open = await post(driver, '/work-hours/sessions').send({ sellerId: seller.id }).expect(201);
+    const open = await post(driver, '/work-hours/sessions')
+      .send({ sellerId: seller.id })
+      .expect(201);
     const mineOpen = await get(driver, '/work-hours/me').expect(200);
-    const pair = mineOpen.body.find((p: { counterpartId: string }) => p.counterpartId === seller.id);
+    const pair = mineOpen.body.find(
+      (p: { counterpartId: string }) => p.counterpartId === seller.id,
+    );
     expect(pair.activeSessionId).toBe(open.body.id);
 
     // driver видит свою открытую смену отдельным эндпоинтом

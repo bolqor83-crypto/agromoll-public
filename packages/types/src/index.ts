@@ -5,10 +5,21 @@
  * и mobile (Expo), поэтому здесь не должно быть платформенно-специфичного кода.
  */
 
-/** Роли участников рынка. */
-export const USER_ROLES = ['buyer', 'seller', 'driver'] as const;
+/** Роли участников рынка + арбитр (v0.6.0-C, ADR-033). */
+export const USER_ROLES = ['buyer', 'seller', 'driver', 'arbitrator'] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * Рыночные роли — переключаются сами через PATCH /users/me/role.
+ *
+ * arbitrator сюда НЕ входит (ADR-033): арбитр рассматривает споры,
+ * самоназначение арбитром создавало бы конфликт интересов — роль
+ * выдают вручную (сид/админ). UI смены роли тоже показывает только MARKET_ROLES.
+ */
+export const MARKET_ROLES = ['buyer', 'seller', 'driver'] as const;
+
+export type MarketRole = (typeof MARKET_ROLES)[number];
 
 /**
  * Демо-аккаунты для этапа заглушки auth (X-User-Id, v0.2.0).
@@ -21,6 +32,7 @@ export const DEMO_ACCOUNTS: Record<UserRole, { id: string; displayName: string }
   buyer: { id: '00000000-0000-4000-8000-000000000001', displayName: 'Ларёк «У Ашота»' },
   seller: { id: '00000000-0000-4000-8000-000000000002', displayName: 'ФХ «Донская долина»' },
   driver: { id: '00000000-0000-4000-8000-000000000003', displayName: 'Газель Next' },
+  arbitrator: { id: '00000000-0000-4000-8000-000000000004', displayName: 'Арбитраж рынка' },
 };
 
 /** Человекочитаемые названия ролей — для UI. */
@@ -28,6 +40,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   buyer: 'Покупатель',
   seller: 'Продавец',
   driver: 'Доставщик',
+  arbitrator: 'Арбитр рынка',
 };
 
 /** Категории товаров. Совпадают с enum ListingCategory в Prisma-схеме. */
@@ -393,7 +406,6 @@ export interface MyReputationDto extends ReputationDto {
   events: ReputationEventDto[];
 }
 
-
 // ─── Геозоны (v0.5.0, ADR-014) ──────────────────────────────────────────────
 
 /** Виды геозон. Совпадают с enum GeoPointKind в Prisma-схеме. */
@@ -526,12 +538,29 @@ export interface DeliveryDto {
 
 // ─── Уведомления (v0.4.0, ADR-010) ──────────────────────────────────────────
 
-
 /** Типы in-app уведомлений. Совпадают с enum NotificationType в Prisma-схеме. */
 export const NOTIFICATION_TYPES = [
   'debt_reminder',
   'booking_delivery_confirmed',
   'booking_delivery_disputed',
+  // v0.6.0-A (ADR-031): события броней, доставок и репутации для push.
+  'booking_counter_offered',
+  'booking_confirmed',
+  'booking_cancelled',
+  'delivery_assigned',
+  'delivery_started',
+  'delivery_delivered',
+  'delivery_cancelled',
+  'reputation_score_dropped',
+  // v0.6.0-C (ADR-033): события арбитража споров.
+  'dispute_opened',
+  'dispute_message',
+  'dispute_assigned',
+  'dispute_resolved',
+  // v0.6.0-E (ADR-035): апелляции на блокировки 289-ФЗ.
+  'appeal_opened',
+  'appeal_assigned',
+  'appeal_resolved',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -551,6 +580,56 @@ export interface NotificationDto {
 export interface NotificationsListDto {
   items: NotificationDto[];
   unreadCount: number;
+}
+
+// ─── Push-уведомления (v0.6.0, ADR-031) ─────────────────────────────────────
+
+/** Платформа устройства. Совпадает с enum DevicePlatform в Prisma-схеме. */
+export const DEVICE_PLATFORMS = ['ios', 'android', 'web'] as const;
+export type DevicePlatform = (typeof DEVICE_PLATFORMS)[number];
+
+/**
+ * Регистрация push-канала: POST /notifications/register.
+ *
+ * Два варианта тела: FCM-токен (native ios/android) или подписка
+ * Web Push (web). Идемпотентно — upsert по token/endpoint.
+ */
+export type RegisterPushInput =
+  | { platform: 'ios' | 'android'; token: string }
+  | { platform: 'web'; endpoint: string; p256dh: string; auth: string };
+
+/** Тело DELETE /notifications/unregister — что отвязывать при logout. */
+export type UnregisterPushInput = { token: string } | { endpoint: string };
+
+/** Ответ POST /notifications/register и DELETE /notifications/unregister. */
+export interface PushRegistrationDto {
+  registered: boolean;
+}
+
+/** Канал доставки push. Совпадает с enum NotificationChannel. */
+export const NOTIFICATION_CHANNELS = ['fcm', 'web_push'] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
+/** Строка журнала push-доставок: GET /notifications/log. */
+export interface NotificationLogDto {
+  id: string;
+  channel: NotificationChannel;
+  title: string;
+  body: string;
+  status: 'sent' | 'failed' | 'delivered';
+  error: string | null;
+  createdAt: string;
+}
+
+/** Ответ GET /notifications/log. */
+export interface NotificationLogListDto {
+  items: NotificationLogDto[];
+}
+
+/** Ответ GET /notifications/vapid-public — публичный ключ Web Push. */
+export interface VapidPublicKeyDto {
+  /** base64url, null — Web Push не настроен на сервере. */
+  publicKey: string | null;
 }
 
 // ─── Учёт часов 289-ФЗ (v0.4.0, ADR-011) ────────────────────────────────────
@@ -586,6 +665,10 @@ export interface WorkHoursPairDto {
   series: number;
   /** Пара заблокирована (289-ФЗ: нужна пауза). */
   blocked: boolean;
+  /** id активной блокировки — для апелляции (ADR-035). NULL, если не заблокирована. */
+  blockedPairId: string | null;
+  /** Активная апелляция на блокировку пары (ADR-035). NULL — не подана. */
+  appeal: AppealShortDto | null;
   /** Открытая сессия с этим контрагентом (для кнопки «Завершить»). */
   activeSessionId: string | null;
 }
@@ -625,4 +708,223 @@ export function maskPhone(phone: string): string {
     return '***';
   }
   return `+7***${digits.slice(-4)}`;
+}
+
+// ─── Арбитраж споров (v0.6.0-C, ADR-033) ───────────────────────────────────
+
+/** Типы спорных объектов. Совпадают с enum DisputeType в Prisma-схеме. */
+export const DISPUTE_TYPES = ['booking', 'delivery', 'debt'] as const;
+
+export type DisputeType = (typeof DISPUTE_TYPES)[number];
+
+export const DISPUTE_TYPE_LABELS: Record<DisputeType, string> = {
+  booking: 'Бронь',
+  delivery: 'Доставка',
+  debt: 'Долг',
+};
+
+/** Статусы кейса. Совпадают с enum DisputeStatus в Prisma-схеме. */
+export const DISPUTE_STATUSES = ['open', 'under_review', 'resolved', 'dismissed'] as const;
+
+export type DisputeStatus = (typeof DISPUTE_STATUSES)[number];
+
+export const DISPUTE_STATUS_LABELS: Record<DisputeStatus, string> = {
+  open: 'Открыт',
+  under_review: 'На рассмотрении',
+  resolved: 'Решён',
+  dismissed: 'Отклонён',
+};
+
+/**
+ * Решения арбитра. Совпадают с enum DisputeResolution в Prisma-схеме.
+ * «Покупатель/продавец» — сторона в спорной сделке, а не роль в системе:
+ * в долге «покупатель» = дебитор, «продавец» = кредитор;
+ * в доставке «продавец» = доставщик.
+ */
+export const DISPUTE_RESOLUTIONS = [
+  'favor_buyer',
+  'favor_seller',
+  'compromise',
+  'no_fault',
+] as const;
+
+export type DisputeResolution = (typeof DISPUTE_RESOLUTIONS)[number];
+
+export const DISPUTE_RESOLUTION_LABELS: Record<DisputeResolution, string> = {
+  favor_buyer: 'Прав покупатель',
+  favor_seller: 'Прав продавец',
+  compromise: 'Компромисс',
+  no_fault: 'Вины нет',
+};
+
+/**
+ * Итог спора в POST /disputes/:id/resolve: dismiss — кейс отклонён
+ * (например, необоснованный), остальные — решения по существу.
+ */
+export const DISPUTE_OUTCOMES = [
+  'favor_buyer',
+  'favor_seller',
+  'compromise',
+  'no_fault',
+  'dismiss',
+] as const;
+
+export type DisputeOutcome = (typeof DISPUTE_OUTCOMES)[number];
+
+/** Судьба брони в решении арбитра (ADR-033). */
+export const DISPUTE_BOOKING_OUTCOMES = ['cancel', 'complete', 'complete_minor'] as const;
+
+export type DisputeBookingOutcome = (typeof DISPUTE_BOOKING_OUTCOMES)[number];
+
+/** Судьба долга в решении арбитра (ADR-033). */
+export const DISPUTE_DEBT_OUTCOMES = ['cancel', 'restore_active', 'settle_adjusted'] as const;
+
+export type DisputeDebtOutcome = (typeof DISPUTE_DEBT_OUTCOMES)[number];
+
+/** Судьба доставки в решении арбитра: отменить или оставить сторонам. */
+export const DISPUTE_DELIVERY_OUTCOMES = ['none', 'cancel'] as const;
+
+export type DisputeDeliveryOutcome = (typeof DISPUTE_DELIVERY_OUTCOMES)[number];
+
+/** Участник кейса (в DTO без личных данных, кроме имени и роли). */
+export interface DisputePartyDto {
+  id: string;
+  displayName: string;
+  role: UserRole;
+}
+
+/** Сообщение в кейсе (сторонам isInternal-заметки не отдаются). */
+export interface DisputeMessageDto {
+  id: string;
+  author: DisputePartyDto;
+  body: string;
+  isInternal: boolean;
+  createdAt: string;
+}
+
+/** Доказательство — только метаданные; сам файл не раздаём списком. */
+export interface DisputeEvidenceDto {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: DisputePartyDto;
+  createdAt: string;
+}
+
+/** Кейс арбитража (список). */
+export interface DisputeDto {
+  id: string;
+  type: DisputeType;
+  referenceId: string;
+  subject: string;
+  status: DisputeStatus;
+  firstParty: DisputePartyDto;
+  secondParty: DisputePartyDto;
+  openedBy: DisputePartyDto;
+  openedAt: string;
+  assignedTo: DisputePartyDto | null;
+  assignedAt: string | null;
+  resolution: DisputeResolution | null;
+  resolvedAt: string | null;
+  notes: string | null;
+  messagesCount: number;
+  evidenceCount: number;
+}
+
+/** Кейс с перепиской и доказательствами (GET /disputes/:id). */
+export interface DisputeDetailDto extends DisputeDto {
+  messages: DisputeMessageDto[];
+  evidence: DisputeEvidenceDto[];
+}
+
+/** Ответ GET /disputes (мои кейсы). */
+export interface DisputesListDto {
+  items: DisputeDto[];
+}
+
+/** Очередь арбитра (GET /disputes/queue): активные кейсы, старые сверху. */
+export interface DisputeQueueDto {
+  items: DisputeDto[];
+}
+
+// ─── Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035) ────────────────────
+
+/**
+ * Статусы апелляции. Совпадают с enum AppealStatus в Prisma-схеме.
+ * unblocked/rejected — терминальные статусы, они же суть решения.
+ */
+export const APPEAL_STATUSES = ['open', 'under_review', 'unblocked', 'rejected'] as const;
+
+export type AppealStatus = (typeof APPEAL_STATUSES)[number];
+
+export const APPEAL_STATUS_LABELS: Record<AppealStatus, string> = {
+  open: 'Открыта',
+  under_review: 'На рассмотрении',
+  unblocked: 'Блокировка снята',
+  rejected: 'Отклонена',
+};
+
+/** Активные статусы: кейс ещё не решён (блокировка обжалуется). */
+export const APPEAL_ACTIVE_STATUSES: AppealStatus[] = ['open', 'under_review'];
+
+/** Решение арбитра в POST /appeals/:id/resolve (ADR-035). */
+export const APPEAL_DECISIONS = ['unblock', 'reject'] as const;
+
+export type AppealDecision = (typeof APPEAL_DECISIONS)[number];
+
+export const APPEAL_DECISION_LABELS: Record<AppealDecision, string> = {
+  unblock: 'Снять блокировку',
+  reject: 'Отклонить апелляцию',
+};
+
+/** Краткая ссылка на активную апелляцию (в строке пары «Мои часы»). */
+export interface AppealShortDto {
+  id: string;
+  status: AppealStatus;
+}
+
+/** Месяц часов пары — доказательство в деталях апелляции (ADR-035). */
+export interface AppealMonthDto {
+  /** «YYYY-MM». */
+  month: string;
+  totalMinutes: number;
+  /** ≥ лимита — засчитан в «опасную» серию. */
+  monthCounted: boolean;
+}
+
+/** Апелляция на блокировку 289-ФЗ (список). */
+export interface AppealDto {
+  id: string;
+  /** Блокировка пары, на которую подана апелляция. */
+  blockedPairId: string;
+  /** Пара — «предмет» кейса, фиксируется при открытии. */
+  driver: DisputePartyDto;
+  seller: DisputePartyDto;
+  /** Кто подал (водитель или продавец пары). */
+  appellant: DisputePartyDto;
+  reason: string;
+  status: AppealStatus;
+  openedAt: string;
+  assignedTo: DisputePartyDto | null;
+  assignedAt: string | null;
+  resolvedAt: string | null;
+  /** Обоснование решения — публично для пары. */
+  notes: string | null;
+}
+
+/** Кейс с историей часов пары (GET /appeals/:id) — доказательство арбитра. */
+export interface AppealDetailDto extends AppealDto {
+  /** Месяцы работы пары: свежие сверху, лимит — 12 (ADR-035). */
+  months: AppealMonthDto[];
+}
+
+/** Ответ GET /appeals/mine — кейсы по моим парам и поданные мной. */
+export interface AppealsListDto {
+  items: AppealDto[];
+}
+
+/** Очередь апелляций арбитра (GET /appeals/queue): активные, старые сверху. */
+export interface AppealQueueDto {
+  items: AppealDto[];
 }

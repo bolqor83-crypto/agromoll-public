@@ -32,6 +32,7 @@ import { BOOKING_AUTO_CONFIRM_HOURS } from './bookings.constants';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { DisputesService } from '../disputes/disputes.service';
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -138,6 +139,7 @@ export class BookingsService {
     private readonly notifications: NotificationsService,
     private readonly workHours: WorkHoursService,
     private readonly reputation: ReputationService,
+    private readonly disputes: DisputesService,
   ) {}
 
   /** Покупатель запрашивает бронь. Резервирует количество атомарно. */
@@ -204,10 +206,12 @@ export class BookingsService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const booking = await loadBookingForUpdate(tx, bookingId);
       assertActorIsSeller(booking, actorId);
       assertTransition(booking, 'requested', 'counter_offered');
+      // Арбитраж замораживает спорную бронь (ADR-033).
+      await this.disputes.assertNoActiveDispute('booking', bookingId, tx);
 
       // Переговоры не должны умирать по таймеру посреди разговора:
       // корректировка продлевает TTL на полный срок заново (см. ADR-004).
@@ -230,20 +234,36 @@ export class BookingsService {
       });
 
       this.logTransition(bookingId, actorId, 'requested', 'counter_offered');
-      return updated;
+      return { updated, buyerId: booking.buyerId, requestedQuantity: booking.requestedQuantity };
     });
+
+    // Push после фиксации транзакции (ADR-031): сбой доставки не откатывает бронь.
+    await this.notifications.send({
+      userId: updated.buyerId,
+      type: 'booking_counter_offered',
+      title: 'Продавец предложил корректировку',
+      body: `По брони предложены другие условия${
+        offeredQuantity !== undefined
+          ? `: ${offeredQuantity} вместо ${updated.requestedQuantity}`
+          : ''
+      }. Откройте «Мои брони», чтобы принять или дождаться истечения срока.`,
+      data: { bookingId },
+    });
+    return updated.updated;
   }
 
   /** Покупатель принимает корректировку. Резерв перестраивается под предложенный объём. */
   async acceptCounter(params: AcceptCounterParams): Promise<Booking> {
     const { bookingId, actorId } = params;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const booking = await loadBookingForUpdate(tx, bookingId);
       if (booking.buyerId !== actorId) {
         throw new ForbiddenException('Принять корректировку может только покупатель');
       }
       assertTransition(booking, 'counter_offered', 'confirmed');
+      // Арбитраж замораживает спорную бронь (ADR-033).
+      await this.disputes.assertNoActiveDispute('booking', bookingId, tx);
 
       const offer = await findLatestCounterOffer(tx, bookingId);
       const confirmedQuantity = offer?.offeredQuantity ?? booking.requestedQuantity;
@@ -274,18 +294,31 @@ export class BookingsService {
       });
 
       this.logTransition(bookingId, actorId, 'counter_offered', 'confirmed');
-      return updated;
+      return { updated, sellerId: booking.listing.sellerId };
     });
+
+    // Push продавцу после фиксации (ADR-031): покупатель принял корректировку,
+    // бронь подтверждена — можно собирать заказ.
+    await this.notifications.send({
+      userId: result.sellerId,
+      type: 'booking_confirmed',
+      title: 'Бронь подтверждена',
+      body: 'Покупатель принял вашу корректировку. Бронь подтверждена — соберите заказ.',
+      data: { bookingId },
+    });
+    return result.updated;
   }
 
   /** Продавец подтверждает запрос как есть. */
   async confirm(params: ConfirmParams): Promise<Booking> {
     const { bookingId, actorId } = params;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const booking = await loadBookingForUpdate(tx, bookingId);
       assertActorIsSeller(booking, actorId);
       assertTransition(booking, 'requested', 'confirmed');
+      // Арбитраж замораживает спорную бронь (ADR-033).
+      await this.disputes.assertNoActiveDispute('booking', bookingId, tx);
 
       const updated = await tx.booking.update({
         where: { id: bookingId },
@@ -306,15 +339,25 @@ export class BookingsService {
       });
 
       this.logTransition(bookingId, actorId, 'requested', 'confirmed');
-      return updated;
+      return { updated, buyerId: booking.buyerId };
     });
+
+    // Push покупателю после фиксации (ADR-031): продавец подтвердил бронь.
+    await this.notifications.send({
+      userId: result.buyerId,
+      type: 'booking_confirmed',
+      title: 'Бронь подтверждена',
+      body: 'Продавец подтвердил вашу бронь. Заберите товар до конца срока.',
+      data: { bookingId },
+    });
+    return result.updated;
   }
 
   /** Отмена. Покупатель или продавец лота. Резерв возвращается листингу. */
   async cancel(params: CancelParams): Promise<Booking> {
     const { bookingId, actorId, reason } = params;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const booking = await loadBookingForUpdate(tx, bookingId);
       const isBuyer = booking.buyerId === actorId;
       const isSeller = booking.listing.sellerId === actorId;
@@ -326,6 +369,8 @@ export class BookingsService {
           `Отмена невозможна из статуса «${booking.status}» (разрешено из requested/counter_offered)`,
         );
       }
+      // Арбитраж замораживает спорную бронь (ADR-033).
+      await this.disputes.assertNoActiveDispute('booking', bookingId, tx);
 
       await releaseReservation(tx, booking.listingId, booking.requestedQuantity);
 
@@ -344,8 +389,21 @@ export class BookingsService {
       });
 
       this.logTransition(bookingId, actorId, booking.status, 'cancelled');
-      return updated;
+      return { updated, buyerId: booking.buyerId, sellerId: booking.listing.sellerId };
     });
+
+    // Push другой стороне (ADR-031): инициатор отмены знает о ней сам.
+    await this.notifications.send({
+      userId: actorId === result.buyerId ? result.sellerId : result.buyerId,
+      type: 'booking_cancelled',
+      title: 'Бронь отменена',
+      body:
+        reason !== undefined && reason.trim().length > 0
+          ? `Бронь отменена. Причина: ${reason}`
+          : 'Бронь отменена другой стороной.',
+      data: { bookingId },
+    });
+    return result.updated;
   }
 
   /**
@@ -374,6 +432,8 @@ export class BookingsService {
           `Приёмка невозможна из статуса «${current.status}» (нужен confirmed)`,
         );
       }
+      // Арбитраж замораживает спорную бронь (ADR-033).
+      await this.disputes.assertNoActiveDispute('booking', bookingId, tx);
       const confirmedQuantity = current.confirmedQuantity ?? current.requestedQuantity;
 
       // Недостача — минимум minor_issue, даже если покупатель забыл переключить.
@@ -497,6 +557,11 @@ export class BookingsService {
 
     let confirmed = 0;
     for (const { id } of stale) {
+      // Спор по брони замораживает и авто-подтверждение (ADR-033):
+      // крон не должен «решать» приёмку за арбитра.
+      if (await this.disputes.hasActiveDispute('booking', id)) {
+        continue;
+      }
       try {
         const done = await this.prisma.$transaction(async (tx) => {
           const booking = await tx.booking.findUnique({ where: { id } });
@@ -516,7 +581,14 @@ export class BookingsService {
             data: { bookingId: id, actorId: null, action: 'system_auto_confirmed' },
           });
           await tx.user.update({
-            where: { id: (await tx.booking.findUniqueOrThrow({ where: { id }, select: { listing: { select: { sellerId: true } } } })).listing.sellerId },
+            where: {
+              id: (
+                await tx.booking.findUniqueOrThrow({
+                  where: { id },
+                  select: { listing: { select: { sellerId: true } } },
+                })
+              ).listing.sellerId,
+            },
             data: { totalConfirmations: { increment: 1 } },
           });
           this.logTransition(id, null, 'confirmed', 'completed');
@@ -574,6 +646,11 @@ export class BookingsService {
 
     let expired = 0;
     for (const { id } of stale) {
+      // Спор по брони замораживает и TTL (ADR-033): не гасим бронь,
+      // пока арбитр не решил её судьбу.
+      if (await this.disputes.hasActiveDispute('booking', id)) {
+        continue;
+      }
       try {
         const done = await this.prisma.$transaction(async (tx) => {
           // Без TTL-защиты loadBookingForUpdate: крона работает именно

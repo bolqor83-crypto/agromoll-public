@@ -1,45 +1,56 @@
 /**
- * Карта для web — схематичная SVG-карта (v0.5.0, ADR-014).
+ * Карта для web — Leaflet + OpenStreetMap (v0.6.0-D, ADR-034).
  *
- * Почему не Leaflet/react-native-web-maps на web: тайловые библиотеки
- * тянут DOM-зависимости, конфликтующие с expo export, и требуют
- * провайдера тайлов (ключ/лицензия) ради MVP-задачи «показать точки
- * рядом». Схема с относительными координатами решает задачу без
- * новых зависимостей и не ломает web-сборку (подэтап D).
+ * Заменяет схематичную SVG-карту (v0.5.0): настоящие тайлы, зум,
+ * панорамирование, кластеризация точек рынка. Контракт MapCanvasProps
+ * тот же — MarketMapScreen и MyPointSheet платформы не знают.
  *
- * Взаимодействие: клик по полю — выбор координаты (onTap), пин можно
- * «перетащить» повторным кликом (onPinChange при выставленном pin).
+ * Leaflet грузится ДИНАМИЧЕСКИ в useEffect (ADR-023: тяжёлая
+ * зависимость только в момент показа карты; static export не выполняет
+ * её при пререндере — Leaflet трогает window на импорте). CSS —
+ * минимальная инъекция из leaflet-helpers: полный leaflet.css тянет
+ * url()-ассеты дефолтных маркеров и Metro-CSS-пайплайн (ADR-034).
+ *
+ * OSM fair use: атрибуция обязательна, zoom 12–19, тайлы стандартного
+ * стиля tile.openstreetmap.org — для MVP-нагрузки рынка допустимо
+ * (политика тайлов OSM: умеренное использование с атрибуцией; при
+ * росте — свой стиль/провайдер, см. ADR-034).
  */
-import { useMemo, useRef } from 'react';
-import { View } from 'react-native';
-import type { NativeSyntheticEvent, View as RNView } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import type * as LeafletNS from 'leaflet';
 import { markerColorFor } from '@agromoll/ui';
+import type { MapThemeColors } from '@agromoll/ui';
 import type { GeoCoord } from '@agromoll/types';
 import type { MapCanvasProps } from './types';
+import {
+  MY_PIN_SIZE,
+  PIN_SIZE,
+  clusterHtml,
+  centerRingHtml,
+  containerClassFor,
+  injectLeafletStyles,
+  markerHtml,
+  myPinHtml,
+} from './leaflet-helpers';
 
-/** Полуразмах окна карты в градусах (~2.2 км по широте). */
-const SPAN = 0.01;
+/** URL тайлов OSM (без ключей, fair use, ADR-034). */
+const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const OSM_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
-/** Указатель web-события: offsetX/Y относительно цели (DOM PointerEvent). */
-interface WebPointerEvent {
-  offsetX?: number;
-  offsetY?: number;
-}
+/** Стартовый зум: рынок виден целиком, ряды различимы. */
+const DEFAULT_ZOOM = 16;
 
-/** Проекция lat/lng → проценты внутри канвы (y инвертирован). */
-function project(center: GeoCoord, coord: GeoCoord): { x: number; y: number } {
-  const x = 50 + ((coord.lng - center.lng) / (SPAN * 2)) * 100;
-  const y = 50 - ((coord.lat - center.lat) / (SPAN * 2)) * 100;
-  // кламп в границы канвы
-  return { x: Math.min(100, Math.max(0, x)), y: Math.min(100, Math.max(0, y)) };
-}
+/** Тип динамически импортированного Leaflet-модуля. */
+type LeafletModule = typeof LeafletNS;
 
-/** Обратная проекция процентов → lat/lng. */
-function unproject(center: GeoCoord, x: number, y: number): GeoCoord {
-  return {
-    lat: center.lat + ((50 - y) / 100) * SPAN * 2,
-    lng: center.lng + ((x - 50) / 100) * SPAN * 2,
-  };
+/** Слои карты (пересобираются по props, вне React-стейта). */
+interface MapLayers {
+  map: LeafletNS.Map;
+  cluster: LeafletNS.MarkerClusterGroup;
+  lines: LeafletNS.LayerGroup;
+  centerRing: LeafletNS.Marker | null;
+  pin: LeafletNS.Marker | null;
 }
 
 export default function MapCanvas({
@@ -51,118 +62,219 @@ export default function MapCanvas({
   onTap,
   height = 300,
   colors,
+  mode,
 }: MapCanvasProps) {
-  const canvasRef = useRef<RNView>(null);
-  const centerProj = useMemo(() => project(center, center), [center]);
+  const divRef = useRef<HTMLDivElement | null>(null);
+  const leafletRef = useRef<LeafletModule | null>(null);
+  const layersRef = useRef<MapLayers | null>(null);
+  // Свежие колбэки/палитра для императивных обработчиков Leaflet:
+  // карту пересоздавать не надо — ref-ы читают актуальные значения.
+  const interactRef = useRef({ onPinChange, onTap, hasPin: pin !== null });
+  interactRef.current = { onPinChange, onTap, hasPin: pin !== null };
+  const colorsRef = useRef<MapThemeColors>(colors);
+  colorsRef.current = colors;
 
-  /** Клик по канве → координата: пин двигается, иначе onTap. */
-  const handlePointerDown = (
-    event: NativeSyntheticEvent<WebPointerEvent>,
-  ): void => {
-    const ne = event.nativeEvent;
-    if (ne.offsetX === undefined || ne.offsetY === undefined) {
+  // Инкремент после инициализации Leaflet: слои достраиваются, когда
+  // динамический импорт закончился (эффекты слоёв уже отработали впустую).
+  const [mapEpoch, setMapEpoch] = useState(0);
+
+  // ── Инициализация (однократно): динамический импорт Leaflet ──────────────
+
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+
+    void (async () => {
+      // Leaflet трогает window при импорте — только в браузере.
+      const L = (await import('leaflet')).default as unknown as LeafletModule;
+      await import('leaflet.markercluster');
+      if (disposed || !divRef.current) {
+        return;
+      }
+      injectLeafletStyles();
+
+      const map = L.map(divRef.current, {
+        center: [center.lat, center.lng],
+        zoom: DEFAULT_ZOOM,
+        zoomControl: true,
+        attributionControl: true,
+      });
+      L.tileLayer(OSM_TILE_URL, {
+        attribution: OSM_ATTRIBUTION,
+        maxZoom: 19,
+        // OSM fair use (ADR-034): разумные границы детализации.
+        minZoom: 12,
+      }).addTo(map);
+
+      const cluster = L.markerClusterGroup({
+        maxClusterRadius: 40,
+        showCoverageOnHover: false,
+        spiderfyOnMaxZoom: true,
+        iconCreateFunction: (cl) =>
+          L.divIcon({
+            html: clusterHtml(cl.getChildCount(), colorsRef.current),
+            className: 'marker-cluster',
+            iconSize: [46, 46],
+            iconAnchor: [23, 23],
+          }),
+      });
+      map.addLayer(cluster);
+
+      // Тап по полю: пин двигается, иначе — выбор координаты.
+      map.on('click', (event: LeafletNS.LeafletMouseEvent) => {
+        const coord: GeoCoord = { lat: event.latlng.lat, lng: event.latlng.lng };
+        const { onPinChange: movePin, onTap: tap, hasPin } = interactRef.current;
+        if (hasPin && movePin) {
+          movePin(coord);
+        } else {
+          tap?.(coord);
+        }
+      });
+
+      leafletRef.current = L;
+      layersRef.current = { map, cluster, lines: L.layerGroup().addTo(map), centerRing: null, pin: null };
+      setMapEpoch((epoch) => epoch + 1);
+
+      cleanup = () => {
+        map.remove();
+        leafletRef.current = null;
+        layersRef.current = null;
+      };
+    })().catch((error) => {
+      // Карта — вспомогательный слой: падение инициализации не роняет экран.
+      console.warn('agromoll:map', 'Leaflet не инициализировался', { error: String(error) });
+    });
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+    // Инициализация — один раз на монтирование; центр двигается ниже.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Центр: проп меняется → setView (геолокация/перевыбор) ────────────────
+
+  useEffect(() => {
+    layersRef.current?.map.setView([center.lat, center.lng], DEFAULT_ZOOM, { animate: true });
+  }, [center.lat, center.lng]);
+
+  // ── Маркеры и линии: пересборка слоёв (MVP-объёмы — десятки точек) ───────
+
+  useEffect(() => {
+    const L = leafletRef.current;
+    const layers = layersRef.current;
+    if (!L || !layers) {
       return;
     }
-    const node = canvasRef.current as unknown as
-      | { clientWidth?: number; clientHeight?: number }
-      | null;
-    const width = Math.max(1, node?.clientWidth ?? 0);
-    const heightPx = Math.max(1, node?.clientHeight ?? 0);
-    const x = (ne.offsetX / width) * 100;
-    const y = (ne.offsetY / heightPx) * 100;
-    const coord = unproject(center, x, y);
-    if (pin && onPinChange) {
-      onPinChange(coord);
-    } else {
-      onTap?.(coord);
+    layers.cluster.clearLayers();
+    for (const marker of markers) {
+      layers.cluster.addLayer(
+        L.marker([marker.coord.lat, marker.coord.lng], {
+          icon: L.divIcon({
+            html: markerHtml(markerColorFor(marker.kind, colors), colors, marker.label),
+            className: '',
+            iconSize: [PIN_SIZE, PIN_SIZE],
+            iconAnchor: [PIN_SIZE / 2, PIN_SIZE / 2],
+          }),
+          title: marker.label ?? 'Точка рынка',
+          keyboard: false,
+        }),
+      );
     }
-  };
 
+    layers.lines.clearLayers();
+    for (const line of lines) {
+      L.polyline(
+        [
+          [line.from.lat, line.from.lng],
+          [line.to.lat, line.to.lng],
+        ],
+        { color: colors.corridor, weight: 4, opacity: 0.85 },
+      ).addTo(layers.lines);
+    }
+  }, [markers, lines, colors, mapEpoch]);
+
+  // ── Кольцо позиции пользователя (центр) ──────────────────────────────────
+
+  useEffect(() => {
+    const L = leafletRef.current;
+    const layers = layersRef.current;
+    if (!L || !layers) {
+      return;
+    }
+    layers.centerRing?.remove();
+    layers.centerRing = L.marker([center.lat, center.lng], {
+      icon: L.divIcon({
+        html: centerRingHtml(colors),
+        className: '',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      }),
+      interactive: false,
+      keyboard: false,
+    }).addTo(layers.map);
+  }, [center.lat, center.lng, colors, mapEpoch]);
+
+  // ── Пин «моя точка»: перетаскивание + dragend → onPinChange ──────────────
+
+  useEffect(() => {
+    const L = leafletRef.current;
+    const layers = layersRef.current;
+    if (!L || !layers) {
+      return;
+    }
+    if (!pin) {
+      layers.pin?.remove();
+      layers.pin = null;
+      return;
+    }
+    if (layers.pin) {
+      layers.pin.setLatLng([pin.lat, pin.lng]);
+      return;
+    }
+    layers.pin = L.marker([pin.lat, pin.lng], {
+      icon: L.divIcon({
+        html: myPinHtml(colors),
+        className: '',
+        iconSize: [MY_PIN_SIZE, MY_PIN_SIZE],
+        iconAnchor: [MY_PIN_SIZE / 2, MY_PIN_SIZE / 2],
+      }),
+      draggable: true,
+      keyboard: false,
+    }).addTo(layers.map);
+    layers.pin.on('dragend', () => {
+      const latlng = layers.pin?.getLatLng();
+      if (latlng) {
+        interactRef.current.onPinChange?.({ lat: latlng.lat, lng: latlng.lng });
+      }
+    });
+  }, [pin, colors, mapEpoch]);
+
+  // ── Тема: класс-модификатор контейнера (фильтр тайлов) ───────────────────
+
+  useEffect(() => {
+    const div = divRef.current;
+    if (div) {
+      div.classList.toggle(containerClassFor('dark'), mode === 'dark');
+    }
+  }, [mode]);
+
+  // Простой DOM div (Leaflet — императивная DOM-библиотека): в .web-файле
+  // валидны HTML-элементы (как SVG в предыдущей версии карты).
   return (
-    <View
-      ref={canvasRef}
-      accessibilityLabel="Карта рынка"
-      accessible
+    <div
+      ref={divRef}
+      className={containerClassFor(mode)}
+      role="application"
+      aria-label="Карта рынка"
       style={{
         height,
+        width: '100%',
         borderRadius: 16,
         overflow: 'hidden',
-        // v0.6.2-D: канва из темы — тёмная карта в тёмной теме (аудит №6)
-        backgroundColor: colors.canvas,
+        background: colors.canvas,
       }}
-      onPointerDown={handlePointerDown}
-    >
-      <svg
-        width="100%"
-        height="100%"
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-        style={{ display: 'block' }}
-      >
-        {/* Сетка ориентира: крупные улицы рынка, без тайлов (ADR-014). */}
-        {[25, 50, 75].map((v) => (
-          <g key={v}>
-            <line x1={v} y1={0} x2={v} y2={100} stroke={colors.grid} strokeWidth={0.4} />
-            <line x1={0} y1={v} x2={100} y2={v} stroke={colors.grid} strokeWidth={0.4} />
-          </g>
-        ))}
-
-        {/* Коридоры — янтарные линии маршрутов. */}
-        {lines.map((line) => {
-          const from = project(center, line.from);
-          const to = project(center, line.to);
-          return (
-            <line
-              key={`line-${line.id}`}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              stroke={colors.corridor}
-              strokeWidth={0.9}
-              strokeLinecap="round"
-            />
-          );
-        })}
-
-        {/* Точки: покупатели синие, продавцы зелёные, коридоры янтарные. */}
-        {markers.map((marker) => {
-          const p = project(center, marker.coord);
-          return (
-            <circle
-              key={marker.id}
-              cx={p.x}
-              cy={p.y}
-              r={1.8}
-              fill={markerColorFor(marker.kind, colors)}
-              fillOpacity={0.9}
-            />
-          );
-        })}
-
-        {/* Центр (позиция пользователя) — кольцо из темы. */}
-        <circle
-          cx={centerProj.x}
-          cy={centerProj.y}
-          r={1.2}
-          fill="none"
-          stroke={colors.centerRing}
-          strokeWidth={0.5}
-        />
-
-        {/* Пин «моя точка» — зелёная капля. */}
-        {pin
-          ? (() => {
-              const p = project(center, pin);
-              return (
-                <g>
-                  <circle cx={p.x} cy={p.y} r={2.4} fill={colors.sellerLine} />
-                  <circle cx={p.x} cy={p.y} r={0.9} fill={colors.pinHole} />
-                </g>
-              );
-            })()
-          : null}
-      </svg>
-    </View>
+    />
   );
 }

@@ -5,8 +5,15 @@
  * смена пары, закрытие смены), TTL — на моке Prisma. Полный HTTP-цикл
  * с реальной БД — в e2e (delivery-flow.e2e-spec.ts).
  */
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DeliveriesService } from './deliveries.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { DisputesService } from '../disputes/disputes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
 import { DELIVERY_PAIR_BLOCKED_CODE } from './deliveries.constants';
@@ -27,7 +34,7 @@ interface PrismaMockShape {
   };
   deliveryEvent: { create: jest.Mock };
   workSession: { findFirst: jest.Mock; create: jest.Mock };
-  blockedPair: { findUnique: jest.Mock };
+  blockedPair: { findFirst: jest.Mock };
   $transaction: jest.Mock;
 }
 
@@ -96,22 +103,31 @@ function makeService(): {
     },
     deliveryEvent: { create: jest.fn() },
     workSession: { findFirst: jest.fn(), create: jest.fn() },
-    blockedPair: { findUnique: jest.fn() },
+    blockedPair: { findFirst: jest.fn() },
     $transaction: jest.fn(),
   };
   const workHours = { endSession: jest.fn(), enforceSeriesForPair: jest.fn() };
+  // v0.6.0-A: мок push-уведомлений (ADR-031) — доставки шлют статусы покупателю.
+  const notifications = { send: jest.fn().mockResolvedValue(undefined) };
+  // v0.6.0-C: мок арбитража (ADR-033) — заморозка спорных доставок.
+  const disputes = {
+    assertNoActiveDispute: jest.fn().mockResolvedValue(undefined),
+    hasActiveDispute: jest.fn().mockResolvedValue(false),
+  };
   const service = new DeliveriesService(
     prisma as unknown as PrismaService,
     workHours as unknown as WorkHoursService,
     60,
+    notifications as unknown as NotificationsService,
+    disputes as unknown as DisputesService,
   );
   return { service, prisma, workHours };
 }
 
 /** Настроить мок транзакции: $transaction вызывает колбэк с тем же моком. */
 function mockTransaction(prisma: PrismaMockShape): void {
-  prisma.$transaction.mockImplementation(async (fn: (client: PrismaMockShape) => Promise<unknown>) =>
-    fn(prisma),
+  prisma.$transaction.mockImplementation(
+    async (fn: (client: PrismaMockShape) => Promise<unknown>) => fn(prisma),
   );
 }
 
@@ -145,7 +161,9 @@ describe('DeliveriesService.create', () => {
       }),
     );
     expect(prisma.deliveryEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { deliveryId: 'delivery-1', actorId: BUYER, action: 'created' } }),
+      expect.objectContaining({
+        data: { deliveryId: 'delivery-1', actorId: BUYER, action: 'created' },
+      }),
     );
   });
 
@@ -155,7 +173,11 @@ describe('DeliveriesService.create', () => {
       where.id === 'pickup-1' ? { id: 'pickup-1', ownerId: SELLER, isActive: false } : null,
     );
     await expect(
-      service.create(BUYER, { pickupPointId: 'pickup-1', dropoffPointId: 'dropoff-1', weightKg: 10 }),
+      service.create(BUYER, {
+        pickupPointId: 'pickup-1',
+        dropoffPointId: 'dropoff-1',
+        weightKg: 10,
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -167,7 +189,11 @@ describe('DeliveriesService.create', () => {
         : { id: 'dropoff-1', ownerId: BUYER, isActive: true },
     );
     await expect(
-      service.create(BUYER, { pickupPointId: 'pickup-1', dropoffPointId: 'dropoff-1', weightKg: 10 }),
+      service.create(BUYER, {
+        pickupPointId: 'pickup-1',
+        dropoffPointId: 'dropoff-1',
+        weightKg: 10,
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
@@ -241,7 +267,7 @@ describe('DeliveriesService.assign (взятие + 289-ФЗ)', () => {
   it('счастливый путь: assigned + смена пары создана + событие', async () => {
     const { service, prisma } = makeService();
     setup(prisma);
-    prisma.blockedPair.findUnique.mockResolvedValue(null);
+    prisma.blockedPair.findFirst.mockResolvedValue(null);
     prisma.workSession.findFirst.mockResolvedValue(null);
 
     const dto = await service.assign('delivery-1', DRIVER);
@@ -253,14 +279,16 @@ describe('DeliveriesService.assign (взятие + 289-ФЗ)', () => {
       }),
     );
     expect(prisma.deliveryEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { deliveryId: 'delivery-1', actorId: DRIVER, action: 'assigned' } }),
+      expect.objectContaining({
+        data: { deliveryId: 'delivery-1', actorId: DRIVER, action: 'assigned' },
+      }),
     );
   });
 
   it('пара заблокирована 289-ФЗ → 409 + событие blocked_by_289fz (запрос жив)', async () => {
     const { service, prisma } = makeService();
     setup(prisma);
-    prisma.blockedPair.findUnique.mockResolvedValue({
+    prisma.blockedPair.findFirst.mockResolvedValue({
       driverId: DRIVER,
       sellerId: SELLER,
       reason: 'причина',
@@ -301,7 +329,7 @@ describe('DeliveriesService.assign (взятие + 289-ФЗ)', () => {
   it('уже есть открытая смена (другой продавец) → 409', async () => {
     const { service, prisma } = makeService();
     setup(prisma);
-    prisma.blockedPair.findUnique.mockResolvedValue(null);
+    prisma.blockedPair.findFirst.mockResolvedValue(null);
     prisma.workSession.findFirst.mockResolvedValue({ id: 'ws-1', sellerId: 'seller-other' });
 
     await expect(service.assign('delivery-1', DRIVER)).rejects.toBeInstanceOf(ConflictException);
@@ -323,7 +351,6 @@ describe('DeliveriesService.assign (взятие + 289-ФЗ)', () => {
 });
 
 describe('DeliveriesService.start / deliver / cancel', () => {
-
   it('start: только назначенный водитель, assigned → in_transit', async () => {
     const { service, prisma } = makeService();
     mockTransaction(prisma);
@@ -340,7 +367,9 @@ describe('DeliveriesService.start / deliver / cancel', () => {
     expect(dto.status).toBe('in_transit');
 
     // Чужой водитель → 403
-    await expect(service.start('delivery-1', OTHER_DRIVER)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.start('delivery-1', OTHER_DRIVER)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('deliver: закрывает смену пары и проверяет серию 289-ФЗ', async () => {
@@ -434,7 +463,9 @@ describe('DeliveriesService.start / deliver / cancel', () => {
       buyerId: BUYER,
       assignedDriverId: null,
     });
-    await expect(service.cancel('delivery-1', OTHER_DRIVER)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.cancel('delivery-1', OTHER_DRIVER)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
 
     prisma.deliveryRequest.findUnique.mockResolvedValue(null);
     await expect(service.cancel('delivery-404', DRIVER)).rejects.toBeInstanceOf(NotFoundException);

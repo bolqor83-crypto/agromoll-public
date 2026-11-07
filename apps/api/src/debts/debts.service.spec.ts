@@ -22,6 +22,7 @@ import { DEBT_REMINDER_COOLDOWN_HOURS } from './debts.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { DisputesService } from '../disputes/disputes.service';
 
 const CREDITOR = 'creditor-1';
 const DEBTOR = 'debtor-1';
@@ -85,6 +86,13 @@ async function createService(
       { provide: PrismaService, useValue: prisma },
       { provide: NotificationsService, useValue: notifications },
       { provide: ReputationService, useValue: { safeOnDebtChanged: jest.fn() } },
+      {
+        provide: DisputesService,
+        useValue: {
+          assertNoActiveDispute: jest.fn().mockResolvedValue(undefined),
+          hasActiveDispute: jest.fn().mockResolvedValue(false),
+        },
+      },
       { provide: DEBT_REMINDER_COOLDOWN_HOURS, useValue: cooldownHours },
       DebtsService,
     ],

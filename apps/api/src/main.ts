@@ -2,9 +2,13 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { useJsonBodyLimit } from './app-body-parser';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // bodyParser: false — свой парсер с лимитом 4 МБ (ADR-033: доказательства
+  // споров base64 ≤ 2 МБ не проходят дефолтные 100 КБ express).
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
+  useJsonBodyLimit(app);
 
   // Структурированные логи pino (см. ADR-001).
   app.useLogger(app.get(Logger));

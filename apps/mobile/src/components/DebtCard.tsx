@@ -27,6 +27,8 @@ export interface DebtCardProps {
   onDispute: (debt: DebtDto) => void;
   onResolve: (debt: DebtDto) => void;
   onRemind: (debt: DebtDto) => void;
+  /** Эскалация в арбитраж (v0.6.0-C, ADR-033): нейтральный арбитр. */
+  onEscalate?: (debt: DebtDto) => void;
 }
 
 export function DebtCard({
@@ -37,6 +39,7 @@ export function DebtCard({
   onDispute,
   onResolve,
   onRemind,
+  onEscalate,
 }: DebtCardProps) {
   const isCreditor = debt.creditorId === viewerId;
   const counterparty = isCreditor ? debt.debtorName : debt.creditorName;
@@ -129,6 +132,17 @@ export function DebtCard({
             onPress={() => onResolve(debt)}
             style={{ flex: 1 }}
           />
+          {/* Не договорились обоюдно — решает нейтральный арбитр (ADR-033). */}
+          {onEscalate ? (
+            <Button
+              title="К арбитру"
+              variant="ghost"
+              size="md"
+              disabled={pending}
+              onPress={() => onEscalate(debt)}
+              style={{ flex: 1 }}
+            />
+          ) : null}
         </View>
       );
     }
@@ -162,6 +176,17 @@ export function DebtCard({
           onPress={() => onDispute(debt)}
           style={{ flexGrow: 1 }}
         />
+        {/* Эскалация сразу в арбитраж, минуя обоюдный спор (ADR-033). */}
+        {onEscalate ? (
+          <Button
+            title="К арбитру"
+            variant="ghost"
+            size="md"
+            disabled={pending}
+            onPress={() => onEscalate(debt)}
+            style={{ flexGrow: 1 }}
+          />
+        ) : null}
       </View>
     );
   }

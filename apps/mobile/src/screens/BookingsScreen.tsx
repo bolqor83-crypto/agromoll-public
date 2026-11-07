@@ -15,10 +15,12 @@ import type { BookingDto, BookingStatus, ListingUnit } from '@agromoll/types';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { BookingCard } from '@/components/BookingCard';
 import { ConfirmDeliveryModal } from '@/components/ConfirmDeliveryModal';
+import { OpenDisputeSheet } from '@/components/OpenDisputeSheet';
 import { api, isInvalidResponseError } from '@/lib/api';
 import { errorContentFor } from '@/lib/error-content';
 import { logger } from '@/lib/logger';
 import { useOutboxStore } from '@/store/outbox';
+import { useNotificationStore } from '@/store/notifications';
 
 /** Задержка каскадного входа карточек броней (первая отрисовка, ADR-009). */
 const STAGGER_MS = 40;
@@ -63,12 +65,16 @@ export default function MyBookingsScreen() {
   const [firstEntrance, setFirstEntrance] = useState(true);
   // Приёмка (v0.4.0-C): бронь, для которой открыта модалка подтверждения.
   const [confirming, setConfirming] = useState<BookingDto | null>(null);
+  // Арбитраж (v0.6.0-C, ADR-033): бронь, по которой открывают спор.
+  const [disputing, setDisputing] = useState<BookingDto | null>(null);
   // Предыдущие статусы: живая бронь стала «истекла» → мягкий warning-тактильный
   // сигнал один раз (не на каждый рендер).
   const prevStatuses = useRef<Map<string, BookingStatus>>(new Map());
   const ttlWarned = useRef(false);
 
   const version = useOutboxStore((s) => s.version);
+  // v0.6.0-A (ADR-031): push-сигнал — экран перечитывает данные.
+  const pushVersion = useNotificationStore((s) => s.version);
   const runSync = useOutboxStore((s) => s.runSync);
   const overrides = useOutboxStore((s) => s.overrides);
   const pendingCreates = useOutboxStore((s) => s.pendingCreates);
@@ -85,16 +91,14 @@ export default function MyBookingsScreen() {
         code: isInvalidResponseError(error) ? 'INVALID_RESPONSE' : String(error),
       });
       setState((prev) =>
-        prev.phase === 'ready'
-          ? { ...prev, staleError: error }
-          : { phase: 'error', error },
+        prev.phase === 'ready' ? { ...prev, staleError: error } : { phase: 'error', error },
       );
     }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load, version]);
+  }, [load, version, pushVersion]);
 
   const handleRefresh = useCallback((): void => {
     setRefreshing(true);
@@ -180,7 +184,11 @@ export default function MyBookingsScreen() {
       <ScreenHeader
         title="Мои брони"
         subtitle="Запросы, корректировки и подтверждения"
-        badge={activeCount > 0 ? <Badge label={`Активных: ${activeCount}`} variant="success" /> : undefined}
+        badge={
+          activeCount > 0 ? (
+            <Badge label={`Активных: ${activeCount}`} variant="success" />
+          ) : undefined
+        }
       />
       {state.phase === 'loading' ? (
         <SkeletonCard />
@@ -208,6 +216,7 @@ export default function MyBookingsScreen() {
                 booking={booking}
                 pendingLabel="Ждёт сети"
                 onConfirmDelivery={setConfirming}
+                onOpenDispute={setDisputing}
               />
             ))}
           </PullToRefreshScrollView>
@@ -256,6 +265,7 @@ export default function MyBookingsScreen() {
                   booking={booking}
                   pendingLabel={pendingLabelFor(booking.id, overrides)}
                   onConfirmDelivery={setConfirming}
+                  onOpenDispute={setDisputing}
                 />
               </Animated.View>
             );
@@ -271,6 +281,16 @@ export default function MyBookingsScreen() {
         visible={confirming !== null}
         booking={confirming}
         onClose={() => setConfirming(null)}
+      />
+
+      {/* Арбитраж (v0.6.0-C, ADR-033): эскалация сделки нейтральному арбитру. */}
+      <OpenDisputeSheet
+        visible={disputing !== null}
+        type="booking"
+        referenceId={disputing?.id ?? ''}
+        subject={disputing?.listingTitle ?? 'Бронь'}
+        onClose={() => setDisputing(null)}
+        onOpened={() => router.push('/disputes')}
       />
     </Screen>
   );

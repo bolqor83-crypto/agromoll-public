@@ -63,3 +63,18 @@ export async function isCoachMarkSeen(role: string): Promise<boolean> {
 export async function markCoachMarkSeen(role: string): Promise<void> {
   await write(COACH_KEY_PREFIX + role, SEEN);
 }
+
+// ─── Push-уведомления (v0.6.0-A, ADR-031) ───────────────────────────────────
+
+/** Ключ баннера «Включите уведомления» (отказ в разрешении). */
+const PUSH_BANNER_KEY = 'agromoll.push-banner-dismissed.v1';
+
+/** Баннер «включите уведомления» уже выключали навсегда? */
+export async function isNotificationBannerDismissed(): Promise<boolean> {
+  return (await read(PUSH_BANNER_KEY)) === SEEN;
+}
+
+/** Пользователь закрыл баннер «включите уведомления» — больше не показываем. */
+export async function markNotificationBannerDismissed(): Promise<void> {
+  await write(PUSH_BANNER_KEY, SEEN);
+}

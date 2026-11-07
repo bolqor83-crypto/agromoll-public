@@ -33,6 +33,8 @@ import type { CreateDeliveryInput } from '@agromoll/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkHoursService } from '../work-hours/work-hours.service';
 import { toMonthKey } from '../work-hours/work-hours.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { DisputesService } from '../disputes/disputes.service';
 import {
   DEFAULT_DELIVERY_TTL_MINUTES,
   DELIVERY_CORRIDOR_MATCH_METERS,
@@ -97,6 +99,8 @@ export class DeliveriesService {
     private readonly prisma: PrismaService,
     private readonly workHours: WorkHoursService,
     @Inject(DELIVERY_TTL_MINUTES) private readonly ttlMinutes: number,
+    private readonly notifications: NotificationsService,
+    private readonly disputes: DisputesService,
   ) {}
 
   /** Покупатель создаёт запрос доставки (идемпотентно, ADR-006). */
@@ -176,7 +180,10 @@ export class DeliveriesService {
 
     const scored = foreign
       .map((request) => {
-        const pickup: GeoCoord = { lat: request.pickupPoint.latitude, lng: request.pickupPoint.longitude };
+        const pickup: GeoCoord = {
+          lat: request.pickupPoint.latitude,
+          lng: request.pickupPoint.longitude,
+        };
         const dropoff: GeoCoord = {
           lat: request.dropoffPoint.latitude,
           lng: request.dropoffPoint.longitude,
@@ -234,11 +241,15 @@ export class DeliveriesService {
       if (current.buyerId === driverId) {
         throw new ForbiddenException('Нельзя взять собственный заказ');
       }
+      // Арбитраж замораживает спорную доставку (ADR-033).
+      await this.disputes.assertNoActiveDispute('delivery', deliveryId, tx);
       const sellerId = current.pickupPoint.ownerId;
 
       // 289-ФЗ: пара заблокирована → заказ остаётся открытым, попытка — в аудит.
-      const blocked = await tx.blockedPair.findUnique({
-        where: { driverId_sellerId: { driverId, sellerId } },
+      // Активная блокировка: снятая арбитром по апелляции (ADR-035)
+      // работу пары не ограничивает.
+      const blocked = await tx.blockedPair.findFirst({
+        where: { driverId, sellerId, unblockedAt: null },
       });
       if (blocked) {
         // Событие — отдельной записью (транзакция ниже откатится с 409).
@@ -288,6 +299,15 @@ export class DeliveriesService {
       return updated;
     });
 
+    // Push покупателю после фиксации (ADR-031): водитель взял заказ.
+    await this.notifications.send({
+      userId: delivery.buyerId,
+      type: 'delivery_assigned',
+      title: 'Водитель взял ваш заказ',
+      body: `${delivery.assignedDriver?.displayName ?? 'Водитель'} взялся доставить ваш товар. Отслеживайте статус в «Доставке».`,
+      data: { deliveryId },
+    });
+
     return this.toDto(delivery, driverId, null);
   }
 
@@ -302,8 +322,12 @@ export class DeliveriesService {
         throw new ForbiddenException('Начать может только водитель, взявший заказ');
       }
       if (current.status !== 'assigned') {
-        throw new ConflictException(`Начать можно только из «assigned» (сейчас «${current.status}»)`);
+        throw new ConflictException(
+          `Начать можно только из «assigned» (сейчас «${current.status}»)`,
+        );
       }
+      // Арбитраж замораживает спорную доставку (ADR-033).
+      await this.disputes.assertNoActiveDispute('delivery', deliveryId, tx);
       const updated = await tx.deliveryRequest.update({
         where: { id: deliveryId },
         data: { status: 'in_transit' },
@@ -313,6 +337,14 @@ export class DeliveriesService {
         data: { deliveryId, actorId: driverId, action: 'started' },
       });
       return updated;
+    });
+    // Push покупателю (ADR-031): водитель выехал к точке забора.
+    await this.notifications.send({
+      userId: delivery.buyerId,
+      type: 'delivery_started',
+      title: 'Водитель выехал',
+      body: 'Ваш заказ в пути. Следите за статусом в «Доставке».',
+      data: { deliveryId },
     });
     this.logger.log({ deliveryId, driverId }, 'delivery:started');
     return this.toDto(delivery, driverId, null);
@@ -340,6 +372,8 @@ export class DeliveriesService {
           `Завершить можно только из «in_transit» (сейчас «${current.status}»)`,
         );
       }
+      // Арбитраж замораживает спорную доставку (ADR-033).
+      await this.disputes.assertNoActiveDispute('delivery', deliveryId, tx);
       const updated = await tx.deliveryRequest.update({
         where: { id: deliveryId },
         data: { status: 'delivered', deliveredAt: new Date() },
@@ -349,6 +383,15 @@ export class DeliveriesService {
         data: { deliveryId, actorId: driverId, action: 'delivered' },
       });
       return updated;
+    });
+
+    // Push покупателю (ADR-031): товар передан, можно принимать.
+    await this.notifications.send({
+      userId: delivery.buyerId,
+      type: 'delivery_delivered',
+      title: 'Заказ доставлен',
+      body: 'Водитель отметил передачу товара. Проверьте заказ и подтвердите приёмку.',
+      data: { deliveryId },
     });
 
     // Часы 289-ФЗ: закрываем смену пары (если открыта) и проверяем серию.
@@ -381,9 +424,15 @@ export class DeliveriesService {
           throw new BadRequestException('После выезда причина отмены обязательна');
         }
       }
-      if (current.status !== 'open' && current.status !== 'assigned' && current.status !== 'in_transit') {
+      if (
+        current.status !== 'open' &&
+        current.status !== 'assigned' &&
+        current.status !== 'in_transit'
+      ) {
         throw new ConflictException(`Отменить из «${current.status}» нельзя`);
       }
+      // Арбитраж замораживает спорную доставку (ADR-033).
+      await this.disputes.assertNoActiveDispute('delivery', deliveryId, tx);
       const updated = await tx.deliveryRequest.update({
         where: { id: deliveryId },
         data: { status: 'cancelled' },
@@ -400,6 +449,23 @@ export class DeliveriesService {
       return updated;
     });
 
+    // Push другой стороне (ADR-031): инициатор знает об отмене сам.
+    // Водителю — если отменил покупатель (и заказ уже был взят).
+    const counterpartyId =
+      actorId === delivery.buyerId ? delivery.assignedDriverId : delivery.buyerId;
+    if (counterpartyId) {
+      await this.notifications.send({
+        userId: counterpartyId,
+        type: 'delivery_cancelled',
+        title: 'Заказ доставки отменён',
+        body:
+          reason !== undefined && reason.trim().length > 0
+            ? `Заказ отменён. Причина: ${reason}`
+            : 'Заказ отменён другой стороной.',
+        data: { deliveryId },
+      });
+    }
+
     // Смена закрывается и при отмене взятого заказа — часы честные.
     await this.closePairSession(deliveryId);
 
@@ -415,6 +481,10 @@ export class DeliveriesService {
     });
     let expired = 0;
     for (const { id } of stale) {
+      // Спор по доставке замораживает и TTL (ADR-033).
+      if (await this.disputes.hasActiveDispute('delivery', id)) {
+        continue;
+      }
       try {
         const done = await this.prisma.$transaction(async (tx) => {
           const current = await tx.deliveryRequest.findUnique({ where: { id } });

@@ -57,6 +57,19 @@ export function createApiModuleMock() {
     debtsSummary: jest.fn(),
     geoPointsNearby: jest.fn(),
     geoPointsMine: jest.fn(),
+    // v0.6.0-C (ADR-033): арбитраж споров.
+    myDisputes: jest.fn(),
+    disputeQueue: jest.fn(),
+    dispute: jest.fn(),
+    // v0.6.0-E (ADR-035): апелляции на блокировки 289-ФЗ.
+    workHoursMine: jest.fn(),
+    workHoursOpenSession: jest.fn(),
+    openAppeal: jest.fn(),
+    myAppeals: jest.fn(),
+    appealQueue: jest.fn(),
+    appeal: jest.fn(),
+    assignAppeal: jest.fn(),
+    resolveAppeal: jest.fn(),
   };
   const toApiError = (error: unknown): MockApiError => {
     if (error && typeof error === 'object' && 'code' in error && 'message' in error) {
@@ -118,7 +131,7 @@ export function createOutboxStoreMock(initial: Partial<OutboxStateMock> = {}) {
     refreshQueue: jest.fn(),
     ...initial,
   };
-  const useOutboxStore = <T,>(selector: (s: OutboxStateMock) => T): T => selector(state);
+  const useOutboxStore = <T>(selector: (s: OutboxStateMock) => T): T => selector(state);
   useOutboxStore.getState = (): OutboxStateMock => state;
   useOutboxStore.setState = (patch: Partial<OutboxStateMock>): void => {
     Object.assign(state, patch);
@@ -148,8 +161,12 @@ export function createAuthStoreMock(
     signOut: jest.fn(),
     changeRole: jest.fn(),
   };
-  const useAuthStore = <T,>(selector: (s: typeof state) => T): T => selector(state);
+  const useAuthStore = <T>(selector: (s: typeof state) => T): T => selector(state);
   useAuthStore.getState = () => state;
+  // Подмена состояния из тестов (роль арбитра и т.п., v0.6.0-C).
+  useAuthStore.setState = (patch: Partial<typeof state>): void => {
+    Object.assign(state, patch);
+  };
   return { useAuthStore };
 }
 
@@ -160,7 +177,7 @@ export function createThemeStoreMock() {
     setSetting: jest.fn(),
     toggle: jest.fn(),
   };
-  const useThemeStore = <T,>(selector: (s: typeof state) => T): T => selector(state);
+  const useThemeStore = <T>(selector: (s: typeof state) => T): T => selector(state);
   return { useThemeStore };
 }
 

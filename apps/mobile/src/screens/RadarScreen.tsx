@@ -35,6 +35,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { api, toApiError } from '@/lib/api';
 import { errorContentFor } from '@/lib/error-content';
 import { logger } from '@/lib/logger';
+import { useNotificationStore } from '@/store/notifications';
 
 /** Сколько минут осталось жить открытому заказу (TTL, ADR-015). */
 function minutesLeft(expiresAt: string): number {
@@ -63,6 +64,8 @@ type RadarState =
 
 export default function RadarScreen() {
   const [state, setState] = useState<RadarState>({ phase: 'loading' });
+  // v0.6.0-A (ADR-031): push-сигнал — экран перечитывает данные.
+  const pushVersion = useNotificationStore((s) => s.version);
   const [refreshing, setRefreshing] = useState(false);
   const [taking, setTaking] = useState<string | null>(null);
 
@@ -82,7 +85,7 @@ export default function RadarScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, pushVersion]);
 
   // Тексты ошибок — из единого маппинга (ADR-026): заголовок и пояснение.
   const stale =

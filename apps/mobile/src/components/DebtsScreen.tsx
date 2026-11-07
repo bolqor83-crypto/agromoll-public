@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import {
   Badge,
   Button,
@@ -30,6 +31,7 @@ import {
 import type { CounterpartyDto, DebtDto, DebtStatus } from '@agromoll/types';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { DebtCard } from '@/components/DebtCard';
+import { OpenDisputeSheet } from '@/components/OpenDisputeSheet';
 import { CreateDebtModal } from '@/components/CreateDebtModal';
 import { api, isInvalidResponseError, toApiError } from '@/lib/api';
 import { logger } from '@/lib/logger';
@@ -43,11 +45,10 @@ import {
 import { useAuthStore } from '@/store/auth';
 import { useOutboxStore } from '@/store/outbox';
 import { DEMO_DEBTS } from '@/lib/demo-data';
+import { useNotificationStore } from '@/store/notifications';
 
 type DebtsState =
-  | { phase: 'loading' }
-  | { phase: 'invalid' }
-  | { phase: 'ready'; debts: DebtDto[]; demo: boolean };
+  { phase: 'loading' } | { phase: 'invalid' } | { phase: 'ready'; debts: DebtDto[]; demo: boolean };
 
 export function DebtsScreen() {
   const [state, setState] = useState<DebtsState>({ phase: 'loading' });
@@ -59,7 +60,12 @@ export function DebtsScreen() {
   const [flash, setFlash] = useState(false);
 
   const viewerId = useAuthStore((s) => s.user?.id ?? '');
+  const router = useRouter();
+  // Арбитраж (v0.6.0-C, ADR-033): долг, эскалируемый нейтральному арбитру.
+  const [escalating, setEscalating] = useState<DebtDto | null>(null);
   const version = useOutboxStore((s) => s.version);
+  // v0.6.0-A (ADR-031): push-сигнал — экран перечитывает данные.
+  const pushVersion = useNotificationStore((s) => s.version);
   const runSync = useOutboxStore((s) => s.runSync);
   const debtOverrides = useOutboxStore((s) => s.debtOverrides);
   const pendingDebtCreates = useOutboxStore((s) => s.pendingDebtCreates);
@@ -80,7 +86,7 @@ export function DebtsScreen() {
 
   useEffect(() => {
     void load();
-  }, [load, version]);
+  }, [load, version, pushVersion]);
 
   const loadCounterparties = useCallback(async (): Promise<void> => {
     setCounterpartiesLoading(true);
@@ -106,9 +112,7 @@ export function DebtsScreen() {
     }
     return state.debts.map((debt) => {
       const override = debtOverrides[debt.id];
-      return override
-        ? { ...debt, status: override.status, pending: true }
-        : debt;
+      return override ? { ...debt, status: override.status, pending: true } : debt;
     });
   }, [state, debtOverrides]);
 
@@ -118,13 +122,10 @@ export function DebtsScreen() {
 
   // ─── Действия ───────────────────────────────────────────────────────────
 
-  const handleSettle = useCallback(
-    (debt: DebtDto): void => {
-      setFlash(true); // ADR-027: успех — галочкой, не салютом
-      void settleDebtMutation(debt.id);
-    },
-    [],
-  );
+  const handleSettle = useCallback((debt: DebtDto): void => {
+    setFlash(true); // ADR-027: успех — галочкой, не салютом
+    void settleDebtMutation(debt.id);
+  }, []);
 
   const handleDispute = useCallback((debt: DebtDto): void => {
     void disputeDebtMutation(debt.id);
@@ -134,8 +135,7 @@ export function DebtsScreen() {
     (debt: DebtDto): void => {
       // Оптимистичный статус: второе подтверждение закрывает спор, первое —
       // оставляет открытым (ждём другую сторону).
-      const closes =
-        debt.resolveRequestedById !== null && debt.resolveRequestedById !== viewerId;
+      const closes = debt.resolveRequestedById !== null && debt.resolveRequestedById !== viewerId;
       if (closes) {
         setFlash(true); // спор закрыт обоюдно — тот же тихий успех (ADR-027)
       }
@@ -144,17 +144,20 @@ export function DebtsScreen() {
     [viewerId],
   );
 
-  const handleRemind = useCallback((debt: DebtDto): void => {
-    void remindDebt(debt.id)
-      .then(() => {
-        // Сервер записал напоминание: перечитываем — canRemind станет false.
-        void load();
-      })
-      .catch((error: unknown) => {
-        const apiError = toApiError(error);
-        Alert.alert('Напоминание', apiError.hint ?? apiError.message);
-      });
-  }, [load]);
+  const handleRemind = useCallback(
+    (debt: DebtDto): void => {
+      void remindDebt(debt.id)
+        .then(() => {
+          // Сервер записал напоминание: перечитываем — canRemind станет false.
+          void load();
+        })
+        .catch((error: unknown) => {
+          const apiError = toApiError(error);
+          Alert.alert('Напоминание', apiError.hint ?? apiError.message);
+        });
+    },
+    [load],
+  );
 
   // ─── Рендер ─────────────────────────────────────────────────────────────
 
@@ -232,6 +235,7 @@ export function DebtsScreen() {
                 onDispute={handleDispute}
                 onResolve={handleResolve}
                 onRemind={handleRemind}
+                onEscalate={setEscalating}
               />
             ))}
             {/* Офлайн-созданные долги — псевдо-карточки до подтверждения. */}
@@ -255,6 +259,7 @@ export function DebtsScreen() {
                 onDispute={handleDispute}
                 onResolve={handleResolve}
                 onRemind={handleRemind}
+                onEscalate={setEscalating}
               />
             ))}
           </Section>
@@ -281,6 +286,22 @@ export function DebtsScreen() {
         onClose={() => setCreateVisible(false)}
         counterparties={counterparties}
         counterpartiesLoading={counterpartiesLoading}
+      />
+
+      {/* Арбитраж (v0.6.0-C, ADR-033): эскалация долга нейтральному арбитру. */}
+      <OpenDisputeSheet
+        visible={escalating !== null}
+        type="debt"
+        referenceId={escalating?.id ?? ''}
+        subject={
+          escalating
+            ? `Долг ${formatMoney(escalating.amount)}${
+                escalating.description ? ` · ${escalating.description}` : ''
+              }`
+            : 'Долг'
+        }
+        onClose={() => setEscalating(null)}
+        onOpened={() => router.push('/disputes')}
       />
     </Screen>
   );

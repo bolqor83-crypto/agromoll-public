@@ -5,9 +5,11 @@ import { LoggerModule } from 'nestjs-pino';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { IdempotencyInterceptor } from './common/idempotency.interceptor';
+import { AppealsModule } from './appeals/appeals.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { DebtsModule } from './debts/debts.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
+import { DisputesModule } from './disputes/disputes.module';
 import { GeoModule } from './geo/geo.module';
 import { HealthModule } from './health/health.module';
 import { ListingsModule } from './listings/listings.module';
@@ -50,6 +52,10 @@ const isProduction = process.env.NODE_ENV === 'production';
     ReputationModule,
     GeoModule,
     DeliveriesModule,
+    // Арбитраж споров (v0.6.0-C, ADR-033).
+    DisputesModule,
+    // Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035).
+    AppealsModule,
   ],
   providers: [
     // Идемпотентность POST-мутаций (X-Idempotency-Key, ADR-006):

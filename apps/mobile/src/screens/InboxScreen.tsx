@@ -16,6 +16,7 @@ import { api } from '@/lib/api';
 import { errorContentFor } from '@/lib/error-content';
 import { logger } from '@/lib/logger';
 import { useOutboxStore } from '@/store/outbox';
+import { useNotificationStore } from '@/store/notifications';
 
 /**
  * Конечный автомат «Входящих» (v0.6.1-D, ADR-026, вариант A — без фейков):
@@ -40,6 +41,8 @@ export default function InboxScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const version = useOutboxStore((s) => s.version);
+  // v0.6.0-A (ADR-031): push-сигнал — экран перечитывает данные.
+  const pushVersion = useNotificationStore((s) => s.version);
   const runSync = useOutboxStore((s) => s.runSync);
   const overrides = useOutboxStore((s) => s.overrides);
 
@@ -50,16 +53,14 @@ export default function InboxScreen() {
     } catch (error) {
       logger.warn('inbox', 'входящие брони не загрузились', { error: String(error) });
       setState((prev) =>
-        prev.phase === 'ready'
-          ? { ...prev, staleError: error }
-          : { phase: 'error', error },
+        prev.phase === 'ready' ? { ...prev, staleError: error } : { phase: 'error', error },
       );
     }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load, version]);
+  }, [load, version, pushVersion]);
 
   const handleRefresh = useCallback((): void => {
     setRefreshing(true);
@@ -92,7 +93,11 @@ export default function InboxScreen() {
       <ScreenHeader
         title="Входящие"
         subtitle="Брони покупателей по вашим лотам"
-        badge={pendingCount > 0 ? <Badge label={`Ждут решения: ${pendingCount}`} variant="attention" /> : undefined}
+        badge={
+          pendingCount > 0 ? (
+            <Badge label={`Ждут решения: ${pendingCount}`} variant="attention" />
+          ) : undefined
+        }
       />
       {state.phase === 'loading' ? (
         <View style={{ gap: spacing.md }}>

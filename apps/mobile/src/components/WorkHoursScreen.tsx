@@ -28,8 +28,9 @@ import {
   spacing,
 } from '@agromoll/ui';
 import type { CounterpartyDto, WorkHoursPairDto, WorkHoursSessionDto } from '@agromoll/types';
-import { WORK_HOURS_UI } from '@agromoll/types';
+import { APPEAL_STATUS_LABELS, WORK_HOURS_UI } from '@agromoll/types';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { AppealSheet } from '@/components/AppealSheet';
 import { api, isInvalidResponseError, toApiError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { useAuthStore } from '@/store/auth';
@@ -49,6 +50,8 @@ export function WorkHoursScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [counterparties, setCounterparties] = useState<CounterpartyDto[]>([]);
   const [pickerVisible, setPickerVisible] = useState(false);
+  // v0.6.0-E (ADR-035): шторка обжалования блокировки.
+  const [appealPair, setAppealPair] = useState<WorkHoursPairDto | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
@@ -77,7 +80,8 @@ export function WorkHoursScreen() {
     void load().finally(() => setRefreshing(false));
   }, [load]);
 
-  /** Начать смену: прямой вызов; 409 WORK_PAIR_BLOCKED — мягкий экран паузы. */
+  /** Начать смену: прямой вызов; 409 WORK_PAIR_BLOCKED — мягкий экран паузы
+   *  с подсказкой об апелляции (ADR-035). */
   const handleStart = useCallback(
     (sellerId: string): void => {
       setBusy(true);
@@ -93,7 +97,8 @@ export function WorkHoursScreen() {
               'Нужна пауза',
               (apiError.hint ?? '') +
                 '\n\nПо закону нужна пауза, чтобы защитить вас и платформу. ' +
-                'Попробуйте другого продавца или подождите — счётчик обнулится в следующем месяце.',
+                'Попробуйте другого продавца или подождите — счётчик обнулится в следующем месяце. ' +
+                'Если часы считались неверно — оспорьте блокировку в карточке пары ниже.',
             );
           } else {
             Alert.alert('Смена', apiError.hint ?? apiError.message);
@@ -215,6 +220,7 @@ export function WorkHoursScreen() {
                 isDriver={isDriver}
                 busy={busy}
                 onEnd={handleEnd}
+                onAppeal={setAppealPair}
               />
             ))
           )}
@@ -239,21 +245,36 @@ export function WorkHoursScreen() {
           onClose={() => setPickerVisible(false)}
         />
       ) : null}
+
+      {/* v0.6.0-E (ADR-035): обжалование блокировки пары в арбитраж. */}
+      {appealPair?.blockedPairId ? (
+        <AppealSheet
+          visible
+          blockedPairId={appealPair.blockedPairId}
+          counterpartName={appealPair.counterpartName}
+          onClose={() => setAppealPair(null)}
+          onOpened={() => void load()}
+        />
+      ) : null}
     </Screen>
   );
 }
 
-/** Карточка пары: имя, часы месяца, прогресс-бар, серия, предупреждения. */
+/** Карточка пары: имя, часы месяца, прогресс-бар, серия, предупреждения,
+ *  кнопка обжалования блокировки (v0.6.0-E, ADR-035). */
 function PairCard({
   pair,
   isDriver,
   busy,
   onEnd,
+  onAppeal,
 }: {
   pair: WorkHoursPairDto;
   isDriver: boolean;
   busy: boolean;
   onEnd: (sessionId: string) => void;
+  /** Открыть шторку обжалования (заблокированная пара без активной апелляции). */
+  onAppeal: (pair: WorkHoursPairDto) => void;
 }) {
   const approaching =
     pair.totalMinutes >= WORK_HOURS_UI.approachingMinutes &&
@@ -280,7 +301,14 @@ function PairCard({
             </Text>
           </View>
           {pair.blocked ? (
-            <Badge label="Пауза по 289-ФЗ" variant="attention" />
+            pair.appeal ? (
+              <Badge
+                label={`Апелляция: ${APPEAL_STATUS_LABELS[pair.appeal.status]}`}
+                variant="neutral"
+              />
+            ) : (
+              <Badge label="Пауза по 289-ФЗ" variant="attention" />
+            )
           ) : pair.monthCounted ? (
             <Badge label="60 ч достигнуты" variant="attention" />
           ) : approaching ? (
@@ -305,10 +333,27 @@ function PairCard({
         </ProgressBar>
 
         {pair.blocked ? (
-          <Text variant="caption" color="secondary">
-            По закону нужна пауза, чтобы защитить вас и платформу. Счётчик обнулится в следующем
-            месяце.
-          </Text>
+          pair.appeal ? (
+            <Text variant="caption" color="secondary">
+              По закону нужна пауза, чтобы защитить вас и платформу. Апелляция уже в арбитраже —
+              решение придёт в уведомлениях.
+            </Text>
+          ) : (
+            <>
+              <Text variant="caption" color="secondary">
+                По закону нужна пауза, чтобы защитить вас и платформу. Счётчик обнулится в следующем
+                месяце — или оспорьте блокировку, если часы считались неверно.
+              </Text>
+              {/* Обжаловать может любая сторона пары — и водитель, и продавец. */}
+              <Button
+                title="Оспорить блокировку"
+                variant="secondary"
+                size="md"
+                disabled={busy}
+                onPress={() => onAppeal(pair)}
+              />
+            </>
+          )
         ) : approaching ? (
           <Text variant="caption" color="secondary">
             Вы близки к лимиту по 289-ФЗ с {pair.counterpartName}. Скоро потребуется пауза.
