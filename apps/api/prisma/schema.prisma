@@ -972,11 +972,20 @@ model DisputeMessage {
   @@map("dispute_messages")
 }
 
-/// Доказательство в споре (v0.6.0-C, ADR-033): фото/скан, base64 ≤ 2 МБ.
+/// Доказательство в споре (v0.6.0-C → v0.7.0-B, ADR-036).
 ///
-/// Хранение в БД — осознанное решение MVP: файлы маленькие, S3-хранилище
-/// запланировано на v0.7.0 (ADR-033 «Масштабирование»). Контент отдаётся
-/// только участникам кейса — через GET /disputes/:id (evidence без data).
+/// Файл хранится в S3-совместимом хранилище (presigned PUT напрямую с
+/// клиента — трафик не проходит через API), в БД — только ссылка и
+/// метаданные.
+/// fileUrl — две формы:
+///   s3://<objectKey>    — объект в хранилище (ключ без имени бакета:
+///                         бакет задаётся конфигом, переименование не
+///                         ломает строки);
+///   data:<mime>;base64… — резервный путь (fallback) для критических
+///                         случаев, когда хранилище недоступно; лимит
+///                         500 КБ, проверяется zod-схемой на входе.
+/// createdAt и есть момент загрузки (подтверждения) — отдельной
+/// колонки uploadedAt не заводим, дублирование бесполезно.
 model DisputeEvidence {
   id           String      @id @default(uuid())
   disputeId    String
@@ -986,8 +995,8 @@ model DisputeEvidence {
   fileName     String
   mimeType     String
   sizeBytes    Int
-  /// Сам файл: base64. Проверка размера — zod-схемой на входе API.
-  dataBase64   String      @db.Text
+  /// Ссылка на файл: s3://<objectKey> или data:<mime>;base64 (fallback).
+  fileUrl      String      @db.Text
   createdAt    DateTime    @default(now())
 
   @@index([disputeId])

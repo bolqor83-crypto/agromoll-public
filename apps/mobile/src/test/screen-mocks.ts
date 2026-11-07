@@ -61,6 +61,9 @@ export function createApiModuleMock() {
     myDisputes: jest.fn(),
     disputeQueue: jest.fn(),
     dispute: jest.fn(),
+    disputeEvidence: jest.fn(),
+    disputeEvidenceUploadUrl: jest.fn(),
+    attachDisputeEvidence: jest.fn(),
     // v0.6.0-E (ADR-035): апелляции на блокировки 289-ФЗ.
     workHoursMine: jest.fn(),
     workHoursOpenSession: jest.fn(),

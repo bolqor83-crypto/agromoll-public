@@ -1,16 +1,17 @@
 /**
- * E2E арбитража споров (v0.6.0-C, ADR-033): полный HTTP-цикл.
+ * E2E арбитража споров (v0.6.0-C ADR-033 → v0.7.0-B ADR-036): полный HTTP-цикл.
  *
- * Требует DATABASE_URL и применённых миграций — запускается в CI
- * (service-контейнеры postgis + redis) командой
+ * Требует DATABASE_URL, применённых миграций и S3_* (MinIO) — запускается
+ * в CI (service-контейнеры postgis + redis + minio) командой
  * `pnpm --filter @agromoll/api test:e2e`.
  *
  * Сценарии:
  *  1. бронь: приёмка с major_issue → эскалация в арбитраж → дубликат 409
  *     → заморозка (отмена брони 409) → очередь арбитра → assign →
- *     сообщения (внутренние заметки скрыты от сторон) → доказательства →
- *     решение favor_buyer + cancel → бронь отменена, резерв возвращён,
- *     продавец оштрафован в рейтинге;
+ *     сообщения (внутренние заметки скрыты от сторон) → доказательства
+ *     (S3-цикл: presigned PUT → confirm → presigned GET; fallback
+ *     data:-URL ≤ 500 КБ; чужой objectKey — 400) → решение favor_buyer +
+ *     cancel → бронь отменена, резерв возвращён, продавец оштрафован;
  *  2. долг: эскалация активного долга → compromise + settle_adjusted →
  *     сумма снижена, статус settled;
  *  3. доступ: очередь только арбитру (403), арбитр не открывает споры;
@@ -183,24 +184,86 @@ describe('Disputes arbitration flow (e2e, HTTP)', () => {
     const arbView = await get(arbitrator, `/disputes/${disputeId}`).expect(200);
     expect(arbView.body.messages).toHaveLength(3); // + внутренняя
 
-    // 9. Доказательство покупателя (base64 «фото»).
-    const evidence = await post(buyer, `/disputes/${disputeId}/evidence`)
-      .send({
-        fileName: 'yashiki.jpg',
-        mimeType: 'image/jpeg',
-        dataBase64: Buffer.from('broken-crates-photo').toString('base64'),
-      })
+    // 9. Доказательства покупателя (v0.7.0-B, ADR-036) — полный S3-цикл
+    //    против реального MinIO: presigned URL → PUT напрямую в хранилище →
+    //    confirm с objectKey (сверка HEAD) → список с presigned GET.
+    const photoBytes = Buffer.from('broken-crates-photo-e2e');
+    const uploadUrlResponse = await post(buyer, `/disputes/${disputeId}/evidence/upload-url`)
+      .send({ mimeType: 'image/jpeg', sizeBytes: photoBytes.length })
       .expect(201);
-    expect(evidence.body.sizeBytes).toBeGreaterThan(0);
+    const { objectKey, uploadUrl } = uploadUrlResponse.body as {
+      objectKey: string;
+      uploadUrl: string;
+    };
+    expect(objectKey).toMatch(new RegExp(`^disputes/${disputeId}/[\\w.-]+\\.jpg$`));
 
-    // Файл больше 2 МБ — 400 (защита на входе, zod).
+    // PUT напрямую в MinIO (presigned, без токенов приложения).
+    const putResponse = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: photoBytes,
+    });
+    expect(putResponse.status).toBe(200);
+
+    // Confirm: без загрузки — 400; после загрузки — 201.
     await post(buyer, `/disputes/${disputeId}/evidence`)
       .send({
+        storage: 's3',
+        objectKey,
+        fileName: 'yashiki.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: photoBytes.length,
+      })
+      .expect(201);
+
+    // Список доказательств: участник получает presigned GET-ссылку.
+    const evidenceList = await get(buyer, `/disputes/${disputeId}/evidence`).expect(200);
+    expect(evidenceList.body.items).toHaveLength(1);
+    expect(evidenceList.body.items[0].url).toContain(objectKey);
+    // Ссылка рабочая: GET по ней отдаёт байты фото.
+    const getResponse = await fetch(evidenceList.body.items[0].url);
+    expect(getResponse.status).toBe(200);
+    expect(Buffer.from(await getResponse.arrayBuffer()).toString()).toBe(photoBytes.toString());
+
+    // Посторонний не видит ссылок (404 — не раскрываем факт спора).
+    await get(outsider, `/disputes/${disputeId}/evidence`).expect(404);
+
+    // 9a. Fallback: data:-URL ≤ 500 КБ (хранилище доступно, но путь валиден).
+    const fallback = await post(buyer, `/disputes/${disputeId}/evidence`)
+      .send({
+        storage: 'data',
+        fileName: 'akt.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: `data:image/jpeg;base64,${photoBytes.toString('base64')}`,
+      })
+      .expect(201);
+    expect(fallback.body.sizeBytes).toBe(photoBytes.length);
+
+    // Fallback больше 500 КБ — 400 (защита на входе, zod).
+    await post(buyer, `/disputes/${disputeId}/evidence`)
+      .send({
+        storage: 'data',
         fileName: 'huge.jpg',
         mimeType: 'image/jpeg',
-        dataBase64: 'A'.repeat(3 * 1024 * 1024),
+        dataUrl: `data:image/jpeg;base64,${'A'.repeat(700_000)}`,
       })
       .expect(400);
+
+    // 9b. Чужой objectKey (другой спор) — 400.
+    await post(buyer, `/disputes/${disputeId}/evidence`)
+      .send({
+        storage: 's3',
+        objectKey: `disputes/00000000-0000-4000-8000-000000000000/stolen.jpg`,
+        fileName: 'stolen.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: photoBytes.length,
+      })
+      .expect(400);
+
+    // 9c. Оба файла в списке: presigned GET + data:-URL как есть.
+    const listAfterFallback = await get(arbitrator, `/disputes/${disputeId}/evidence`).expect(200);
+    expect(listAfterFallback.body.items).toHaveLength(2);
+    expect(listAfterFallback.body.items[1].url).toMatch(/^data:image\/jpeg;base64,/);
 
     // 10. Решение: прав покупатель, бронь отменить, резерв вернуть.
     const resolved = await post(arbitrator, `/disputes/${disputeId}/resolve`)

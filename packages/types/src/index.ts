@@ -812,6 +812,27 @@ export interface DisputeEvidenceDto {
   createdAt: string;
 }
 
+/** Ответ POST /disputes/:id/evidence/upload-url (v0.7.0-B, ADR-036). */
+export interface DisputeEvidenceUploadUrlDto {
+  /** Ключ объекта — подтвердить его в POST /disputes/:id/evidence. */
+  objectKey: string;
+  /** Куда PUT-ить файл (живёт expiresIn секунд). */
+  uploadUrl: string;
+  /** Срок жизни ссылки, секунды. */
+  expiresIn: number;
+}
+
+/** Элемент GET /disputes/:id/evidence: метаданные + ссылка просмотра. */
+export interface DisputeEvidenceItemDto extends DisputeEvidenceDto {
+  /** Presigned GET-ссылка (S3) или data:-URL (fallback). */
+  url: string;
+}
+
+/** Ответ GET /disputes/:id/evidence. */
+export interface DisputeEvidenceListDto {
+  items: DisputeEvidenceItemDto[];
+}
+
 /** Кейс арбитража (список). */
 export interface DisputeDto {
   id: string;

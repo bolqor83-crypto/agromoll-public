@@ -20,8 +20,9 @@ import {
   UserResponseSchema,
   UserRoleSchema,
   DisputeEvidenceSchema,
+  DisputeEvidenceUploadUrlSchema,
   DisputeMessageSchema,
-  DISPUTE_EVIDENCE_MAX_BYTES,
+  DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES,
   OpenDisputeSchema,
   ResolveDisputeSchema,
   UpdateRoleSchema,
@@ -345,13 +346,57 @@ describe('@agromoll/validation', () => {
       expect(DisputeMessageSchema.safeParse({ body: 'x'.repeat(2001) }).success).toBe(false);
     });
 
-    it('DisputeEvidenceSchema: base64 ≤ 2 МБ', () => {
-      const ok = { fileName: 'photo.jpg', mimeType: 'image/jpeg', dataBase64: 'aGVsbG8gd29ybGQ=' };
-      expect(DisputeEvidenceSchema.safeParse(ok).success).toBe(true);
-      // base64-строка длиннее лимита ~2.8 млн символов — файл > 2 МБ
-      const huge = { ...ok, dataBase64: 'A'.repeat(DISPUTE_EVIDENCE_MAX_BYTES * 2) };
-      expect(DisputeEvidenceSchema.safeParse(huge).success).toBe(false);
-      expect(DisputeEvidenceSchema.safeParse({ ...ok, mimeType: 'не-mime' }).success).toBe(false);
+    it('DisputeEvidenceSchema: s3-подтверждение и fallback dataUrl ≤ 500 КБ', () => {
+      // S3-путь: подтверждение загруженного объекта
+      const s3 = {
+        storage: 's3',
+        objectKey: `disputes/0e0d9d8e-1111-4222-8333-444455556666/${'a'.repeat(8)}.jpg`,
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 1234,
+      };
+      expect(DisputeEvidenceSchema.safeParse(s3).success).toBe(true);
+      // Чужой ключ (не disputes/<uuid>/…) — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...s3, objectKey: 'listings/123/evil.jpg' }).success).toBe(false);
+      // Больше 10 МБ — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...s3, sizeBytes: 11 * 1024 * 1024 }).success).toBe(false);
+
+      // Fallback: data:-URL до 500 КБ
+      const data = {
+        storage: 'data',
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: `data:image/jpeg;base64,${'aGVsbG8gd29ybGQ='.repeat(100)}`,
+      };
+      expect(DisputeEvidenceSchema.safeParse(data).success).toBe(true);
+      // Кривой формат dataUrl — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...data, dataUrl: 'not-a-data-url' }).success).toBe(false);
+      // Больше 500 КБ декодированного (base64-хвост длиннее ~683 тыс. символов) — отклоняется
+      expect(
+        DisputeEvidenceSchema.safeParse({
+          ...data,
+          dataUrl: `data:image/jpeg;base64,${'A'.repeat(DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES * 2)}`,
+        }).success,
+      ).toBe(false);
+      // Запрещённый тип — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...data, mimeType: 'video/mp4' }).success).toBe(false);
+    });
+
+    it('DisputeEvidenceUploadUrlSchema: запрос presigned URL', () => {
+      expect(
+        DisputeEvidenceUploadUrlSchema.safeParse({ mimeType: 'image/jpeg', sizeBytes: 1024 })
+          .success,
+      ).toBe(true);
+      // Больше 10 МБ — на этом этапе, до подписания ссылки
+      expect(
+        DisputeEvidenceUploadUrlSchema.safeParse({
+          mimeType: 'image/jpeg',
+          sizeBytes: 11 * 1024 * 1024,
+        }).success,
+      ).toBe(false);
+      expect(
+        DisputeEvidenceUploadUrlSchema.safeParse({ mimeType: 'video/mp4', sizeBytes: 1024 }).success,
+      ).toBe(false);
     });
 
     it('ResolveDisputeSchema: решения и судьба объекта', () => {

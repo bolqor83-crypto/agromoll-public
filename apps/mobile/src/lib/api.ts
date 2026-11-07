@@ -34,6 +34,8 @@ import type {
   DeliveryDto,
   DisputeDetailDto,
   DisputeDto,
+  DisputeEvidenceListDto,
+  DisputeEvidenceUploadUrlDto,
   DisputesListDto,
   GeoPointDto,
   ListingDto,
@@ -69,6 +71,9 @@ import {
   DeliveriesResponseSchema,
   DeliveryResponseSchema,
   DisputeDetailResponseSchema,
+  DisputeEvidenceListResponseSchema,
+  DisputeEvidenceResponseSchema,
+  DisputeEvidenceUploadUrlResponseSchema,
   DisputeMessageResponseSchema,
   DisputeResponseSchema,
   DisputesListResponseSchema,
@@ -820,6 +825,67 @@ export const api = {
   disputeQueue(): Promise<DisputesListDto> {
     return apiRequest<DisputesListDto>({ method: 'GET', url: '/disputes/queue' }).then((d) =>
       validateResponse(DisputesListResponseSchema, d, 'disputes/queue'),
+    );
+  },
+
+  // ─── Доказательства споров (v0.7.0-B, ADR-036) ───────────────
+  // Файлы ходят напрямую клиент ↔ S3-хранилище по presigned URL:
+  // экономия трафика API. Fallback (хранилище недоступно, 503) —
+  // data:-URL ≤ 500 КБ через тот же confirm-эндпоинт.
+
+  /** Presigned URL для прямой загрузки файла (участник/арбитр). */
+  disputeEvidenceUploadUrl(
+    disputeId: string,
+    input: { mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf'; sizeBytes: number },
+  ): Promise<DisputeEvidenceUploadUrlDto> {
+    return apiRequest<DisputeEvidenceUploadUrlDto>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/evidence/upload-url`,
+      data: input,
+    }).then((d) =>
+      validateResponse(
+        DisputeEvidenceUploadUrlResponseSchema,
+        d,
+        'disputes/:id/evidence/upload-url',
+      ),
+    );
+  },
+
+  /**
+   * Подтвердить доказательство: objectKey (S3-путь) или dataUrl (fallback).
+   */
+  attachDisputeEvidence(
+    disputeId: string,
+    input:
+      | {
+          storage: 's3';
+          objectKey: string;
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+          sizeBytes: number;
+        }
+      | {
+          storage: 'data';
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+          dataUrl: string;
+        },
+  ): Promise<DisputeDetailDto['evidence'][number]> {
+    return apiRequest<DisputeDetailDto['evidence'][number]>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/evidence`,
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(DisputeEvidenceResponseSchema, d, 'disputes/:id/evidence'));
+  },
+
+  /** Список доказательств с ссылками для просмотра (участник/арбитр). */
+  disputeEvidence(disputeId: string): Promise<DisputeEvidenceListDto> {
+    return apiRequest<DisputeEvidenceListDto>({
+      method: 'GET',
+      url: `/disputes/${disputeId}/evidence`,
+    }).then((d) =>
+      validateResponse(DisputeEvidenceListResponseSchema, d, 'disputes/:id/evidence (GET)'),
     );
   },
 

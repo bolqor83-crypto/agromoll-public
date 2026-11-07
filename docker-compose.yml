@@ -1,4 +1,5 @@
-# Стек для локальной разработки: PostgreSQL + PostGIS и Redis.
+# Стек для локальной разработки: PostgreSQL + PostGIS, Redis и MinIO
+# (S3-совместимое хранилище доказательств и фото, v0.7.0-B, ADR-036).
 # Redis на этом этапе не используется приложением — заложен на будущее (ADR-001).
 services:
   postgres:
@@ -33,6 +34,30 @@ services:
       timeout: 3s
       retries: 10
 
+  # S3-совместимое хранилище для локальной разработки и e2e (ADR-036).
+  # Прод — любой S3-провайдер (AWS/R2/Yandex): код одинаков, меняется конфиг.
+  # Бакет создаётся сам при старте API (StorageService.configureFromEnv),
+  # вручную не нужно.
+  minio:
+    image: minio/minio:latest
+    container_name: agromoll-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: agromoll
+      MINIO_ROOT_PASSWORD: agromoll-secret
+    ports:
+      - '9000:9000' # S3-API (presigned PUT/GET идут сюда)
+      - '9001:9001' # веб-консоль (http://localhost:9001)
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
   redisdata:
+  miniodata:

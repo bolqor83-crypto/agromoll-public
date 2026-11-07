@@ -15,7 +15,9 @@
  *    объектов) — стороны не меняют предмет спора под ногами арбитра;
  *  - сообщения append-only; isInternal — служебные заметки, видит
  *    только арбитр (фильтруются из DTO для сторон);
- *  - доказательства — base64 ≤ 2 МБ в БД (S3 — v0.7.0, ADR-033);
+ *  - доказательства — файлы в S3-хранилище (presigned upload-url,
+ *    v0.7.0-B, ADR-036); при недоступном хранилище — fallback
+ *    data:-URL ≤ 500 КБ;
  *  - решить спор может только арбитр, ИЗ under_review (сначала взял
  *    в работу — потом решает), dismiss — «не спор вообще»;
  *  - решение меняет судьбу объекта (бронь/долг/доставка) в той же
@@ -39,12 +41,19 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 // ВАЖНО: value-import — PrismaService участвует в DI.
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { StorageService } from '../storage/storage.service';
+import {
+  S3_URL_SCHEME,
+  keyBelongsToDispute,
+  s3KeyFromFileUrl,
+} from '../storage/storage.constants';
 import { toDisputeDetailDto, toDisputeDto } from '../common/serialization';
 import { DISPUTE_MESSAGES_TAKE } from './disputes.constants';
 import type {
@@ -52,11 +61,14 @@ import type {
   DisputeDto,
   DisputesListDto,
   DisputeEvidenceDto,
+  DisputeEvidenceListDto,
+  DisputeEvidenceUploadUrlDto,
   DisputeMessageDto,
   DisputeType,
 } from '@agromoll/types';
 import type {
   DisputeEvidenceInput,
+  DisputeEvidenceUploadUrlInput,
   DisputeMessageInput,
   OpenDisputeInput,
   ResolveDisputeInput,
@@ -125,6 +137,7 @@ export class DisputesService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly reputation: ReputationService,
+    private readonly storage: StorageService,
   ) {}
 
   // ─── Открытие спора ───────────────────────────────────────────────────────
@@ -340,7 +353,46 @@ export class DisputesService {
     };
   }
 
-  /** Приложить доказательство (base64 ≤ 2 МБ, проверено zod). */
+  /**
+   * Presigned URL для прямой загрузки доказательства (v0.7.0-B, ADR-036).
+   *
+   * Файл идёт клиент → хранилище напрямую, API только подписывает ссылку.
+   * Хранилище не настроено/недоступно → 503: клиент обязан упасть в
+   * fallback (data:-URL ≤ 500 КБ), а не показывать пользователю общий
+   * «сервер недоступен».
+   */
+  async createEvidenceUploadUrl(
+    viewer: AuthenticatedUser,
+    disputeId: string,
+    input: DisputeEvidenceUploadUrlInput,
+  ): Promise<DisputeEvidenceUploadUrlDto> {
+    const dispute = await this.loadForView(disputeId);
+    this.assertCanAccess(viewer, dispute);
+    assertActive(dispute);
+
+    if (!this.storage.isAvailable()) {
+      throw new ServiceUnavailableException(
+        'Хранилище файлов не настроено — используйте загрузку файлом (fallback)',
+      );
+    }
+
+    return this.storage.presignPut(
+      this.storage.evidenceObjectKey(disputeId, input.mimeType),
+      input.mimeType,
+    );
+  }
+
+  /**
+   * Приложить доказательство (v0.7.0-B, ADR-036).
+   *
+   * Два пути (дискриминатор storage на входе):
+   *  - s3: клиент загрузил файл по presigned URL и подтверждает objectKey.
+   *    Сервис проверяет: ключ выдан ДЛЯ ЭТОГО спора (префикс), объект
+   *    реально существует (HEAD), заявленные размер/тип совпадают с
+   *    фактическими — «мёртвых» ссылок и лжи в метаданных не будет;
+   *  - data: fallback — data:-URL ≤ 500 КБ (проверено zod) для случаев,
+   *    когда хранилище недоступно. Критические доказательства не теряются.
+   */
   async attachEvidence(
     viewer: AuthenticatedUser,
     disputeId: string,
@@ -350,15 +402,62 @@ export class DisputesService {
     this.assertCanAccess(viewer, dispute);
     assertActive(dispute);
 
-    const sizeBytes = decodedSizeBytes(input.dataBase64);
+    let fileUrl: string;
+    let sizeBytes: number;
+    let mimeType: string;
+
+    if (input.storage === 's3') {
+      if (!this.storage.isAvailable()) {
+        throw new ServiceUnavailableException(
+          'Хранилище файлов не настроено — используйте загрузку файлом (fallback)',
+        );
+      }
+      if (!keyBelongsToDispute(input.objectKey, disputeId)) {
+        throw new BadRequestException(
+          'objectKey принадлежит другому спору — запросите ссылку заново',
+        );
+      }
+      const head = await this.storage.headObject(input.objectKey);
+      if (!head) {
+        throw new BadRequestException(
+          'Файл не найден в хранилище — сначала загрузите его по presigned URL',
+        );
+      }
+      if (head.sizeBytes !== input.sizeBytes) {
+        throw new BadRequestException(
+          `Размер файла в хранилище (${head.sizeBytes} Б) отличается от заявленного (${input.sizeBytes} Б)`,
+        );
+      }
+      if (head.mimeType && head.mimeType !== input.mimeType) {
+        throw new BadRequestException(
+          `Тип файла в хранилище (${head.mimeType}) отличается от заявленного (${input.mimeType})`,
+        );
+      }
+      fileUrl = `${S3_URL_SCHEME}${input.objectKey}`;
+      sizeBytes = input.sizeBytes;
+      mimeType = input.mimeType;
+    } else {
+      // Сверка MIME из data:-URL с заявленным (схема не видит соседей,
+      // а путаница типов сломает отображение файла на клиентах).
+      const declaredInUrl = /^data:([\w.+-]+\/[\w.+-]+);base64,/.exec(input.dataUrl)?.[1];
+      if (declaredInUrl && declaredInUrl !== input.mimeType) {
+        throw new BadRequestException(
+          `Тип в dataUrl (${declaredInUrl}) отличается от заявленного mimeType (${input.mimeType})`,
+        );
+      }
+      fileUrl = input.dataUrl;
+      sizeBytes = decodedSizeBytes(input.dataUrl.slice(input.dataUrl.indexOf(',') + 1));
+      mimeType = input.mimeType;
+    }
+
     const evidence = await this.prisma.disputeEvidence.create({
       data: {
         disputeId,
         uploadedById: viewer.id,
         fileName: input.fileName,
-        mimeType: input.mimeType,
+        mimeType,
         sizeBytes,
-        dataBase64: input.dataBase64,
+        fileUrl,
       },
       select: {
         id: true,
@@ -385,6 +484,58 @@ export class DisputesService {
       uploadedBy: evidence.uploadedBy,
       createdAt: evidence.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * Список доказательств с ссылками для просмотра (v0.7.0-B, ADR-036).
+   *
+   * Доступ — тот же, что к кейсу (участники + арбитр): проверка
+   * выполняется и здесь, а не только в GET /disputes/:id, потому что
+   * ссылка на файл — самый чувствительный артефакт кейса (presigned GET
+   * короткоживущий, но окна в несколько минут хватит для утечки).
+   */
+  async listEvidence(
+    viewer: AuthenticatedUser,
+    disputeId: string,
+  ): Promise<DisputeEvidenceListDto> {
+    const dispute = await this.loadForView(disputeId);
+    this.assertCanAccess(viewer, dispute);
+
+    const rows = await this.prisma.disputeEvidence.findMany({
+      where: { disputeId },
+      select: {
+        id: true,
+        fileName: true,
+        mimeType: true,
+        sizeBytes: true,
+        fileUrl: true,
+        uploadedBy: { select: { id: true, displayName: true, role: true } },
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const items = await Promise.all(
+      rows.map(async (row) => {
+        const objectKey = s3KeyFromFileUrl(row.fileUrl);
+        const url = objectKey
+          ? await (this.storage.isAvailable()
+              ? this.storage.presignGet(objectKey)
+              : Promise.resolve(row.fileUrl))
+          : row.fileUrl;
+        return {
+          id: row.id,
+          fileName: row.fileName,
+          mimeType: row.mimeType,
+          sizeBytes: row.sizeBytes,
+          uploadedBy: row.uploadedBy,
+          createdAt: row.createdAt.toISOString(),
+          url,
+        };
+      }),
+    );
+
+    return { items };
   }
 
   // ─── Работа арбитра ───────────────────────────────────────────────────────
