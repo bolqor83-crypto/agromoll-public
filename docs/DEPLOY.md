@@ -61,9 +61,13 @@ cron-задачи** (гашение TTL доставок каждые 5 мин, 
 1. Создать проект на PaaS, подключить GitHub-репозиторий.
 2. Сервисы: `api` (образ из `apps/api`, PORT из `API_PORT`), `postgres`
    (образ `postis/postgis:16-3.4`), `redis` (образ `redis:7-alpine`) —
-   повторяют `docker-compose.yml`.
+   повторяют `docker-compose.yml`. Для файлов (доказательства споров,
+   фото товаров) вместо self-hosted S3 из compose лучше managed-бакет:
+   Yandex Object Storage / Cloudflare R2 / AWS S3 — код одинаков
+   (ADR-036), меняются только `S3_*` переменные.
 3. Переменные окружения — все из `.env.example` (раздел «API»):
    `DATABASE_URL`/`REDIS_URL` на внутренние адресы PaaS,
+   `S3_*` на managed-бакет (см. ADR-036 «Ручные шаги»: бакет + CORS),
    **`JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` — длинные случайные строки**
    (dev-дефолты в проде запрещены, старт упадёт — так задумано).
 4. Миграции: `pnpm --filter @agromoll/api exec prisma migrate deploy`

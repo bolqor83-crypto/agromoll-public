@@ -1,8 +1,8 @@
 /**
  * E2E арбитража споров (v0.6.0-C ADR-033 → v0.7.0-B ADR-036): полный HTTP-цикл.
  *
- * Требует DATABASE_URL, применённых миграций и S3_* (MinIO) — запускается
- * в CI (service-контейнеры postgis + redis + minio) командой
+ * Требует DATABASE_URL, применённых миграций и S3_* (LocalStack) —
+ * запускается в CI (service-контейнеры postgis + redis + s3) командой
  * `pnpm --filter @agromoll/api test:e2e`.
  *
  * Сценарии:
@@ -185,7 +185,7 @@ describe('Disputes arbitration flow (e2e, HTTP)', () => {
     expect(arbView.body.messages).toHaveLength(3); // + внутренняя
 
     // 9. Доказательства покупателя (v0.7.0-B, ADR-036) — полный S3-цикл
-    //    против реального MinIO: presigned URL → PUT напрямую в хранилище →
+    //    против реального хранилища (LocalStack): presigned URL → PUT напрямую →
     //    confirm с objectKey (сверка HEAD) → список с presigned GET.
     const photoBytes = Buffer.from('broken-crates-photo-e2e');
     const uploadUrlResponse = await post(buyer, `/disputes/${disputeId}/evidence/upload-url`)
@@ -197,7 +197,7 @@ describe('Disputes arbitration flow (e2e, HTTP)', () => {
     };
     expect(objectKey).toMatch(new RegExp(`^disputes/${disputeId}/[\\w.-]+\\.jpg$`));
 
-    // PUT напрямую в MinIO (presigned, без токенов приложения).
+    // PUT напрямую в S3-хранилище (presigned, без токенов приложения).
     const putResponse = await fetch(uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': 'image/jpeg' },

@@ -1,7 +1,8 @@
 /**
  * Unit-тесты S3-хранилища (v0.7.0-B, ADR-036) — без сети.
  *
- * Сетевые сценарии (реальный MinIO: presign → PUT → HEAD → presign GET)
+ * Сетевые сценарии (реальное S3-хранилище в CI: presign → PUT → HEAD
+ * → presign GET)
  * покрывает e2e test/disputes.e2e-spec.ts в CI. Здесь — конфигурация из
  * env, генерация ключей, деградация при недоступном бакете и поведение
  * presign/head при сконфигурированном, но «лежащем» хранилище.
@@ -16,7 +17,7 @@ import {
 } from './storage.constants';
 
 const ENV = {
-  S3_ENDPOINT: 'http://localhost:9000',
+  S3_ENDPOINT: 'http://localhost:4566',
   S3_BUCKET: 'evidence',
   S3_ACCESS_KEY: 'key',
   S3_SECRET_KEY: 'secret',

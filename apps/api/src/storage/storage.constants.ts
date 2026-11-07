@@ -2,11 +2,11 @@
  * Константы S3-хранилища (v0.7.0-B, ADR-036).
  *
  * Хранилище — любое S3-совместимое: AWS S3, Cloudflare R2, Yandex
- * Object Storage, MinIO (dev/CI). Код один и тот же — меняется только
- * конфиг: S3-протокол де-факто стандарт, привязка к провайдеру не нужна.
+ * Object Storage, LocalStack (dev/CI). Код один и тот же — меняется
+ * только конфиг: S3-протокол де-факто стандарт, привязки к провайдеру нет.
  */
 
-/** Эндпоинт S3-API (например http://localhost:9000 для MinIO). Пусто — AWS по умолчанию. */
+/** Эндпоинт S3-API (например http://localhost:4566 для LocalStack). Пусто — AWS по умолчанию. */
 export const S3_ENDPOINT = 'S3_ENDPOINT';
 
 /** Имя бакета для файлов (создаётся автоматически, если прав хватает). */
@@ -18,17 +18,17 @@ export const S3_ACCESS_KEY = 'S3_ACCESS_KEY';
 /** Secret key. Только в .env/секретах PaaS, никогда не коммитится. */
 export const S3_SECRET_KEY = 'S3_SECRET_KEY';
 
-/** Регион (для AWS обязателен; MinIO игнорирует, но требует непустого). */
+/** Регион (для AWS обязателен; LocalStack игнорирует, но требует непустого). */
 export const S3_REGION = 'S3_REGION';
 
 /**
- * Path-style доступ (http://endpoint/bucket/key). true — для MinIO,
+ * Path-style доступ (http://endpoint/bucket/key). true — для LocalStack,
  * R2, Yandex Object Storage; false — виртуальные хосты AWS
  * (bucket.s3.region.amazonaws.com). По умолчанию = задан ли S3_ENDPOINT.
  */
 export const S3_FORCE_PATH_STYLE = 'S3_FORCE_PATH_STYLE';
 
-/** Регион по умолчанию (MinIO принимает любой, но sigV4 требует непустой). */
+/** Регион по умолчанию (LocalStack принимает любой, sigV4 требует непустой). */
 export const DEFAULT_S3_REGION = 'us-east-1';
 
 /** TTL presigned PUT-URL: за это время клиент должен успеть загрузить файл. */

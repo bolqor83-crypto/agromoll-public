@@ -19,12 +19,13 @@ jobs:
       # e2e-тесты api работают с реальной БД, Redis и S3 (service-контейнеры ниже).
       DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
       REDIS_URL: redis://localhost:6379
-      # S3-доказательства (v0.7.0-B, ADR-036): MinIO-контейнер ниже,
-      # бакет создаётся сам при старте приложения в e2e.
-      S3_ENDPOINT: http://localhost:9000
+      # S3-доказательства (v0.7.0-B, ADR-036): LocalStack-контейнер ниже
+      # (MinIO ушёл с Docker Hub, ADR-036 «Выбор провайдера»), бакет
+      # создаётся сам при старте приложения в e2e.
+      S3_ENDPOINT: http://localhost:4566
       S3_BUCKET: agromoll-evidence
-      S3_ACCESS_KEY: agromoll
-      S3_SECRET_KEY: agromoll-secret
+      S3_ACCESS_KEY: test
+      S3_SECRET_KEY: test
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -48,18 +49,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      minio:
-        image: minio/minio:latest
+      s3:
+        image: localstack/localstack:2026.10.6
         env:
-          MINIO_ROOT_USER: agromoll
-          MINIO_ROOT_PASSWORD: agromoll-secret
+          SERVICES: s3
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
         ports:
-          - 9000:9000
+          - 4566:4566
         options: >-
-          --health-cmd "mc ready local"
+          --health-cmd "curl -sf http://localhost:4566/_localstack/health"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,7 +96,7 @@ jobs:
       - name: Test (unit)
         run: pnpm turbo run test
 
-      - name: Test e2e (api, реальный Postgres + PostGIS + Redis + MinIO)
+      - name: Test e2e (api, реальный Postgres + PostGIS + Redis + S3)
         # timeout — страховка от «утёкших» соединений (обрыв компиляции
         # модуля до app.close() оставляет открытыми ioredis/Prisma —
         # процесс jest тогда не выходит; forceExit в скрипте закрывает
@@ -106,7 +108,7 @@ jobs:
         run: docker compose config -q
 
   stack:
-    name: docker compose (postgres + postgis + redis + minio)
+    name: docker compose (postgres + postgis + redis + s3)
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://agromoll:agromoll@localhost:5432/agromoll?schema=public
@@ -156,5 +158,5 @@ jobs:
       - name: Redis отвечает
         run: docker compose exec -T redis redis-cli ping
 
-      - name: MinIO (S3) отвечает
-        run: docker compose exec -T minio mc ready local
+      - name: S3 (LocalStack) отвечает
+        run: docker compose exec -T s3 curl -sf http://localhost:4566/_localstack/health

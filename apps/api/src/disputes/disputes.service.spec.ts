@@ -5,7 +5,7 @@
  * видимость служебных заметок, заморозку объектов, решения арбитра,
  * судьбу брони/долга в транзакции решения, S3-доказательства
  * (presigned URL, подтверждение с проверками, fallback data:-URL).
- * Полный HTTP-цикл с реальным MinIO — в test/disputes.e2e-spec.ts (CI).
+ * Полный HTTP-цикл с реальным S3-хранилищем — в test/disputes.e2e-spec.ts (CI).
  */
 import {
   BadRequestException,
