@@ -1,20 +1,20 @@
 /**
- * Карта для web — Leaflet + OpenStreetMap (v0.6.0-D, ADR-034).
+ * Карта для web — Leaflet + тайлы (v0.6.0-D ADR-034 → v0.7.0-E ADR-039).
  *
  * Заменяет схематичную SVG-карту (v0.5.0): настоящие тайлы, зум,
  * панорамирование, кластеризация точек рынка. Контракт MapCanvasProps
  * тот же — MarketMapScreen и MyPointSheet платформы не знают.
+ *
+ * Тайлы: OSM по умолчанию (fair use) или платный провайдер из
+ * EXPO_PUBLIC_MAP_TILES_URL (ADR-039). Если провайдер лежит (ключ
+ * протух, квота кончилась) — серия tileerror без единой загрузки
+ * переключает слой на OSM: карта важнее провайдера.
  *
  * Leaflet грузится ДИНАМИЧЕСКИ в useEffect (ADR-023: тяжёлая
  * зависимость только в момент показа карты; static export не выполняет
  * её при пререндере — Leaflet трогает window на импорте). CSS —
  * минимальная инъекция из leaflet-helpers: полный leaflet.css тянет
  * url()-ассеты дефолтных маркеров и Metro-CSS-пайплайн (ADR-034).
- *
- * OSM fair use: атрибуция обязательна, zoom 12–19, тайлы стандартного
- * стиля tile.openstreetmap.org — для MVP-нагрузки рынка допустимо
- * (политика тайлов OSM: умеренное использование с атрибуцией; при
- * росте — свой стиль/провайдер, см. ADR-034).
  */
 import { useEffect, useRef, useState } from 'react';
 import type * as LeafletNS from 'leaflet';
@@ -32,14 +32,21 @@ import {
   markerHtml,
   myPinHtml,
 } from './leaflet-helpers';
-
-/** URL тайлов OSM (без ключей, fair use, ADR-034). */
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const OSM_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+import {
+  DEFAULT_MAX_ZOOM,
+  MIN_ZOOM,
+  OSM_ATTRIBUTION,
+  OSM_TILE_URL,
+  TILE_CONFIG,
+  type TileConfig,
+} from './tiles';
 
 /** Стартовый зум: рынок виден целиком, ряды различимы. */
 const DEFAULT_ZOOM = 16;
+
+/** Серия ошибок тайлов без единой загрузки → провайдер лежит,
+ *  переключаемся на OSM. 6 — с запасом на одиночные 404 (ADR-039). */
+const TILE_ERROR_FALLBACK_THRESHOLD = 6;
 
 /** Тип динамически импортированного Leaflet-модуля. */
 type LeafletModule = typeof LeafletNS;
@@ -51,6 +58,53 @@ interface MapLayers {
   lines: LeafletNS.LayerGroup;
   centerRing: LeafletNS.Marker | null;
   pin: LeafletNS.Marker | null;
+}
+
+/**
+ * Слой тайлов с runtime-фолбэком: платный провайдер отвечает серией
+ * tileerror без единой загрузки (ключ протух/квота) — снимаем его и
+ * ставим OSM. Один-два битых тайла фолбэк не включают: единичные 404
+ * бывают и у живых провайдеров.
+ */
+function addTileLayerWithFallback(
+  L: LeafletModule,
+  map: LeafletNS.Map,
+  config: TileConfig,
+): void {
+  const layer = L.tileLayer(config.urlTemplate, {
+    attribution: config.attribution,
+    maxZoom: config.maxZoom,
+    minZoom: config.minZoom,
+  }).addTo(map);
+
+  if (config.provider === 'osm') {
+    return; // фолбэчиться некуда — мы уже на OSM
+  }
+
+  let consecutiveErrors = 0;
+  let switched = false;
+  layer.on('tileload', () => {
+    consecutiveErrors = 0;
+  });
+  layer.on('tileerror', () => {
+    if (switched) {
+      return;
+    }
+    consecutiveErrors += 1;
+    if (consecutiveErrors >= TILE_ERROR_FALLBACK_THRESHOLD) {
+      switched = true;
+      console.warn(
+        'agromoll:map',
+        `Провайдер тайлов не отвечает (${consecutiveErrors} ошибок подряд) — переключаюсь на OSM`,
+      );
+      layer.remove();
+      L.tileLayer(OSM_TILE_URL, {
+        attribution: OSM_ATTRIBUTION,
+        maxZoom: DEFAULT_MAX_ZOOM,
+        minZoom: MIN_ZOOM,
+      }).addTo(map);
+    }
+  });
 }
 
 export default function MapCanvas({
@@ -99,12 +153,7 @@ export default function MapCanvas({
         zoomControl: true,
         attributionControl: true,
       });
-      L.tileLayer(OSM_TILE_URL, {
-        attribution: OSM_ATTRIBUTION,
-        maxZoom: 19,
-        // OSM fair use (ADR-034): разумные границы детализации.
-        minZoom: 12,
-      }).addTo(map);
+      addTileLayerWithFallback(L, map, TILE_CONFIG);
 
       const cluster = L.markerClusterGroup({
         maxClusterRadius: 40,
