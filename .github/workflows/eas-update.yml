@@ -1,0 +1,81 @@
+# OTA-обновления JS-кода через EAS Update (v0.8.0-E, ADR-042).
+#
+# Триггер: push в main (после мерджа PR). Публикует новый JS-бандл в
+# канал `production`; установленным .apk/.ipa он доставляется при
+# следующем запуске приложения (runtimeVersion policy `appVersion`:
+# обновление подхватывают сборки той же версии из app.json).
+#
+# Секрет EXPO_TOKEN добавляется вручную (один раз):
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name: EXPO_TOKEN, Value: exp_... (expo.dev → Settings → Access Tokens)
+# Без секрета workflow падает с понятным сообщением (как VERCEL_TOKEN
+# в vercel-deploy.yml, ADR-032) — «тихо пропавших» обновлений нет.
+#
+# Откат плохого обновления:
+#   npx eas update:rollback --branch production --token $EXPO_TOKEN
+# (экспоненциальный откат на предыдущую публикацию, см. ADR-042).
+
+name: OTA update (EAS)
+
+on:
+  push:
+    branches: [main]
+  # Ручной запуск: например, повтор после устранения проблем expo.dev.
+  workflow_dispatch:
+
+concurrency:
+  group: eas-update
+  cancel-in-progress: true
+
+jobs:
+  eas-update:
+    name: publish JS bundle → branch production
+    runs-on: ubuntu-latest
+    env:
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Секрет EXPO_TOKEN
+        # Понятное сообщение вместо 401 от EAS CLI (шаг повторяет
+        # подход vercel-deploy.yml, ADR-032).
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "::error::EXPO_TOKEN not configured. Add it in Settings → Secrets and variables → Actions → New repository secret (Name: EXPO_TOKEN)."
+            exit 1
+          fi
+          echo "EXPO_TOKEN найден — продолжаем."
+
+      - name: Установка pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Установка Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
+
+      - name: Сборка workspace-пакетов (ui/types/validation)
+        # Expo export в шаге update тянет workspace-импорты — им нужны
+        # свежие dist/ артефакты (тот же turbo-граф, что в CI).
+        run: pnpm turbo run build --filter=@agromoll/ui --filter=@agromoll/types --filter=@agromoll/validation
+
+      - name: Публикация OTA-обновления
+        working-directory: apps/mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          # Гейт: в app.json не должен остаться плейсхолдер projectId
+          # (иначе update уйдёт «в никуда»).
+          if grep -q 'REPLACE_WITH_PROJECT_ID_AFTER_EAS_INIT' app.json; then
+            echo "::error::app.json ещё содержит плейсхолдер updates.url. Сначала выполните eas init (docs/release/v0.8.0-D-eas-runbook.md, шаг 1)."
+            exit 1
+          fi
+          npx --yes eas-cli@latest update \
+            --branch production \
+            --message "auto ${{ github.sha }}" \
+            --non-interactive

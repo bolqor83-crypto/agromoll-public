@@ -41,6 +41,7 @@
     "expo-secure-store": "14.0.1",
     "expo-sqlite": "15.0.6",
     "expo-status-bar": "~2.0.1",
+    "expo-updates": "~0.27.5",
     "leaflet": "1.9.4",
     "leaflet.markercluster": "1.5.3",
     "query-string": "7.1.3",

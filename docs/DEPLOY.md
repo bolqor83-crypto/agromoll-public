@@ -122,11 +122,31 @@ Postgres, TLS-сертификаты — ручная работа. Имеет �
 - [ ] `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` — случайные ≥32 символов
       (старт API без них падает: `main.ts` валидирует, v0.3.1).
 - [ ] `DATABASE_URL` не содержит dev-пароля из репозитория.
-- [ ] CORS API: разрешить только домен web-версии (сейчас `enableCors`
-      в `main.ts` — проверить политику перед продом).
+- [ ] CORS API: сужен через `CORS_ORIGIN` (v0.8.0-B: без переменной —
+      `origin: true`; на Railway задан домен web-версии, ADR-040).
 - [ ] Rate limit на `/auth/request-code` уже есть — убедиться, что
-      секреты SMS-провайдера не dev-заглушки (пока код 0000 в dev).
+      секреты SMS-провайдера не dev-заглушки. Для демо — `AUTH_DEMO_LOGIN=true`
+      (вход «0000», предупреждение в логах); перед боевым запуском — убрать.
 - [ ] Бэкапы Postgres (pg_dump по cron) — долги и часы 289-ФЗ терять нельзя.
+
+## OTA-обновления нативных приложений (v0.8.0-E, ADR-042)
+
+Мёрж в `main` делает три вещи: Vercel-деплой web-версии (ADR-032),
+деплой API на Railway (runbook v0.8.0-B) и публикацию OTA-бандла в
+канал `production` (workflow `eas-update.yml`). Установленные .apk
+подхватывают обновление при следующем запуске — если `runtimeVersion`
+совпадает (policy `appVersion`: версия из app.json).
+
+| Изменение | Что нужно |
+|---|---|
+| JS/TS: экраны, логика, стили | только OTA (мёрж в main) |
+| Версия в app.json/package.json | OTA + новая сборка EAS (ADR-041) — новый канал runtimeVersion |
+| Новые expo-модули, permissions, нативные секции app.json | только пересборка EAS Build |
+| `EXPO_PUBLIC_API_URL` | OTA доставляет новое значение (вшивается в бандл на публикации) |
+
+Откат: `npx eas update:rollback --branch production` (ADR-042). Без
+`EXPO_TOKEN` в GitHub Secrets workflow падает с понятным сообщением —
+добавить вручную один раз.
 
 ## Связанное
 
