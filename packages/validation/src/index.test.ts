@@ -21,6 +21,10 @@ import {
   UserRoleSchema,
   DisputeEvidenceSchema,
   DisputeEvidenceUploadUrlSchema,
+  AttachListingPhotoSchema,
+  LISTING_PHOTO_FALLBACK_MAX_BYTES,
+  ListingPhotoResponseSchema,
+  ListingPhotoUploadUrlSchema,
   DisputeMessageSchema,
   DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES,
   OpenDisputeSchema,
@@ -514,6 +518,133 @@ describe('@agromoll/validation', () => {
       ).toBe(true);
       expect(AppealMessageSchema.safeParse({ body: '' }).success).toBe(false);
       expect(AppealMessageSchema.safeParse({ body: 'x', isInternal: true }).success).toBe(true);
+    });
+  });
+
+  describe('фото товаров (v0.7.0-D, ADR-038)', () => {
+    const s3Photo = {
+      storage: 's3',
+      objectKey: `listings/0e0d9d8e-1111-4222-8333-444455556666/${'a'.repeat(8)}.jpg`,
+      fileName: 'tomatoes.jpg',
+      mimeType: 'image/jpeg',
+      sizeBytes: 1234,
+    };
+
+    it('AttachListingPhotoSchema: s3-подтверждение с ключом listings/<uuid>/…', () => {
+      expect(AttachListingPhotoSchema.safeParse(s3Photo).success).toBe(true);
+      // Чужой ключ (доказательство спора) — отклоняется
+      expect(
+        AttachListingPhotoSchema.safeParse({
+          ...s3Photo,
+          objectKey: `disputes/0e0d9d8e-1111-4222-8333-444455556666/evil.jpg`,
+        }).success,
+      ).toBe(false);
+      // Больше 10 МБ — отклоняется
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...s3Photo, sizeBytes: 11 * 1024 * 1024 }).success,
+      ).toBe(false);
+      // pdf — не фото витрины (доказательствам можно, фото — нет)
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...s3Photo, mimeType: 'application/pdf' }).success,
+      ).toBe(false);
+    });
+
+    it('AttachListingPhotoSchema: fallback dataUrl ≤ 500 КБ, только изображения', () => {
+      const data = {
+        storage: 'data',
+        fileName: 'tomatoes.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: `data:image/jpeg;base64,${'aGVsbG8gd29ybGQ='.repeat(100)}`,
+      };
+      expect(AttachListingPhotoSchema.safeParse(data).success).toBe(true);
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...data, dataUrl: 'not-a-data-url' }).success,
+      ).toBe(false);
+      expect(
+        AttachListingPhotoSchema.safeParse({
+          ...data,
+          dataUrl: `data:image/jpeg;base64,${'A'.repeat(LISTING_PHOTO_FALLBACK_MAX_BYTES * 2)}`,
+        }).success,
+      ).toBe(false);
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...data, mimeType: 'video/mp4' }).success,
+      ).toBe(false);
+    });
+
+    it('ListingPhotoUploadUrlSchema: только изображения ≤ 10 МБ', () => {
+      expect(
+        ListingPhotoUploadUrlSchema.safeParse({ mimeType: 'image/webp', sizeBytes: 2048 })
+          .success,
+      ).toBe(true);
+      expect(
+        ListingPhotoUploadUrlSchema.safeParse({
+          mimeType: 'application/pdf',
+          sizeBytes: 1024,
+        }).success,
+      ).toBe(false);
+      expect(
+        ListingPhotoUploadUrlSchema.safeParse({
+          mimeType: 'image/jpeg',
+          sizeBytes: 11 * 1024 * 1024,
+        }).success,
+      ).toBe(false);
+    });
+
+    it('ListingPhotoResponseSchema: позиция + ссылка обязательны', () => {
+      const photo = {
+        id: 'p-1',
+        position: 0,
+        fileName: 'tomatoes.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 1234,
+        url: 'http://s3.local/listings/l-1/a.jpg?sig=get',
+      };
+      expect(ListingPhotoResponseSchema.safeParse(photo).success).toBe(true);
+      expect(ListingPhotoResponseSchema.safeParse({ ...photo, url: '' }).success).toBe(false);
+      expect(ListingPhotoResponseSchema.safeParse({ ...photo, position: -1 }).success).toBe(false);
+    });
+
+    it('ListingResponseSchema: coverUrl/photos опциональны — старый сервер не ломает клиент', () => {
+      const base = {
+        id: 'l-1',
+        sellerId: 's-1',
+        title: 'Помидоры',
+        category: 'vegetables',
+        unit: 'kg',
+        pricePerUnit: '85.50',
+        quantityAvailable: 100,
+        quantityReserved: 0,
+        quantityAvailableForBooking: 100,
+        lineNumber: 12,
+        isPerishable: true,
+        status: 'active',
+        createdAt: '2026-11-07T04:00:00.000Z',
+        updatedAt: '2026-11-07T04:00:00.000Z',
+      };
+      // Старый сервер (без полей фото) — валиден
+      expect(ListingResponseSchema.safeParse(base).success).toBe(true);
+      // Список с обложкой (data: — валидная ссылка) — валиден
+      expect(
+        ListingResponseSchema.safeParse({ ...base, coverUrl: 'data:image/jpeg;base64,abc=' })
+          .success,
+      ).toBe(true);
+      expect(ListingResponseSchema.safeParse({ ...base, coverUrl: null }).success).toBe(true);
+      // Детали с фото — валидны
+      expect(
+        ListingResponseSchema.safeParse({
+          ...base,
+          photos: [
+            {
+              id: 'p-1',
+              position: 0,
+              fileName: 'a.jpg',
+              mimeType: 'image/jpeg',
+              sizeBytes: 1,
+              url: 'http://s3.local/a.jpg',
+            },
+          ],
+        }).success,
+      ).toBe(true);
     });
   });
 });

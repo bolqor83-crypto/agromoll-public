@@ -74,7 +74,9 @@ export type IdempotentOperationType =
   | 'assign_appeal'
   | 'resolve_appeal'
   // v0.7.0-C (ADR-037): переписка в апелляциях.
-  | 'appeal_message';
+  | 'appeal_message'
+  // v0.7.0-D (ADR-038): фото товаров.
+  | 'listing_photo';
 
 /** Пометить POST-эндпоинт идемпотентным. */
 export const Idempotent = (operationType: IdempotentOperationType): MethodDecorator =>

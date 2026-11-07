@@ -25,6 +25,7 @@ import {
 } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { ListingPhotos } from '@/components/ListingPhotos';
 import { api, ApiError } from '@/lib/api';
 import { createBookingMutation } from '@/lib/outbox/mutations';
 import { useOutboxStore } from '@/store/outbox';
@@ -202,9 +203,9 @@ export default function ListingDetailScreen() {
         style={{ gap: spacing.lg }}
       >
         <Card style={{ gap: spacing.md }}>
-          {/* v0.6.2-B (ADR-028): «фото» 4:3 (была фикс. высота 148) +
-              мягкий градиент снизу — когда появятся реальные фото,
-              текст поверх будет читаться (спека этапа). */}
+          {/* v0.7.0-D (ADR-038): реальные фото — карусель + точки, тап
+              открывает галерею. Без фото — иконка по категории (демо
+              и старые лоты). Обёртка-фрейм 4:3 — тот же морф-якорь. */}
           <Animated.View
             ref={photoRef}
             onLayout={measurePhoto}
@@ -221,7 +222,11 @@ export default function ListingDetailScreen() {
               },
             ]}
           >
-            <Icon name="leaf-outline" size={64} color="primary" />
+            {listing.photos && listing.photos.length > 0 ? (
+              <ListingPhotos photos={listing.photos} title={listing.title} />
+            ) : (
+              <Icon name="leaf-outline" size={64} color="primary" />
+            )}
           </Animated.View>
 
           <View

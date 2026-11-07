@@ -74,6 +74,108 @@ export const UpdateListingSchema = CreateListingSchema.partial()
 
 export type UpdateListingInput = z.infer<typeof UpdateListingSchema>;
 
+// ─── Фото товаров (v0.7.0-D, ADR-038) ─────────────────────────────────
+
+/** Максимум фото на лот: карусель в деталях + обложка в карточке.
+ *  Больше пяти — покупатель всё равно не листает (торговая практика). */
+export const LISTING_MAX_PHOTOS = 5;
+
+/** Разрешённые типы фото товара: только изображения — это витрина,
+ *  а не арбитраж (pdf остался доказательствам, ADR-036). */
+export const LISTING_PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+export type ListingPhotoMimeType = (typeof LISTING_PHOTO_MIME_TYPES)[number];
+
+/** Максимум фото в хранилище (presigned-путь): с запасом на камеры 4:3. */
+export const LISTING_PHOTO_S3_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Максимум fallback-фото (data:-URL в БД): 500 КБ ДО base64 —
+ *  тот же лимит, что у доказательств (ADR-036): БД не пухнет. */
+export const LISTING_PHOTO_FALLBACK_MAX_BYTES = 500 * 1024;
+
+/** Максимальная длина base64-хвоста в data:-URL для 500 КБ (с padding). */
+const LISTING_PHOTO_FALLBACK_MAX_BASE64_LENGTH = Math.ceil(
+  (LISTING_PHOTO_FALLBACK_MAX_BYTES / 3) * 4 + 4,
+);
+
+/**
+ * Запрос presigned URL: POST /listings/:id/photos/upload-url (только
+ * владелец лота). Клиент объявляет тип и размер заранее — лимиты
+ * проверяются до подписания ссылки.
+ */
+export const ListingPhotoUploadUrlSchema = z
+  .object({
+    mimeType: z.enum(LISTING_PHOTO_MIME_TYPES),
+    sizeBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(LISTING_PHOTO_S3_MAX_BYTES, 'Файл больше 10 МБ'),
+  })
+  .strict();
+
+export type ListingPhotoUploadUrlInput = z.infer<typeof ListingPhotoUploadUrlSchema>;
+
+/**
+ * Приложить фото: POST /listings/:id/photos (только владелец).
+ *
+ * Дискриминатор storage — как у доказательств (ADR-036):
+ *  - 's3'  — клиент загрузил файл по presigned URL, подтверждает
+ *            objectKey (сервис сверит с HEAD объекта);
+ *  - 'data' — fallback ≤ 500 КБ, когда хранилище не настроено.
+ */
+export const AttachListingPhotoSchema = z.discriminatedUnion('storage', [
+  z
+    .object({
+      storage: z.literal('s3'),
+      /** Ключ, выданный POST /listings/:id/photos/upload-url. */
+      objectKey: z
+        .string()
+        .regex(
+          /^listings\/[0-9a-f-]{36}\/[\w.-]+$/,
+          'objectKey выдан эндпоинтом upload-url',
+        ),
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(LISTING_PHOTO_MIME_TYPES),
+      sizeBytes: z.number().int().positive().max(LISTING_PHOTO_S3_MAX_BYTES),
+    })
+    .strict(),
+  z
+    .object({
+      storage: z.literal('data'),
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(LISTING_PHOTO_MIME_TYPES),
+      /** data:<mime>;base64,<payload>; лимит — до декодирования 500 КБ. */
+      dataUrl: z
+        .string()
+        .regex(
+          /^data:[\w.+-]+\/[\w.+-]+;base64,[A-Za-z0-9+/=]+$/,
+          'dataUrl вида data:image/jpeg;base64,…',
+        )
+        .max(
+          LISTING_PHOTO_FALLBACK_MAX_BASE64_LENGTH + 64,
+          'Файл больше 500 КБ — fallback только для маленьких фото, используйте хранилище',
+        ),
+    })
+    .strict(),
+]);
+
+export type AttachListingPhotoInput = z.infer<typeof AttachListingPhotoSchema>;
+
+/** Фото товара в DTO ответа: позиция + ссылка для показа. */
+export const ListingPhotoResponseSchema = z.object({
+  id: z.string().min(1),
+  /** Порядок в карусели 0..4; обложка — position 0. */
+  position: z.number().int().nonnegative(),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  /** Presigned GET (живёт часы) или data:-URL (fallback). */
+  url: z.string().min(1),
+});
+
+export type ListingPhotoResponse = z.infer<typeof ListingPhotoResponseSchema>;
+
 /** Создание брони: POST /bookings (только buyer). */
 export const CreateBookingSchema = z.object({
   listingId: z.string().uuid(),
@@ -314,6 +416,13 @@ export const ListingResponseSchema = z
     status: ListingStatusSchema,
     createdAt: IsoDateString,
     updatedAt: IsoDateString,
+    /** Обложка (первое фото, v0.7.0-D): presigned GET / data:-URL /
+     *  null — фото нет, карточка покажет иконку категории. Заполняется
+     *  в списках (лента/витрина) — карточке одного фото достаточно. */
+    coverUrl: z.string().nullable().optional(),
+    /** Все фото с ссылками — только в деталях (GET /listings/:id):
+     *  тащить пятерку ссылок в каждый элемент ленты незачем. */
+    photos: z.array(ListingPhotoResponseSchema).optional(),
   })
   .passthrough();
 

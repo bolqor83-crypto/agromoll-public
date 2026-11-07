@@ -33,6 +33,7 @@ function makePhoto(sizeBytes = 1000) {
     fileName: 'photo-1.jpg',
     mimeType: 'image/jpeg' as const,
     sizeBytes,
+    previewUri: 'file:///cache/photo-1.jpg',
   };
 }
 

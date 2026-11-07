@@ -71,6 +71,9 @@ export const MIME_EXTENSION: Record<EvidenceMimeType, string> = {
 /** Префикс object key для доказательств: disputes/<disputeId>/<uuid>.<ext>. */
 export const EVIDENCE_KEY_PREFIX = 'disputes';
 
+/** Префикс object key для фото товаров (v0.7.0-D, ADR-038): listings/<listingId>/… */
+export const LISTING_PHOTO_KEY_PREFIX = 'listings';
+
 /** Протокольная схема fileUrl для объектов хранилища. */
 export const S3_URL_SCHEME = 's3://';
 
@@ -89,4 +92,9 @@ export function s3KeyFromFileUrl(fileUrl: string): string | null {
 /** objectKey принадлежит спору? (disputes/<disputeId>/…) — защита от confirm чужого ключа. */
 export function keyBelongsToDispute(objectKey: string, disputeId: string): boolean {
   return objectKey.startsWith(`${EVIDENCE_KEY_PREFIX}/${disputeId}/`);
+}
+
+/** objectKey принадлежит лоту? (listings/<listingId>/…) — фото лота A нельзя прицепить к лоту B. */
+export function keyBelongsToListing(objectKey: string, listingId: string): boolean {
+  return objectKey.startsWith(`${LISTING_PHOTO_KEY_PREFIX}/${listingId}/`);
 }

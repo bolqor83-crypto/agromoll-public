@@ -29,6 +29,7 @@ import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_S3_REGION,
   EVIDENCE_KEY_PREFIX,
+  LISTING_PHOTO_KEY_PREFIX,
   MIME_EXTENSION,
   S3_ACCESS_KEY,
   S3_BUCKET,
@@ -146,6 +147,14 @@ export class StorageService {
    */
   evidenceObjectKey(disputeId: string, mimeType: EvidenceMimeType): string {
     return `${EVIDENCE_KEY_PREFIX}/${disputeId}/${randomUUID()}.${MIME_EXTENSION[mimeType]}`;
+  }
+
+  /**
+   * Ключ под фото товара (v0.7.0-D, ADR-038): listings/<listingId>/<uuid>.<ext>.
+   * Тот же принцип изоляции: фото лота A нельзя прицепить к лоту B.
+   */
+  listingPhotoObjectKey(listingId: string, mimeType: EvidenceMimeType): string {
+    return `${LISTING_PHOTO_KEY_PREFIX}/${listingId}/${randomUUID()}.${MIME_EXTENSION[mimeType]}`;
   }
 
   /** Presigned PUT: прямая загрузка с клиента в хранилище. */

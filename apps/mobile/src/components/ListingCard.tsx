@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Image, View } from 'react-native';
 import type { ReactNode } from 'react';
 import { Badge, Card, Icon, spacing, tap, Text, useTheme } from '@agromoll/ui';
 import type { ListingDto } from '@agromoll/types';
@@ -8,7 +8,7 @@ import { RatingBadge } from './RatingBadge';
 import { formatAvailable, formatPrice } from '@/lib/format';
 import { recordTransitionOrigin } from '@/lib/transition';
 
-/** Иконка-заглушка по категории товара (фото появятся на следующем этапе). */
+/** Иконка-заглушка по категории товара (фото нет или не загрузилось). */
 const CATEGORY_ICONS: Record<
   string,
   'leaf-outline' | 'nutrition-outline' | 'cube-outline' | 'fast-food-outline' | 'pricetag-outline'
@@ -35,6 +35,10 @@ export function ListingCard({ listing, onPress, sellerView = false, footer }: Li
   const { colors } = useTheme();
   // Опорный элемент морфа: квадрат «фото» (v0.3.1, ADR-009).
   const anchorRef = useRef<View>(null);
+  // Обложка не загрузилась (сеть/протухший presigned) — показываем
+  // иконку категории: деградация, а не пустой квадрат (v0.7.0-D).
+  const [coverBroken, setCoverBroken] = useState(false);
+  const cover = listing.coverUrl && !coverBroken ? listing.coverUrl : null;
 
   const badges: ReactNode[] = [];
   // Рейтинг продавца — первым: доверие важнее «скоропорта» (ADR-013).
@@ -100,13 +104,24 @@ export function ListingCard({ listing, onPress, sellerView = false, footer }: Li
             backgroundColor: colors.primaryMuted,
             alignItems: 'center',
             justifyContent: 'center',
+            overflow: 'hidden',
           }}
         >
-          <Icon
-            name={CATEGORY_ICONS[listing.category] ?? 'pricetag-outline'}
-            size={26}
-            color="primary"
-          />
+          {cover ? (
+            <Image
+              source={{ uri: cover }}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="cover"
+              onError={() => setCoverBroken(true)}
+              accessibilityLabel={`Фото: ${listing.title}`}
+            />
+          ) : (
+            <Icon
+              name={CATEGORY_ICONS[listing.category] ?? 'pricetag-outline'}
+              size={26}
+              color="primary"
+            />
+          )}
         </View>
         <View style={{ flex: 1, gap: spacing.xs }}>
           <Text variant="title">{listing.title}</Text>

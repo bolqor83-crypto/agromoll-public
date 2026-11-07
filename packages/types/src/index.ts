@@ -133,6 +133,21 @@ export const QUALITY_FLAG_LABELS: Record<QualityFlag, string> = {
 };
 
 /**
+ * Фото товара (v0.7.0-D, ADR-038): до 5 на лот, первое — обложка.
+ * url — presigned GET (живёт часы) или data:-URL (fallback ≤ 500 КБ).
+ */
+export interface ListingPhotoDto {
+  id: string;
+  /** Порядок в карусели 0..4; обложка — position 0. */
+  position: number;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** Presigned GET (S3) или data:-URL (fallback). */
+  url: string;
+}
+
+/**
  * Лот продавца (DTO уровня API, без служебных полей БД).
  * Decimal из Prisma приходит строкой — сохраняем её как есть и парсим в UI.
  */
@@ -156,6 +171,13 @@ export interface ListingDto {
   status: ListingStatus;
   createdAt: string;
   updatedAt: string;
+  /** Обложка (первое фото, v0.7.0-D): presigned GET / data:-URL;
+   *  null — фото нет, карточка покажет иконку категории.
+   *  Заполняется в списках (лента/витрина). Опционально — старый
+   *  сервер без фото не ломает клиент. */
+  coverUrl?: string | null;
+  /** Все фото с ссылками — только в деталях (GET /listings/:id). */
+  photos?: ListingPhotoDto[];
 }
 
 /** Бронь покупателя (DTO уровня API). */

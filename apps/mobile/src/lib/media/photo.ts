@@ -22,6 +22,9 @@ export interface PreparedPhoto {
   fileName: string;
   mimeType: 'image/jpeg';
   sizeBytes: number;
+  /** Превью для UI ДО загрузки (uri сжатой копии): манипулятор уже
+   *  вернул uri — не выбрасывать же его (v0.7.0-D). */
+  previewUri: string;
 }
 
 /** Размер после сжатия всегда укладывается в fallback-лимит 500 КБ. */
@@ -50,6 +53,25 @@ export async function pickAndCompressPhoto(
   return compressPhoto(result.assets[0].uri);
 }
 
+/**
+ * Выбрать НЕСКОЛЬКО фото из галереи и сжать каждое (v0.7.0-D, ADR-038):
+ * фото товара грузятся пачкой — пять раз открывать галерею никто не будет.
+ * selectionLimit ограничивает выбор ДО сжатия: больше лимита и не выбрать.
+ * Отмена — пустой массив.
+ */
+export async function pickPhotosAndCompress(limit: number): Promise<PreparedPhoto[]> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    quality: 1,
+    allowsMultipleSelection: true,
+    selectionLimit: Math.max(1, limit),
+  });
+  if (result.canceled) {
+    return [];
+  }
+  return Promise.all(result.assets.map((asset) => compressPhoto(asset.uri)));
+}
+
 /** Сжать фото по uri: 1200 px / JPEG 80 (web — canvas, native — SDK). */
 export async function compressPhoto(uri: string): Promise<PreparedPhoto> {
   const manipulated = await ImageManipulator.manipulateAsync(
@@ -67,6 +89,7 @@ export async function compressPhoto(uri: string): Promise<PreparedPhoto> {
     fileName: `photo-${Date.now()}.jpg`,
     mimeType: 'image/jpeg',
     sizeBytes: buffer.byteLength,
+    previewUri: manipulated.uri,
   };
 }
 

@@ -40,6 +40,7 @@ import type {
   DisputesListDto,
   GeoPointDto,
   ListingDto,
+  ListingPhotoDto,
   MyReputationDto,
   NotificationLogListDto,
   NotificationsListDto,
@@ -82,6 +83,7 @@ import {
   DisputesListResponseSchema,
   GeoPointResponseSchema,
   GeoPointsResponseSchema,
+  ListingPhotoResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
   MyReputationResponseSchema,
@@ -99,6 +101,7 @@ import {
   WorkHoursSessionResponseSchema,
 } from '@agromoll/validation';
 import type { ZodType } from 'zod';
+import { z } from 'zod';
 
 const REQUEST_TIMEOUT_MS = 8000;
 
@@ -993,5 +996,63 @@ export const api = {
     return apiRequest<ListingDto>({ method: 'POST', url: '/listings', data: body }).then((d) =>
       validateResponse(ListingResponseSchema, d, 'listings (POST)'),
     );
+  },
+
+  // ── Фото товаров (v0.7.0-D, ADR-038) ───────────────────────────────
+  // Файлы ходят напрямую клиент ↔ S3-хранилище по presigned URL
+  // (как доказательства споров, ADR-036); fallback — data:-URL ≤ 500 КБ.
+  // В офлайн-очередь не идут: файл в S3 не повторить идемпотентно,
+  // прямой POST с X-Idempotency-Key — тот же паттерн, что у evidence.
+
+  /** Presigned URL для прямой загрузки фото (только владелец лота). */
+  listingPhotoUploadUrl(
+    listingId: string,
+    input: { mimeType: 'image/jpeg' | 'image/png' | 'image/webp'; sizeBytes: number },
+  ): Promise<{ objectKey: string; uploadUrl: string; expiresIn: number }> {
+    return apiRequest<{ objectKey: string; uploadUrl: string; expiresIn: number }>({
+      method: 'POST',
+      url: `/listings/${listingId}/photos/upload-url`,
+      data: input,
+    }).then((d) =>
+      validateResponse(
+        DisputeEvidenceUploadUrlResponseSchema,
+        d,
+        'listings/:id/photos/upload-url',
+      ),
+    );
+  },
+
+  /** Приложить фото: objectKey (S3-путь) или dataUrl (fallback). */
+  attachListingPhoto(
+    listingId: string,
+    input:
+      | {
+          storage: 's3';
+          objectKey: string;
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+          sizeBytes: number;
+        }
+      | {
+          storage: 'data';
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+          dataUrl: string;
+        },
+  ): Promise<ListingPhotoDto> {
+    return apiRequest<ListingPhotoDto>({
+      method: 'POST',
+      url: `/listings/${listingId}/photos`,
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(ListingPhotoResponseSchema, d, 'listings/:id/photos'));
+  },
+
+  /** Удалить фото лота (позиции остальных пересоберутся). */
+  deleteListingPhoto(listingId: string, photoId: string): Promise<{ id: string }> {
+    return apiRequest<{ id: string }>({
+      method: 'DELETE',
+      url: `/listings/${listingId}/photos/${photoId}`,
+    }).then((d) => validateResponse(z.object({ id: z.string().min(1) }), d, 'listings/:id/photos (DELETE)'));
   },
 };

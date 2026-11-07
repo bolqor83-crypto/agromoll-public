@@ -13,6 +13,7 @@ import {
   DATA_URL_PREFIX,
   S3_URL_SCHEME,
   keyBelongsToDispute,
+  keyBelongsToListing,
   s3KeyFromFileUrl,
 } from './storage.constants';
 
@@ -73,6 +74,17 @@ describe('StorageService (unit, v0.7.0-B)', () => {
     expect(key).toMatch(/^disputes\/0e0d9d8e-1111-4222-8333-444455556666\/[\w-]+\.jpg$/);
     expect(keyBelongsToDispute(key, '0e0d9d8e-1111-4222-8333-444455556666')).toBe(true);
     expect(keyBelongsToDispute(key, 'another-dispute-id')).toBe(false);
+  });
+
+  it('ключ фото товара (v0.7.0-D): listings/<id>/<uuid>.<ext> — изоляция лотов', () => {
+    const service = new StorageService();
+    const key = service.listingPhotoObjectKey('0e0d9d8e-1111-4222-8333-444455556666', 'image/png');
+    expect(key).toMatch(/^listings\/0e0d9d8e-1111-4222-8333-444455556666\/[\w-]+\.png$/);
+    expect(keyBelongsToListing(key, '0e0d9d8e-1111-4222-8333-444455556666')).toBe(true);
+    expect(keyBelongsToListing(key, 'another-listing-id')).toBe(false);
+    // Ключ доказательства спора не выдаётся за ключ фото — префиксы разные.
+    expect(keyBelongsToListing(`disputes/0e0d9d8e-1111-4222-8333-444455556666/x.jpg`, '0e0d9d8e-1111-4222-8333-444455556666')).toBe(false);
+    expect(keyBelongsToDispute(service.listingPhotoObjectKey('0e0d9d8e-1111-4222-8333-444455556666', 'image/jpeg'), '0e0d9d8e-1111-4222-8333-444455556666')).toBe(false);
   });
 
   it('fileUrl-хелперы: s3:// и data: различаются', () => {

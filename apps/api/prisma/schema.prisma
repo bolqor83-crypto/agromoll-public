@@ -289,11 +289,39 @@ model Listing {
   bookings Booking[]
   /// Долги, привязанные к лоту (если товар отпущен в долг, ADR-010).
   debts    Debt[]
+  /// Фото товара (до 5, v0.7.0-D, ADR-038): первое — обложка.
+  photos   ListingPhoto[]
 
   @@index([sellerId])
   @@index([status])
   @@index([category])
   @@map("listings")
+}
+
+/// Фото товара (v0.7.0-D, ADR-038).
+///
+/// fileUrl — те же две формы, что у доказательств споров (ADR-036):
+///   s3://<objectKey>    — объект в хранилище, ключ listings/<listingId>/…;
+///   data:<mime>;base64… — fallback ≤ 500 КБ, когда хранилище не
+///                         настроено (dev/демо) — карточка с фото
+///                         лучше иконки-заглушки даже так.
+/// position 0..4 — порядок в карусели; обложка = position 0.
+/// Удаляется вместе с лотом (каскад); удаляется продавцом — позиции
+/// пересобираются, чтобы 0..n-1 оставались без дыр.
+model ListingPhoto {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  position  Int
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  fileUrl   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@unique([listingId, position])
+  @@index([listingId])
+  @@map("listing_photos")
 }
 
 model Booking {
@@ -383,6 +411,8 @@ enum OutboxOperationType {
   resolve_appeal
   // v0.7.0-C (ADR-037): переписка в апелляциях.
   appeal_message
+  // v0.7.0-D (ADR-038): фото товаров.
+  listing_photo
 }
 
 /// Состояние операции на сервере (ADR-006).

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -12,14 +13,22 @@ import {
 } from '@nestjs/common';
 import type { ZodType } from 'zod';
 import {
+  AttachListingPhotoSchema,
   CreateListingSchema,
   ListingCategorySchema,
+  ListingPhotoUploadUrlSchema,
   ListingStatusSchema,
   UpdateListingSchema,
 } from '@agromoll/validation';
-import type { CreateListingInput, UpdateListingInput } from '@agromoll/validation';
+import type {
+  AttachListingPhotoInput,
+  CreateListingInput,
+  ListingPhotoUploadUrlInput,
+  UpdateListingInput,
+} from '@agromoll/validation';
 import { CurrentUser, Roles, RolesGuard, JwtAuthGuard } from '../auth/auth.guards';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { Idempotent } from '../common/idempotency.interceptor';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ListingsService } from './listings.service';
 
@@ -75,6 +84,45 @@ export class ListingsController {
     @Body(new ZodValidationPipe(UpdateListingSchema)) body: UpdateListingInput,
   ) {
     return this.listings.update(id, user.id, body);
+  }
+
+  // ─── Фото товаров (v0.7.0-D, ADR-038) ──────────────────────────────────
+  // Владелец лота (проверка в сервисе, не ролями: seller создаёт лоты,
+  // но владелец — конкретный seller). Файлы идут напрямую в S3 по
+  // presigned URL — API не перекачивает мегабайты.
+
+  /** Presigned URL для прямой загрузки фото. */
+  @Post(':id/photos/upload-url')
+  @UseGuards(JwtAuthGuard)
+  createPhotoUploadUrl(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(ListingPhotoUploadUrlSchema)) body: ListingPhotoUploadUrlInput,
+  ) {
+    return this.listings.createPhotoUploadUrl(user.id, id, body);
+  }
+
+  /** Приложить фото: objectKey (S3) или dataUrl (fallback ≤ 500 КБ). */
+  @Post(':id/photos')
+  @UseGuards(JwtAuthGuard)
+  @Idempotent('listing_photo')
+  attachPhoto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(AttachListingPhotoSchema)) body: AttachListingPhotoInput,
+  ) {
+    return this.listings.attachPhoto(user.id, id, body);
+  }
+
+  /** Удалить фото (позиции остальных пересобираются). */
+  @Delete(':id/photos/:photoId')
+  @UseGuards(JwtAuthGuard)
+  deletePhoto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('photoId', ParseUUIDPipe) photoId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.listings.deletePhoto(user.id, id, photoId);
   }
 }
 
