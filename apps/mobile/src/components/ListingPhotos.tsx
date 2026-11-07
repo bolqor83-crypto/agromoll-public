@@ -45,9 +45,20 @@ export function ListingPhotos({ photos, title }: ListingPhotosProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
 
-  const onLayout = useCallback((event: { nativeEvent: { layout: { width: number } } }) => {
-    setContainerWidth(event.nativeEvent.layout.width);
-  }, []);
+  // Ширина контейнера — единственный источник правды для пейджинга.
+  // Гард против аномалий лэйаута (RN-web: горизонтальный FlatList без
+  // явной ширины может распереть родителя — ширина растёт с каждым
+  // onLayout до сатурации LayoutUnit): игнорируем всё, что шире
+  // окна (контентная колонка ≤ 600 px, окно — верхняя граница).
+  const onLayout = useCallback(
+    (event: { nativeEvent: { layout: { width: number } } }) => {
+      const width = event.nativeEvent.layout.width;
+      if (width > 0 && width <= windowWidth) {
+        setContainerWidth(width);
+      }
+    },
+    [windowWidth],
+  );
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -82,7 +93,14 @@ export function ListingPhotos({ photos, title }: ListingPhotosProps) {
 
   return (
     <>
-      <Animated.View onLayout={onLayout} style={{ borderRadius: 16, overflow: 'hidden' }}>
+      {/* width:'100%' — обязателен на RN-web: родитель с alignItems:'center'
+          даёт обёртке сжаться до контента, а горизонтальный FlatList
+          распирает её (цикл onLayout → рост ширины). 100% — ширина
+          морф-фрейма 4:3 из ListingDetailScreen, как задумано. */}
+      <Animated.View
+        onLayout={onLayout}
+        style={{ width: '100%', borderRadius: 16, overflow: 'hidden' }}
+      >
         <FlatList
           data={photos}
           renderItem={renderItem}
@@ -97,6 +115,7 @@ export function ListingPhotos({ photos, title }: ListingPhotosProps) {
             index,
           })}
           extraData={containerWidth}
+          style={{ width: '100%' }}
         />
         {photos.length > 1 ? (
           <View
@@ -141,6 +160,10 @@ function PhotoGallery({
 }) {
   const { width } = useWindowDimensions();
   const visible = index !== null;
+  // Высота зоны фото: % внутри контента ScrollView не резолвятся на
+  // RN-web (контейнер авто-высоты → 0) — меряем сам ScrollView и
+  // задаём страницам явные пиксели.
+  const [scrollHeight, setScrollHeight] = useState(0);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -185,17 +208,22 @@ function PhotoGallery({
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
+            // flex:1 — занимает всё под шапкой; высота меряется onLayout
+            // и задаётся страницам явно (иначе RN-web даст 0).
+            style={{ flex: 1 }}
+            onLayout={(event) => setScrollHeight(event.nativeEvent.layout.height)}
             contentContainerStyle={{ alignItems: 'center' }}
             accessibilityLabel={`Галерея: ${title}`}
           >
             {photos.map((photo, photoIndex) => (
-              <Image
-                key={photo.id}
-                source={{ uri: photo.url }}
-                style={{ width, flex: 1 }}
-                resizeMode="contain"
-                accessibilityLabel={`Фото ${photoIndex + 1}: ${title}`}
-              />
+              <View key={photo.id} style={{ width, height: scrollHeight || '100%' }}>
+                <Image
+                  source={{ uri: photo.url }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                  accessibilityLabel={`Фото ${photoIndex + 1}: ${title}`}
+                />
+              </View>
             ))}
           </ScrollView>
         ) : null}
