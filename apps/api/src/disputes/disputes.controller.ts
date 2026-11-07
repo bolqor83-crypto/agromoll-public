@@ -8,12 +8,14 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import {
   DisputeEvidenceSchema,
+  DisputeEvidenceUploadUrlSchema,
   DisputeMessageSchema,
   OpenDisputeSchema,
   ResolveDisputeSchema,
 } from '@agromoll/validation';
 import type {
   DisputeEvidenceInput,
+  DisputeEvidenceUploadUrlInput,
   DisputeMessageInput,
   OpenDisputeInput,
   ResolveDisputeInput,
@@ -73,7 +75,28 @@ export class DisputesController {
     return this.disputes.postMessage(user, id, body);
   }
 
-  /** Приложить доказательство (base64 ≤ 2 МБ). */
+  /** Список доказательств кейса с ссылками (участники + арбитр, ADR-036). */
+  @Get(':id/evidence')
+  async listEvidence(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.disputes.listEvidence(user, id);
+  }
+
+  /** Presigned URL для прямой загрузки файла в хранилище (ADR-036). */
+  @Post(':id/evidence/upload-url')
+  async createEvidenceUploadUrl(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(DisputeEvidenceUploadUrlSchema)) body: DisputeEvidenceUploadUrlInput,
+  ) {
+    return this.disputes.createEvidenceUploadUrl(user, id, body);
+  }
+
+  /**
+   * Подтвердить загрузку: objectKey (S3) или data:-URL (fallback ≤ 500 КБ).
+   */
   @Post(':id/evidence')
   @Idempotent('dispute_evidence')
   async attachEvidence(

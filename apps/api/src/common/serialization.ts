@@ -174,9 +174,9 @@ export function toDisputeDetailDto(dispute: DisputeView): DisputeDetailDto {
 
 // ─── Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035) ────────────────────
 
-import type { AppealDetailDto, AppealDto } from '@agromoll/types';
+import type { AppealDetailDto, AppealDto, AppealMessageDto } from '@agromoll/types';
 
-/** Связи кейса апелляции для DTO: пара, автор, арбитр. */
+/** Связи кейса апелляции для DTO: пара, автор, арбитр, переписка. */
 type AppealView = {
   id: string;
   blockedPairId: string;
@@ -193,6 +193,14 @@ type AppealView = {
   seller: PartyView;
   appellant: PartyView;
   assignedTo: PartyView | null;
+  /** Переписка кейса (v0.7.0-C, ADR-037); служебные уже отфильтрованы. */
+  messages?: Array<{
+    id: string;
+    author: PartyView;
+    body: string;
+    isInternal: boolean;
+    createdAt: Date;
+  }>;
 };
 
 /** Апелляция → DTO списка. */
@@ -225,5 +233,14 @@ export function toAppealDetailDto(
       totalMinutes: m.totalMinutes,
       monthCounted: m.monthCounted,
     })),
+    messages: (appeal.messages ?? []).map(
+      (m): AppealMessageDto => ({
+        id: m.id,
+        author: partyDto(m.author),
+        body: m.body,
+        isInternal: m.isInternal,
+        createdAt: m.createdAt.toISOString(),
+      }),
+    ),
   };
 }

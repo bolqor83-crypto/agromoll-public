@@ -1,18 +1,26 @@
 /**
- * Unit-тесты сервиса арбитража (v0.6.0-C, ADR-033) — мок Prisma.
+ * Unit-тесты сервиса арбитража (v0.6.0-C ADR-033 → v0.7.0-B ADR-036) — мок Prisma.
  *
  * Покрывают: открытие спора (стороны, дубликат 409, гонка P2002),
- * видимость служебных заметок, заморозку объектов, решения арбитра
- * и судьбу брони/долга в транзакции решения. Полный HTTP-цикл —
- * в test/disputes.e2e-spec.ts (реальная БД, CI).
+ * видимость служебных заметок, заморозку объектов, решения арбитра,
+ * судьбу брони/долга в транзакции решения, S3-доказательства
+ * (presigned URL, подтверждение с проверками, fallback data:-URL).
+ * Полный HTTP-цикл с реальным S3-хранилищем — в test/disputes.e2e-spec.ts (CI).
  */
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import { DisputesService } from './disputes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { StorageService } from '../storage/storage.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
 
 const BUYER = 'user-buyer';
@@ -87,7 +95,7 @@ function createPrismaMock() {
       update: jest.fn(),
     },
     disputeMessage: { create: jest.fn() },
-    disputeEvidence: { create: jest.fn() },
+    disputeEvidence: { create: jest.fn(), findMany: jest.fn() },
     $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
   };
   return {
@@ -97,7 +105,33 @@ function createPrismaMock() {
   };
 }
 
-async function createService(prisma: PrismaService): Promise<DisputesService> {
+/** Мок StorageService: состояние задаётся тестом (available, head, presign). */
+function createStorageMock(overrides: Record<string, unknown> = {}) {
+  return {
+    isConfigured: jest.fn(() => true),
+    isAvailable: jest.fn(() => true),
+    evidenceObjectKey: jest.fn(
+      (disputeId: string, mimeType: string) => `disputes/${disputeId}/fake-key.${mimeType.split('/')[1]}`,
+    ),
+    presignPut: jest.fn(
+      jest.fn(async (objectKey: string) => ({
+        objectKey,
+        uploadUrl: `http://minio.local/bucket/${objectKey}?signature=fake`,
+        expiresIn: 600,
+      })),
+    ),
+    presignGet: jest.fn(
+      jest.fn(async (objectKey: string) => `http://minio.local/bucket/${objectKey}?get-signature=fake`),
+    ),
+    headObject: jest.fn(),
+    ...overrides,
+  } as unknown as StorageService;
+}
+
+async function createService(
+  prisma: PrismaService,
+  storage: StorageService = createStorageMock(),
+): Promise<DisputesService> {
   const moduleRef = await Test.createTestingModule({
     providers: [
       { provide: PrismaService, useValue: prisma },
@@ -111,6 +145,7 @@ async function createService(prisma: PrismaService): Promise<DisputesService> {
           recalculate: jest.fn(),
         },
       },
+      { provide: StorageService, useValue: storage },
       DisputesService,
     ],
   }).compile();
@@ -324,6 +359,235 @@ describe('DisputesService (unit, v0.6.0-C)', () => {
           isInternal: false,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('доказательства — S3 presigned + fallback (v0.7.0-B, ADR-036)', () => {
+    it('upload-url: участнику выдаётся presigned PUT с ключом его спора', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const storage = createStorageMock();
+      const service = await createService(prisma, storage);
+
+      const dto = await service.createEvidenceUploadUrl(viewer(BUYER, 'buyer'), 'dispute-1', {
+        mimeType: 'image/jpeg',
+        sizeBytes: 2048,
+      });
+
+      expect(dto.uploadUrl).toContain('http://minio.local/bucket/');
+      expect(dto.objectKey).toMatch(/^disputes\/dispute-1\/[\w.-]+\.jpe?g$/);
+      expect(dto.expiresIn).toBe(600);
+      expect(storage.presignPut).toHaveBeenCalledWith(
+        expect.stringMatching(/^disputes\/dispute-1\//),
+        'image/jpeg',
+      );
+    });
+
+    it('upload-url: хранилище недоступно — 503 (клиент уйдёт в fallback)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const service = await createService(prisma, createStorageMock({ isAvailable: jest.fn(() => false) }));
+
+      await expect(
+        service.createEvidenceUploadUrl(viewer(BUYER, 'buyer'), 'dispute-1', {
+          mimeType: 'image/jpeg',
+          sizeBytes: 2048,
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
+
+    it('upload-url: посторонний не получает ссылку (404)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const service = await createService(prisma);
+
+      await expect(
+        service.createEvidenceUploadUrl(viewer('stranger', 'buyer'), 'dispute-1', {
+          mimeType: 'image/jpeg',
+          sizeBytes: 2048,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('confirm s3: файл существует, метаданные совпали — строка с s3://fileUrl', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const storage = createStorageMock();
+      (storage.headObject as jest.Mock).mockResolvedValue({
+        sizeBytes: 2048,
+        mimeType: 'image/jpeg',
+      });
+      prismaMock.disputeEvidence.create.mockResolvedValue({
+        id: 'ev-1',
+        fileName: 'bochki.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 2048,
+        uploadedBy: { id: BUYER, displayName: 'Тест', role: 'buyer' },
+        createdAt: new Date(),
+      });
+      const service = await createService(prisma, storage);
+
+      const dto = await service.attachEvidence(viewer(BUYER, 'buyer'), 'dispute-1', {
+        storage: 's3',
+        objectKey: 'disputes/dispute-1/abc.jpg',
+        fileName: 'bochki.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 2048,
+      });
+
+      expect(dto.sizeBytes).toBe(2048);
+      expect(prismaMock.disputeEvidence.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            fileUrl: 's3://disputes/dispute-1/abc.jpg',
+            sizeBytes: 2048,
+          }),
+        }),
+      );
+    });
+
+    it('confirm s3: ключ чужого спора — 400', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const service = await createService(prisma);
+
+      await expect(
+        service.attachEvidence(viewer(BUYER, 'buyer'), 'dispute-1', {
+          storage: 's3',
+          objectKey: 'disputes/other-dispute/abc.jpg',
+          fileName: 'evil.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 10,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('confirm s3: файл не загружен (HEAD пуст) — 400', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const storage = createStorageMock();
+      (storage.headObject as jest.Mock).mockResolvedValue(null);
+      const service = await createService(prisma, storage);
+
+      await expect(
+        service.attachEvidence(viewer(BUYER, 'buyer'), 'dispute-1', {
+          storage: 's3',
+          objectKey: 'disputes/dispute-1/ghost.jpg',
+          fileName: 'ghost.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 10,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('confirm s3: размер не совпал с HEAD — 400 (в БД только правда)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const storage = createStorageMock();
+      (storage.headObject as jest.Mock).mockResolvedValue({
+        sizeBytes: 999999,
+        mimeType: 'image/jpeg',
+      });
+      const service = await createService(prisma, storage);
+
+      await expect(
+        service.attachEvidence(viewer(BUYER, 'buyer'), 'dispute-1', {
+          storage: 's3',
+          objectKey: 'disputes/dispute-1/abc.jpg',
+          fileName: 'abc.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 2048,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('fallback data: data:-URL ≤ 500 КБ принимается, размер из base64', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      prismaMock.disputeEvidence.create.mockResolvedValue({
+        id: 'ev-2',
+        fileName: 'doc.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 11,
+        uploadedBy: { id: BUYER, displayName: 'Тест', role: 'buyer' },
+        createdAt: new Date(),
+      });
+      const service = await createService(prisma);
+
+      const dto = await service.attachEvidence(viewer(BUYER, 'buyer'), 'dispute-1', {
+        storage: 'data',
+        fileName: 'doc.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: 'data:image/jpeg;base64,aGVsbG8gd29ybGQ=',
+      });
+
+      // «hello world» = 11 байт
+      expect(dto.sizeBytes).toBe(11);
+      expect(prismaMock.disputeEvidence.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            fileUrl: 'data:image/jpeg;base64,aGVsbG8gd29ybGQ=',
+          }),
+        }),
+      );
+    });
+
+    it('fallback data: MIME в dataUrl расходится с mimeType — 400', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const service = await createService(prisma);
+
+      await expect(
+        service.attachEvidence(viewer(BUYER, 'buyer'), 'dispute-1', {
+          storage: 'data',
+          fileName: 'doc.jpg',
+          mimeType: 'image/png',
+          dataUrl: 'data:image/jpeg;base64,aGVsbG8gd29ybGQ=',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('list: s3-строки получают presigned GET, data:-URL отдаются как есть', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      prismaMock.disputeEvidence.findMany.mockResolvedValue([
+        {
+          id: 'ev-1',
+          fileName: 'a.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 100,
+          fileUrl: 's3://disputes/dispute-1/a.jpg',
+          uploadedBy: { id: BUYER, displayName: 'Тест', role: 'buyer' },
+          createdAt: new Date(),
+        },
+        {
+          id: 'ev-2',
+          fileName: 'b.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 11,
+          fileUrl: 'data:image/jpeg;base64,aGVsbG8gd29ybGQ=',
+          uploadedBy: { id: SELLER, displayName: 'Тест', role: 'seller' },
+          createdAt: new Date(),
+        },
+      ]);
+      const storage = createStorageMock();
+      const service = await createService(prisma, storage);
+
+      const list = await service.listEvidence(viewer(ARBITRATOR, 'arbitrator'), 'dispute-1');
+
+      expect(list.items).toHaveLength(2);
+      expect(list.items[0].url).toContain('get-signature=fake');
+      expect(list.items[1].url).toBe('data:image/jpeg;base64,aGVsbG8gd29ybGQ=');
+    });
+
+    it('list: посторонний не видит ссылки (404)', async () => {
+      const { prisma, prismaMock } = createPrismaMock();
+      prismaMock.disputeCase.findUnique.mockResolvedValue(makeDispute());
+      const service = await createService(prisma);
+
+      await expect(
+        service.listEvidence(viewer('stranger', 'seller'), 'dispute-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

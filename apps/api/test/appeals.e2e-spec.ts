@@ -1,5 +1,6 @@
 /**
- * E2E апелляций на блокировки 289-ФЗ (v0.6.0-E, ADR-035): полный HTTP-цикл.
+ * E2E апелляций на блокировки 289-ФЗ (v0.6.0-E ADR-035, переписка —
+ * v0.7.0-C ADR-037): полный HTTP-цикл.
  *
  * Требует DATABASE_URL и применённых миграций — запускается в CI
  * (service-контейнеры postgis + redis) командой
@@ -220,6 +221,70 @@ describe('Block appeals 289-ФЗ (e2e, HTTP)', () => {
     expect(mineOutsider.body.items).toHaveLength(0);
   });
 
+  it('переписка (v0.7.0-C, ADR-037): арбитр уточняет → сторона отвечает → решение', async () => {
+    const blockedPairId = await blockPair();
+    const appeal = await post(driver, '/appeals')
+      .send({ blockedPairId, reason: 'Часы задвоились из-за отменённых доставок' })
+      .expect(201);
+    const appealId = appeal.body.id as string;
+
+    await post(arbitrator, `/appeals/${appealId}/assign`).send({}).expect(201);
+
+    // Арбитр спрашивает публично — обе стороны видят сообщение.
+    await post(arbitrator, `/appeals/${appealId}/messages`)
+      .send({ body: 'Пришлите номера смен, которые закрывались дважды', isInternal: false })
+      .expect(201);
+
+    // Арбитр фиксирует служебную заметку — паре она невидима.
+    await post(arbitrator, `/appeals/${appealId}/messages`)
+      .send({ body: 'Проверил журнал: смены 41 и 42 дублированы', isInternal: true })
+      .expect(201);
+
+    // Сторона пары отвечает.
+    await post(driver, `/appeals/${appealId}/messages`)
+      .send({ body: 'Смены 41 и 42, обе закрывались автоматически' })
+      .expect(201);
+
+    // Сторона не может писать служебные заметки — 403.
+    await post(driver, `/appeals/${appealId}/messages`)
+      .send({ body: 'Попробую отметить служебно', isInternal: true })
+      .expect(403);
+
+    // Детали: водитель видит 2 сообщения (своё + вопрос арбитра),
+    // арбитр — 3 (+ служебная заметка).
+    const driverView = await get(driver, `/appeals/${appealId}`).expect(200);
+    expect(driverView.body.messages).toHaveLength(2);
+    expect(driverView.body.messages.every((m: { isInternal: boolean }) => !m.isInternal)).toBe(
+      true,
+    );
+    const arbView = await get(arbitrator, `/appeals/${appealId}`).expect(200);
+    expect(arbView.body.messages).toHaveLength(3);
+
+    // Отдельный эндпоинт списка — та же видимость.
+    const list = await get(seller, `/appeals/${appealId}/messages`).expect(200);
+    expect(list.body.items).toHaveLength(2);
+
+    // Посторонний не читает переписку (404).
+    await get(outsider, `/appeals/${appealId}/messages`).expect(404);
+
+    // Продавец (вторая сторона) получил push об активности в кейсе.
+    const notified = await prisma.notification.findFirst({
+      where: { userId: seller.id, type: 'appeal_message' },
+    });
+    expect(notified).not.toBeNull();
+
+    // Решение закрывает кейс; переписка после закрытия недоступна (409),
+    // но читается в деталях (история сохраняется).
+    await post(arbitrator, `/appeals/${appealId}/resolve`)
+      .send({ decision: 'unblock', notes: 'Дублирование подтверждено, часы пересчитаны' })
+      .expect(201);
+    await post(driver, `/appeals/${appealId}/messages`)
+      .send({ body: 'Спасибо!' })
+      .expect(409);
+    const closedView = await get(driver, `/appeals/${appealId}`).expect(200);
+    expect(closedView.body.messages).toHaveLength(2);
+  });
+
   it('ревайв: после разблока серия всё ещё закрыта → крон блокирует снова', async () => {
     const blockedPairId = await blockPair();
     const appeal = await post(driver, '/appeals')
@@ -249,6 +314,7 @@ describe('Block appeals 289-ФЗ (e2e, HTTP)', () => {
 async function cleanDatabase(prisma: PrismaService): Promise<void> {
   // Идемпотентные операции держат FK на users — чистим первыми (ADR-006).
   await prisma.outboxOperation.deleteMany();
+  await prisma.appealMessage.deleteMany();
   await prisma.appealCase.deleteMany();
   await prisma.blockedPair.deleteMany();
   await prisma.workSession.deleteMany();

@@ -25,6 +25,7 @@ import type { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 
 import type {
   AppealDetailDto,
   AppealDto,
+  AppealMessagesListDto,
   AppealsListDto,
   AuthResponseDto,
   BookingDto,
@@ -34,9 +35,12 @@ import type {
   DeliveryDto,
   DisputeDetailDto,
   DisputeDto,
+  DisputeEvidenceListDto,
+  DisputeEvidenceUploadUrlDto,
   DisputesListDto,
   GeoPointDto,
   ListingDto,
+  ListingPhotoDto,
   MyReputationDto,
   NotificationLogListDto,
   NotificationsListDto,
@@ -59,6 +63,8 @@ import { logger } from './logger';
 import { API_URL, IS_API_CONFIGURED } from './api-config';
 import {
   AppealDetailResponseSchema,
+  AppealMessageResponseSchema,
+  AppealMessagesListResponseSchema,
   AppealResponseSchema,
   AppealsListResponseSchema,
   AuthResponseSchema,
@@ -69,11 +75,15 @@ import {
   DeliveriesResponseSchema,
   DeliveryResponseSchema,
   DisputeDetailResponseSchema,
+  DisputeEvidenceListResponseSchema,
+  DisputeEvidenceResponseSchema,
+  DisputeEvidenceUploadUrlResponseSchema,
   DisputeMessageResponseSchema,
   DisputeResponseSchema,
   DisputesListResponseSchema,
   GeoPointResponseSchema,
   GeoPointsResponseSchema,
+  ListingPhotoResponseSchema,
   ListingResponseSchema,
   ListingsResponseSchema,
   MyReputationResponseSchema,
@@ -91,6 +101,7 @@ import {
   WorkHoursSessionResponseSchema,
 } from '@agromoll/validation';
 import type { ZodType } from 'zod';
+import { z } from 'zod';
 
 const REQUEST_TIMEOUT_MS = 8000;
 
@@ -823,6 +834,67 @@ export const api = {
     );
   },
 
+  // ─── Доказательства споров (v0.7.0-B, ADR-036) ───────────────
+  // Файлы ходят напрямую клиент ↔ S3-хранилище по presigned URL:
+  // экономия трафика API. Fallback (хранилище недоступно, 503) —
+  // data:-URL ≤ 500 КБ через тот же confirm-эндпоинт.
+
+  /** Presigned URL для прямой загрузки файла (участник/арбитр). */
+  disputeEvidenceUploadUrl(
+    disputeId: string,
+    input: { mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf'; sizeBytes: number },
+  ): Promise<DisputeEvidenceUploadUrlDto> {
+    return apiRequest<DisputeEvidenceUploadUrlDto>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/evidence/upload-url`,
+      data: input,
+    }).then((d) =>
+      validateResponse(
+        DisputeEvidenceUploadUrlResponseSchema,
+        d,
+        'disputes/:id/evidence/upload-url',
+      ),
+    );
+  },
+
+  /**
+   * Подтвердить доказательство: objectKey (S3-путь) или dataUrl (fallback).
+   */
+  attachDisputeEvidence(
+    disputeId: string,
+    input:
+      | {
+          storage: 's3';
+          objectKey: string;
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+          sizeBytes: number;
+        }
+      | {
+          storage: 'data';
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+          dataUrl: string;
+        },
+  ): Promise<DisputeDetailDto['evidence'][number]> {
+    return apiRequest<DisputeDetailDto['evidence'][number]>({
+      method: 'POST',
+      url: `/disputes/${disputeId}/evidence`,
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(DisputeEvidenceResponseSchema, d, 'disputes/:id/evidence'));
+  },
+
+  /** Список доказательств с ссылками для просмотра (участник/арбитр). */
+  disputeEvidence(disputeId: string): Promise<DisputeEvidenceListDto> {
+    return apiRequest<DisputeEvidenceListDto>({
+      method: 'GET',
+      url: `/disputes/${disputeId}/evidence`,
+    }).then((d) =>
+      validateResponse(DisputeEvidenceListResponseSchema, d, 'disputes/:id/evidence (GET)'),
+    );
+  },
+
   // ─── Апелляции на блокировки 289-ФЗ (v0.6.0-E, ADR-035) ───────
   // Обжалование — онлайн-процедура, как и споры: арбитру нужна
   // суть жалобы, «апелляция из лифта» без объяснений бесполезна.
@@ -881,6 +953,32 @@ export const api = {
     );
   },
 
+  // ─── Переписка в апелляциях (v0.7.0-C, ADR-037) ────────────────
+
+  /** Сообщение в кейсе (append-only; isInternal — только арбитр). */
+  sendAppealMessage(
+    appealId: string,
+    body: string,
+    isInternal = false,
+  ): Promise<AppealDetailDto['messages'][number]> {
+    return apiRequest<AppealDetailDto['messages'][number]>({
+      method: 'POST',
+      url: `/appeals/${appealId}/messages`,
+      data: { body, isInternal },
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(AppealMessageResponseSchema, d, 'appeals/:id/messages'));
+  },
+
+  /** Список сообщений кейса (паре — публичные, арбитру — все). */
+  appealMessages(appealId: string): Promise<AppealMessagesListDto> {
+    return apiRequest<AppealMessagesListDto>({
+      method: 'GET',
+      url: `/appeals/${appealId}/messages`,
+    }).then((d) =>
+      validateResponse(AppealMessagesListResponseSchema, d, 'appeals/:id/messages (GET)'),
+    );
+  },
+
   // ── Мутации ───────────────────────────────────────────────────────────────
   // Мутации БРОНЕЙ (create/cancel/confirm/counter-offer/accept-counter)
   // живут в офлайн-ядре: src/lib/outbox/* (X-Idempotency-Key, ADR-006).
@@ -898,5 +996,63 @@ export const api = {
     return apiRequest<ListingDto>({ method: 'POST', url: '/listings', data: body }).then((d) =>
       validateResponse(ListingResponseSchema, d, 'listings (POST)'),
     );
+  },
+
+  // ── Фото товаров (v0.7.0-D, ADR-038) ───────────────────────────────
+  // Файлы ходят напрямую клиент ↔ S3-хранилище по presigned URL
+  // (как доказательства споров, ADR-036); fallback — data:-URL ≤ 500 КБ.
+  // В офлайн-очередь не идут: файл в S3 не повторить идемпотентно,
+  // прямой POST с X-Idempotency-Key — тот же паттерн, что у evidence.
+
+  /** Presigned URL для прямой загрузки фото (только владелец лота). */
+  listingPhotoUploadUrl(
+    listingId: string,
+    input: { mimeType: 'image/jpeg' | 'image/png' | 'image/webp'; sizeBytes: number },
+  ): Promise<{ objectKey: string; uploadUrl: string; expiresIn: number }> {
+    return apiRequest<{ objectKey: string; uploadUrl: string; expiresIn: number }>({
+      method: 'POST',
+      url: `/listings/${listingId}/photos/upload-url`,
+      data: input,
+    }).then((d) =>
+      validateResponse(
+        DisputeEvidenceUploadUrlResponseSchema,
+        d,
+        'listings/:id/photos/upload-url',
+      ),
+    );
+  },
+
+  /** Приложить фото: objectKey (S3-путь) или dataUrl (fallback). */
+  attachListingPhoto(
+    listingId: string,
+    input:
+      | {
+          storage: 's3';
+          objectKey: string;
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+          sizeBytes: number;
+        }
+      | {
+          storage: 'data';
+          fileName: string;
+          mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+          dataUrl: string;
+        },
+  ): Promise<ListingPhotoDto> {
+    return apiRequest<ListingPhotoDto>({
+      method: 'POST',
+      url: `/listings/${listingId}/photos`,
+      data: input,
+      headers: { 'X-Idempotency-Key': randomUUID() },
+    }).then((d) => validateResponse(ListingPhotoResponseSchema, d, 'listings/:id/photos'));
+  },
+
+  /** Удалить фото лота (позиции остальных пересоберутся). */
+  deleteListingPhoto(listingId: string, photoId: string): Promise<{ id: string }> {
+    return apiRequest<{ id: string }>({
+      method: 'DELETE',
+      url: `/listings/${listingId}/photos/${photoId}`,
+    }).then((d) => validateResponse(z.object({ id: z.string().min(1) }), d, 'listings/:id/photos (DELETE)'));
   },
 };

@@ -6,8 +6,16 @@
  * арбитр не подаёт апелляций (он не сторона пары — сервис это проверяет).
  */
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
-import { OpenAppealSchema, ResolveAppealSchema } from '@agromoll/validation';
-import type { OpenAppealInput, ResolveAppealInput } from '@agromoll/validation';
+import {
+  AppealMessageSchema,
+  OpenAppealSchema,
+  ResolveAppealSchema,
+} from '@agromoll/validation';
+import type {
+  AppealMessageInput,
+  OpenAppealInput,
+  ResolveAppealInput,
+} from '@agromoll/validation';
 import { CurrentUser, JwtAuthGuard, Roles, RolesGuard } from '../auth/auth.guards';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -47,10 +55,30 @@ export class AppealsController {
     return this.appeals.findQueue();
   }
 
-  /** Детали кейса + история месяцев часов пары (доказательство). */
+  /** Детали кейса + история месяцев часов пары (доказательство) + переписка. */
   @Get(':id')
   async findOne(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.appeals.findOne(user, id);
+  }
+
+  /** Список сообщений кейса (v0.7.0-C, ADR-037): паре — публичные, арбитру — все. */
+  @Get(':id/messages')
+  async listMessages(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.appeals.listMessages(user, id);
+  }
+
+  /** Сообщение в переписке кейса (append-only; isInternal — только арбитр). */
+  @Post(':id/messages')
+  @Idempotent('appeal_message')
+  async postMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(AppealMessageSchema)) body: AppealMessageInput,
+  ) {
+    return this.appeals.postMessage(user, id, body);
   }
 
   /** Взять апелляцию в работу: open → under_review. Только арбитр. */

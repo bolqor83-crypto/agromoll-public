@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Alert, Image, Pressable, View } from 'react-native';
 import {
   LISTING_CATEGORIES,
   LISTING_CATEGORY_LABELS,
@@ -10,6 +10,7 @@ import type { ListingCategory, ListingUnit } from '@agromoll/types';
 import {
   Button,
   Card,
+  Icon,
   Input,
   radius,
   ShakeField,
@@ -21,7 +22,13 @@ import {
   warning,
 } from '@agromoll/ui';
 import { api, ApiError } from '@/lib/api';
+import { pickPhotosAndCompress, type PreparedPhoto } from '@/lib/media/photo';
+import { uploadListingPhoto } from '@/lib/media/photo-upload';
+import { logger } from '@/lib/logger';
 import { SheetModal } from './SheetModal';
+
+/** Максимум фото на лот (ADR-038): совпадает с лимитом сервера. */
+const MAX_PHOTOS = 5;
 
 export interface CreateListingModalProps {
   visible: boolean;
@@ -44,6 +51,10 @@ export function CreateListingModal({ visible, demo, onClose, onCreated }: Create
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('');
   const [sending, setSending] = useState(false);
+  // Фото товара (v0.7.0-D, ADR-038): выбираются до отправки, грузятся
+  // ПОСЛЕ создания лота по очереди (позиция = порядок). Превью — сжатые
+  // копии из манипулятора, сами байты ждут в памяти.
+  const [photos, setPhotos] = useState<PreparedPhoto[]>([]);
 
   const parsedPrice = useMemo(() => Number.parseFloat(price.replace(',', '.')), [price]);
   const parsedQuantity = useMemo(() => Number.parseInt(quantity, 10), [quantity]);
@@ -75,6 +86,22 @@ export function CreateListingModal({ visible, demo, onClose, onCreated }: Create
     setUnit('kg');
     setPrice('');
     setQuantity('');
+    setPhotos([]);
+  };
+
+  /** Добавить фото из галереи (мультивыбор до остатка слотов). */
+  const addPhotos = async (): Promise<void> => {
+    tap();
+    const remaining = MAX_PHOTOS - photos.length;
+    if (remaining <= 0) {
+      return;
+    }
+    try {
+      const picked = await pickPhotosAndCompress(remaining);
+      setPhotos((current) => [...current, ...picked].slice(0, MAX_PHOTOS));
+    } catch (err) {
+      logger.warn('listing-photos', 'не удалось выбрать фото', { err: String(err) });
+    }
   };
 
   const send = async (): Promise<void> => {
@@ -90,16 +117,34 @@ export function CreateListingModal({ visible, demo, onClose, onCreated }: Create
     }
     setSending(true);
     try {
-      await api.createListing({
+      const created = await api.createListing({
         title: title.trim(),
         category,
         unit,
         pricePerUnit: parsedPrice,
         quantityAvailable: parsedQuantity,
       });
+
+      // Фото грузятся ПОСЛЕ создания лота: ошибка фото не должна ронять
+      // лот (некритичные данные, ADR-038). Счётчик неудач — для честного
+      // предупреждения, а не молчаливой потери.
+      let failed = 0;
+      for (const photo of photos) {
+        const result = await uploadListingPhoto(created.id, photo);
+        if (!result.ok) {
+          failed += 1;
+        }
+      }
+
       success();
       reset();
       onCreated();
+      if (failed > 0) {
+        Alert.alert(
+          'Лот создан, но не всё фото загрузились',
+          `Загружено ${photos.length - failed} из ${photos.length}. Лот работает — фото можно будет добавить позже.`,
+        );
+      }
     } catch (error) {
       warning();
       const hint = error instanceof ApiError ? error.hint : undefined;
@@ -124,6 +169,66 @@ export function CreateListingModal({ visible, demo, onClose, onCreated }: Create
             Название
           </Text>
           <Input placeholder="Помидоры розовые" value={title} onChangeText={setTitle} />
+        </View>
+
+        {/* Фото товара (v0.7.0-D): первое — обложка в ленте. */}
+        <View style={{ gap: spacing.xs }}>
+          <Text variant="caption" color="secondary">
+            Фото · {photos.length}/{MAX_PHOTOS}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+            {photos.map((photo, index) => (
+              <Pressable
+                key={`${photo.previewUri}-${index}`}
+                accessibilityLabel={`Убрать фото ${index + 1}`}
+                onPress={() => {
+                  tap();
+                  setPhotos((current) => current.filter((_, i) => i !== index));
+                }}
+                style={{ width: 64, height: 64 }}
+              >
+                <Image
+                  source={{ uri: photo.previewUri }}
+                  style={{ width: '100%', height: '100%', borderRadius: radius.md }}
+                  resizeMode="cover"
+                />
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -6,
+                    right: -6,
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    backgroundColor: colors.surface,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Icon name="close-circle" size={20} color="secondary" />
+                </View>
+              </Pressable>
+            ))}
+            {photos.length < MAX_PHOTOS ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Добавить фото из галереи"
+                onPress={() => void addPhotos()}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: radius.md,
+                  borderWidth: 2,
+                  borderStyle: 'dashed',
+                  borderColor: colors.border,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Icon name="camera-outline" size={24} color="secondary" />
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <View style={{ gap: spacing.xs }}>

@@ -20,12 +20,18 @@ import {
   UserResponseSchema,
   UserRoleSchema,
   DisputeEvidenceSchema,
+  DisputeEvidenceUploadUrlSchema,
+  AttachListingPhotoSchema,
+  LISTING_PHOTO_FALLBACK_MAX_BYTES,
+  ListingPhotoResponseSchema,
+  ListingPhotoUploadUrlSchema,
   DisputeMessageSchema,
-  DISPUTE_EVIDENCE_MAX_BYTES,
+  DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES,
   OpenDisputeSchema,
   ResolveDisputeSchema,
   UpdateRoleSchema,
   AppealDetailResponseSchema,
+  AppealMessageSchema,
   AppealResponseSchema,
   OpenAppealSchema,
   ResolveAppealSchema,
@@ -345,13 +351,57 @@ describe('@agromoll/validation', () => {
       expect(DisputeMessageSchema.safeParse({ body: 'x'.repeat(2001) }).success).toBe(false);
     });
 
-    it('DisputeEvidenceSchema: base64 ≤ 2 МБ', () => {
-      const ok = { fileName: 'photo.jpg', mimeType: 'image/jpeg', dataBase64: 'aGVsbG8gd29ybGQ=' };
-      expect(DisputeEvidenceSchema.safeParse(ok).success).toBe(true);
-      // base64-строка длиннее лимита ~2.8 млн символов — файл > 2 МБ
-      const huge = { ...ok, dataBase64: 'A'.repeat(DISPUTE_EVIDENCE_MAX_BYTES * 2) };
-      expect(DisputeEvidenceSchema.safeParse(huge).success).toBe(false);
-      expect(DisputeEvidenceSchema.safeParse({ ...ok, mimeType: 'не-mime' }).success).toBe(false);
+    it('DisputeEvidenceSchema: s3-подтверждение и fallback dataUrl ≤ 500 КБ', () => {
+      // S3-путь: подтверждение загруженного объекта
+      const s3 = {
+        storage: 's3',
+        objectKey: `disputes/0e0d9d8e-1111-4222-8333-444455556666/${'a'.repeat(8)}.jpg`,
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 1234,
+      };
+      expect(DisputeEvidenceSchema.safeParse(s3).success).toBe(true);
+      // Чужой ключ (не disputes/<uuid>/…) — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...s3, objectKey: 'listings/123/evil.jpg' }).success).toBe(false);
+      // Больше 10 МБ — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...s3, sizeBytes: 11 * 1024 * 1024 }).success).toBe(false);
+
+      // Fallback: data:-URL до 500 КБ
+      const data = {
+        storage: 'data',
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: `data:image/jpeg;base64,${'aGVsbG8gd29ybGQ='.repeat(100)}`,
+      };
+      expect(DisputeEvidenceSchema.safeParse(data).success).toBe(true);
+      // Кривой формат dataUrl — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...data, dataUrl: 'not-a-data-url' }).success).toBe(false);
+      // Больше 500 КБ декодированного (base64-хвост длиннее ~683 тыс. символов) — отклоняется
+      expect(
+        DisputeEvidenceSchema.safeParse({
+          ...data,
+          dataUrl: `data:image/jpeg;base64,${'A'.repeat(DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES * 2)}`,
+        }).success,
+      ).toBe(false);
+      // Запрещённый тип — отклоняется
+      expect(DisputeEvidenceSchema.safeParse({ ...data, mimeType: 'video/mp4' }).success).toBe(false);
+    });
+
+    it('DisputeEvidenceUploadUrlSchema: запрос presigned URL', () => {
+      expect(
+        DisputeEvidenceUploadUrlSchema.safeParse({ mimeType: 'image/jpeg', sizeBytes: 1024 })
+          .success,
+      ).toBe(true);
+      // Больше 10 МБ — на этом этапе, до подписания ссылки
+      expect(
+        DisputeEvidenceUploadUrlSchema.safeParse({
+          mimeType: 'image/jpeg',
+          sizeBytes: 11 * 1024 * 1024,
+        }).success,
+      ).toBe(false);
+      expect(
+        DisputeEvidenceUploadUrlSchema.safeParse({ mimeType: 'video/mp4', sizeBytes: 1024 }).success,
+      ).toBe(false);
     });
 
     it('ResolveDisputeSchema: решения и судьба объекта', () => {
@@ -440,19 +490,161 @@ describe('@agromoll/validation', () => {
       expect(AppealResponseSchema.safeParse(base).success).toBe(true);
       // Неизвестный статус — нельзя
       expect(AppealResponseSchema.safeParse({ ...base, status: 'closed' }).success).toBe(false);
-      // Детали с месяцами часов — доказательство арбитра
+      // Детали с месяцами часов и перепиской (v0.7.0-C, ADR-037)
       expect(
         AppealDetailResponseSchema.safeParse({
           ...base,
           months: [{ month: '2026-11', totalMinutes: 3600, monthCounted: true }],
+          messages: [],
         }).success,
       ).toBe(true);
       expect(
         AppealDetailResponseSchema.safeParse({
           ...base,
           months: [{ month: '2026-1', totalMinutes: 3600, monthCounted: true }],
+          messages: [],
         }).success,
       ).toBe(false);
+      // Переписка обязательна: деталям без messages — отказ (ADR-037)
+      expect(
+        AppealDetailResponseSchema.safeParse({
+          ...base,
+          months: [{ month: '2026-11', totalMinutes: 3600, monthCounted: true }],
+        }).success,
+      ).toBe(false);
+      // Сообщение переписки — форма DisputeMessage
+      expect(
+        AppealMessageSchema.safeParse({ body: 'Смены 41 и 42 дублированы' }).success,
+      ).toBe(true);
+      expect(AppealMessageSchema.safeParse({ body: '' }).success).toBe(false);
+      expect(AppealMessageSchema.safeParse({ body: 'x', isInternal: true }).success).toBe(true);
+    });
+  });
+
+  describe('фото товаров (v0.7.0-D, ADR-038)', () => {
+    const s3Photo = {
+      storage: 's3',
+      objectKey: `listings/0e0d9d8e-1111-4222-8333-444455556666/${'a'.repeat(8)}.jpg`,
+      fileName: 'tomatoes.jpg',
+      mimeType: 'image/jpeg',
+      sizeBytes: 1234,
+    };
+
+    it('AttachListingPhotoSchema: s3-подтверждение с ключом listings/<uuid>/…', () => {
+      expect(AttachListingPhotoSchema.safeParse(s3Photo).success).toBe(true);
+      // Чужой ключ (доказательство спора) — отклоняется
+      expect(
+        AttachListingPhotoSchema.safeParse({
+          ...s3Photo,
+          objectKey: `disputes/0e0d9d8e-1111-4222-8333-444455556666/evil.jpg`,
+        }).success,
+      ).toBe(false);
+      // Больше 10 МБ — отклоняется
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...s3Photo, sizeBytes: 11 * 1024 * 1024 }).success,
+      ).toBe(false);
+      // pdf — не фото витрины (доказательствам можно, фото — нет)
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...s3Photo, mimeType: 'application/pdf' }).success,
+      ).toBe(false);
+    });
+
+    it('AttachListingPhotoSchema: fallback dataUrl ≤ 500 КБ, только изображения', () => {
+      const data = {
+        storage: 'data',
+        fileName: 'tomatoes.jpg',
+        mimeType: 'image/jpeg',
+        dataUrl: `data:image/jpeg;base64,${'aGVsbG8gd29ybGQ='.repeat(100)}`,
+      };
+      expect(AttachListingPhotoSchema.safeParse(data).success).toBe(true);
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...data, dataUrl: 'not-a-data-url' }).success,
+      ).toBe(false);
+      expect(
+        AttachListingPhotoSchema.safeParse({
+          ...data,
+          dataUrl: `data:image/jpeg;base64,${'A'.repeat(LISTING_PHOTO_FALLBACK_MAX_BYTES * 2)}`,
+        }).success,
+      ).toBe(false);
+      expect(
+        AttachListingPhotoSchema.safeParse({ ...data, mimeType: 'video/mp4' }).success,
+      ).toBe(false);
+    });
+
+    it('ListingPhotoUploadUrlSchema: только изображения ≤ 10 МБ', () => {
+      expect(
+        ListingPhotoUploadUrlSchema.safeParse({ mimeType: 'image/webp', sizeBytes: 2048 })
+          .success,
+      ).toBe(true);
+      expect(
+        ListingPhotoUploadUrlSchema.safeParse({
+          mimeType: 'application/pdf',
+          sizeBytes: 1024,
+        }).success,
+      ).toBe(false);
+      expect(
+        ListingPhotoUploadUrlSchema.safeParse({
+          mimeType: 'image/jpeg',
+          sizeBytes: 11 * 1024 * 1024,
+        }).success,
+      ).toBe(false);
+    });
+
+    it('ListingPhotoResponseSchema: позиция + ссылка обязательны', () => {
+      const photo = {
+        id: 'p-1',
+        position: 0,
+        fileName: 'tomatoes.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 1234,
+        url: 'http://s3.local/listings/l-1/a.jpg?sig=get',
+      };
+      expect(ListingPhotoResponseSchema.safeParse(photo).success).toBe(true);
+      expect(ListingPhotoResponseSchema.safeParse({ ...photo, url: '' }).success).toBe(false);
+      expect(ListingPhotoResponseSchema.safeParse({ ...photo, position: -1 }).success).toBe(false);
+    });
+
+    it('ListingResponseSchema: coverUrl/photos опциональны — старый сервер не ломает клиент', () => {
+      const base = {
+        id: 'l-1',
+        sellerId: 's-1',
+        title: 'Помидоры',
+        category: 'vegetables',
+        unit: 'kg',
+        pricePerUnit: '85.50',
+        quantityAvailable: 100,
+        quantityReserved: 0,
+        quantityAvailableForBooking: 100,
+        lineNumber: 12,
+        isPerishable: true,
+        status: 'active',
+        createdAt: '2026-11-07T04:00:00.000Z',
+        updatedAt: '2026-11-07T04:00:00.000Z',
+      };
+      // Старый сервер (без полей фото) — валиден
+      expect(ListingResponseSchema.safeParse(base).success).toBe(true);
+      // Список с обложкой (data: — валидная ссылка) — валиден
+      expect(
+        ListingResponseSchema.safeParse({ ...base, coverUrl: 'data:image/jpeg;base64,abc=' })
+          .success,
+      ).toBe(true);
+      expect(ListingResponseSchema.safeParse({ ...base, coverUrl: null }).success).toBe(true);
+      // Детали с фото — валидны
+      expect(
+        ListingResponseSchema.safeParse({
+          ...base,
+          photos: [
+            {
+              id: 'p-1',
+              position: 0,
+              fileName: 'a.jpg',
+              mimeType: 'image/jpeg',
+              sizeBytes: 1,
+              url: 'http://s3.local/a.jpg',
+            },
+          ],
+        }).success,
+      ).toBe(true);
     });
   });
 });

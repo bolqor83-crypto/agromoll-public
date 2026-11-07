@@ -133,6 +133,21 @@ export const QUALITY_FLAG_LABELS: Record<QualityFlag, string> = {
 };
 
 /**
+ * Фото товара (v0.7.0-D, ADR-038): до 5 на лот, первое — обложка.
+ * url — presigned GET (живёт часы) или data:-URL (fallback ≤ 500 КБ).
+ */
+export interface ListingPhotoDto {
+  id: string;
+  /** Порядок в карусели 0..4; обложка — position 0. */
+  position: number;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** Presigned GET (S3) или data:-URL (fallback). */
+  url: string;
+}
+
+/**
  * Лот продавца (DTO уровня API, без служебных полей БД).
  * Decimal из Prisma приходит строкой — сохраняем её как есть и парсим в UI.
  */
@@ -156,6 +171,13 @@ export interface ListingDto {
   status: ListingStatus;
   createdAt: string;
   updatedAt: string;
+  /** Обложка (первое фото, v0.7.0-D): presigned GET / data:-URL;
+   *  null — фото нет, карточка покажет иконку категории.
+   *  Заполняется в списках (лента/витрина). Опционально — старый
+   *  сервер без фото не ломает клиент. */
+  coverUrl?: string | null;
+  /** Все фото с ссылками — только в деталях (GET /listings/:id). */
+  photos?: ListingPhotoDto[];
 }
 
 /** Бронь покупателя (DTO уровня API). */
@@ -561,6 +583,8 @@ export const NOTIFICATION_TYPES = [
   'appeal_opened',
   'appeal_assigned',
   'appeal_resolved',
+  // v0.7.0-C (ADR-037): переписка в апелляциях.
+  'appeal_message',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -812,6 +836,27 @@ export interface DisputeEvidenceDto {
   createdAt: string;
 }
 
+/** Ответ POST /disputes/:id/evidence/upload-url (v0.7.0-B, ADR-036). */
+export interface DisputeEvidenceUploadUrlDto {
+  /** Ключ объекта — подтвердить его в POST /disputes/:id/evidence. */
+  objectKey: string;
+  /** Куда PUT-ить файл (живёт expiresIn секунд). */
+  uploadUrl: string;
+  /** Срок жизни ссылки, секунды. */
+  expiresIn: number;
+}
+
+/** Элемент GET /disputes/:id/evidence: метаданные + ссылка просмотра. */
+export interface DisputeEvidenceItemDto extends DisputeEvidenceDto {
+  /** Presigned GET-ссылка (S3) или data:-URL (fallback). */
+  url: string;
+}
+
+/** Ответ GET /disputes/:id/evidence. */
+export interface DisputeEvidenceListDto {
+  items: DisputeEvidenceItemDto[];
+}
+
 /** Кейс арбитража (список). */
 export interface DisputeDto {
   id: string;
@@ -917,6 +962,23 @@ export interface AppealDto {
 export interface AppealDetailDto extends AppealDto {
   /** Месяцы работы пары: свежие сверху, лимит — 12 (ADR-035). */
   months: AppealMonthDto[];
+  /** Переписка кейса (v0.7.0-C, ADR-037): служебные — только арбитру. */
+  messages: AppealMessageDto[];
+}
+
+/** Сообщение в переписке апелляции (v0.7.0-C, ADR-037). */
+export interface AppealMessageDto {
+  id: string;
+  author: DisputePartyDto;
+  body: string;
+  /** Служебная заметка — видна только арбитрам. */
+  isInternal: boolean;
+  createdAt: string;
+}
+
+/** Ответ GET /appeals/:id/messages. */
+export interface AppealMessagesListDto {
+  items: AppealMessageDto[];
 }
 
 /** Ответ GET /appeals/mine — кейсы по моим парам и поданные мной. */

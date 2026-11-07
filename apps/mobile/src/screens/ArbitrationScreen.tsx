@@ -13,7 +13,7 @@
  * экран честно показывает это состояние.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Image, Pressable, View } from 'react-native';
 import {
   Badge,
   Button,
@@ -23,6 +23,7 @@ import {
   Input,
   Screen,
   SkeletonCard,
+  radius,
   spacing,
   Text,
 } from '@agromoll/ui';
@@ -43,6 +44,7 @@ import type {
   AppealDto,
   DisputeDetailDto,
   DisputeDto,
+  DisputeEvidenceItemDto,
   DisputeOutcome,
 } from '@agromoll/types';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -102,6 +104,8 @@ export default function ArbitrationScreen() {
   const [section, setSection] = useState<'disputes' | 'appeals'>('disputes');
   const [queue, setQueue] = useState<QueueState<DisputeDto>>({ phase: 'loading' });
   const [detail, setDetail] = useState<DetailState<DisputeDetailDto> | null>(null);
+  // Доказательства с ссылками (v0.7.0-B): отдельным запросом после кейса.
+  const [evidenceItems, setEvidenceItems] = useState<DisputeEvidenceItemDto[]>([]);
   // Форма решения по спору.
   const [outcome, setOutcome] = useState<DisputeOutcome | null>(null);
   const [bookingOutcome, setBookingOutcome] = useState<string | null>(null);
@@ -118,6 +122,9 @@ export default function ArbitrationScreen() {
   const [appealDetail, setAppealDetail] = useState<DetailState<AppealDetailDto> | null>(null);
   const [appealDecision, setAppealDecision] = useState<AppealDecision | null>(null);
   const [appealNotes, setAppealNotes] = useState('');
+  // Переписка апелляции (v0.7.0-C, ADR-037): ввод + переключатель «служебная».
+  const [appealNote, setAppealNote] = useState('');
+  const [appealNoteInternal, setAppealNoteInternal] = useState(false);
 
   const loadQueue = useCallback(async (): Promise<void> => {
     if (!isArbitrator) {
@@ -155,6 +162,18 @@ export default function ArbitrationScreen() {
     try {
       const caseDetail = await api.dispute(disputeId);
       setDetail({ phase: 'ready', detail: caseDetail });
+      // Доказательства с ссылками (v0.7.0-B, ADR-036): арбитр — главный
+      // потребитель фото, сбой их загрузки не должен прятать кейс.
+      try {
+        const evidence = await api.disputeEvidence(disputeId);
+        setEvidenceItems(evidence.items);
+      } catch (err) {
+        logger.warn('arbitration', 'ссылки на доказательства не загрузились', {
+          disputeId,
+          error: String(err),
+        });
+        setEvidenceItems([]);
+      }
     } catch (error) {
       logger.warn('arbitration', 'кейс не загрузился', { disputeId, error: String(error) });
       setDetail({ phase: 'error', id: disputeId, error });
@@ -186,6 +205,8 @@ export default function ArbitrationScreen() {
   const resetAppealForm = useCallback((): void => {
     setAppealDecision(null);
     setAppealNotes('');
+    setAppealNote('');
+    setAppealNoteInternal(false);
     setActionError(null);
   }, []);
 
@@ -203,6 +224,22 @@ export default function ArbitrationScreen() {
       setBusy(false);
     }
   }, []);
+
+  /** Сообщение в переписке апелляции (v0.7.0-C, ADR-037). */
+  const handleSendAppealNote = useCallback(
+    (appealId: string): void => {
+      const body = appealNote.trim();
+      if (body.length === 0) {
+        return;
+      }
+      void runAction(async () => {
+        await api.sendAppealMessage(appealId, body, appealNoteInternal);
+        setAppealNote('');
+        await loadAppealDetail(appealId);
+      });
+    },
+    [appealNote, appealNoteInternal, runAction, loadAppealDetail],
+  );
 
   const handleAssign = useCallback(
     (disputeId: string): void => {
@@ -386,6 +423,49 @@ export default function ArbitrationScreen() {
               </View>
             </Card>
 
+            {/* Доказательства (v0.7.0-B, ADR-036): арбитр решает по фото —
+                превью прямо в кейсе, без скачки по именам файлов. */}
+            {evidenceItems.length > 0 ? (
+              <Card>
+                <View style={{ gap: spacing.sm }}>
+                  <Text variant="caption" color="secondary">
+                    Доказательства · {evidenceItems.length}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                    {evidenceItems.map((item) =>
+                      item.mimeType.startsWith('image/') ? (
+                        <Image
+                          key={item.id}
+                          source={{ uri: item.url }}
+                          style={{
+                            width: 88,
+                            height: 88,
+                            borderRadius: radius.sm,
+                            backgroundColor: '#E8ECE9',
+                          }}
+                          accessibilityLabel={`Доказательство: ${item.fileName}`}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          key={item.id}
+                          style={{
+                            padding: spacing.sm,
+                            borderRadius: radius.sm,
+                            backgroundColor: '#E8ECE9',
+                          }}
+                        >
+                          <Text variant="caption" color="secondary">
+                            Документ: {item.fileName}
+                          </Text>
+                        </View>
+                      ),
+                    )}
+                  </View>
+                </View>
+              </Card>
+            ) : null}
+
             {/* Переписка: арбитр видит служебные заметки */}
             <View style={{ flex: 1, gap: spacing.sm }}>
               {ready.messages.map((message) => (
@@ -540,6 +620,7 @@ export default function ArbitrationScreen() {
               variant="secondary"
               onPress={() => {
                 setDetail(null);
+                setEvidenceItems([]);
                 resetForm();
                 void loadQueue();
               }}
@@ -611,6 +692,58 @@ export default function ArbitrationScreen() {
                 </Card>
               ))}
             </View>
+
+            {/* Переписка кейса (v0.7.0-C, ADR-037): арбитр уточняет
+                обстоятельства, не покидая кейс. Служебные заметки — тут. */}
+            {ready.messages.length > 0 || isActive ? (
+              <View style={{ flex: 1, gap: spacing.sm }}>
+                <Text variant="body" weight="600">
+                  Переписка
+                </Text>
+                {ready.messages.map((message) => (
+                  <Card key={message.id}>
+                    <View style={{ gap: spacing.xs }}>
+                      <Text variant="caption" color={message.isInternal ? 'primary' : 'secondary'}>
+                        {message.author.displayName} · {formatWhen(message.createdAt)}
+                        {message.isInternal ? ' · служебная' : ''}
+                      </Text>
+                      <Text variant="body">{message.body}</Text>
+                    </View>
+                  </Card>
+                ))}
+                {isActive ? (
+                  <View style={{ gap: spacing.sm }}>
+                    <Input
+                      label={
+                        appealNoteInternal
+                          ? 'Служебная заметка (только арбитрам)'
+                          : 'Сообщение паре'
+                      }
+                      value={appealNote}
+                      onChangeText={setAppealNote}
+                      multiline
+                      numberOfLines={2}
+                      placeholder="Уточните обстоятельства у пары"
+                      textAlignVertical="top"
+                    />
+                    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                      <Button
+                        title={appealNoteInternal ? 'Служебная' : 'Паре'}
+                        variant="secondary"
+                        onPress={() => setAppealNoteInternal((prev) => !prev)}
+                      />
+                      <Button
+                        title="Отправить"
+                        variant="secondary"
+                        disabled={appealNote.trim().length === 0 || busy}
+                        loading={busy}
+                        onPress={() => handleSendAppealNote(ready.id)}
+                      />
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
             {isActive ? (
               <View style={{ gap: spacing.md }}>

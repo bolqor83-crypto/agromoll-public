@@ -31,6 +31,24 @@
    адрес вшивается в бандл **на сборке** (ADR-022), существующий деплой
    адрес не подхватит.
 
+## Тайлы карты: провайдер по ключу (v0.7.0-E, ADR-039)
+
+По умолчанию карта — открытые тайлы OpenStreetMap (без ключей, fair
+use). При росте трафика подключается платный провайдер — переменными
+**Project Settings в том же Vercel** (вшиваются в бандл на сборке,
+как `EXPO_PUBLIC_API_URL`):
+
+| Переменная | Обязательна | Пример |
+|---|---|---|
+| `EXPO_PUBLIC_MAP_TILES_URL` | да | `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=ВАШ_КЛЮЧ` |
+| `EXPO_PUBLIC_MAP_TILES_ATTRIBUTION` | желательна | `© OpenStreetMap contributors © MapTiler` |
+| `EXPO_PUBLIC_MAP_TILES_MAX_ZOOM` | нет (19) | `21` |
+
+После задания — Redeploy. Проверка: тайлы и подпись в правом нижнем
+углу карты меняются на провайдера. Ключ протух/квота кончилась —
+карта сама переключится на OSM после серии ошибок загрузки тайлов
+(runtime-фолбэк, ADR-039). Пустые/кривые значения = OSM-дефолт.
+
 > Локальная сборка с другим `EXPO_PUBLIC_API_URL`: кэш трансформаций
 > Metro не учитывает env-переменные — пересобирайте с флагом
 > `--clear` (он уже вшит в `pnpm --filter @agromoll/mobile build`).
@@ -61,9 +79,13 @@ cron-задачи** (гашение TTL доставок каждые 5 мин, 
 1. Создать проект на PaaS, подключить GitHub-репозиторий.
 2. Сервисы: `api` (образ из `apps/api`, PORT из `API_PORT`), `postgres`
    (образ `postis/postgis:16-3.4`), `redis` (образ `redis:7-alpine`) —
-   повторяют `docker-compose.yml`.
+   повторяют `docker-compose.yml`. Для файлов (доказательства споров,
+   фото товаров) вместо self-hosted S3 из compose лучше managed-бакет:
+   Yandex Object Storage / Cloudflare R2 / AWS S3 — код одинаков
+   (ADR-036), меняются только `S3_*` переменные.
 3. Переменные окружения — все из `.env.example` (раздел «API»):
    `DATABASE_URL`/`REDIS_URL` на внутренние адресы PaaS,
+   `S3_*` на managed-бакет (см. ADR-036 «Ручные шаги»: бакет + CORS),
    **`JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` — длинные случайные строки**
    (dev-дефолты в проде запрещены, старт упадёт — так задумано).
 4. Миграции: `pnpm --filter @agromoll/api exec prisma migrate deploy`

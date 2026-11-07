@@ -5,7 +5,12 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts", "!**/*.spec.ts"],
       "outputs": ["dist/**"],
-      "env": ["EXPO_PUBLIC_API_URL"]
+      "env": [
+        "EXPO_PUBLIC_API_URL",
+        "EXPO_PUBLIC_MAP_TILES_URL",
+        "EXPO_PUBLIC_MAP_TILES_ATTRIBUTION",
+        "EXPO_PUBLIC_MAP_TILES_MAX_ZOOM"
+      ]
     },
     "db:generate": {
       "cache": false

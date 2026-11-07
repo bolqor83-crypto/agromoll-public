@@ -74,6 +74,108 @@ export const UpdateListingSchema = CreateListingSchema.partial()
 
 export type UpdateListingInput = z.infer<typeof UpdateListingSchema>;
 
+// ─── Фото товаров (v0.7.0-D, ADR-038) ─────────────────────────────────
+
+/** Максимум фото на лот: карусель в деталях + обложка в карточке.
+ *  Больше пяти — покупатель всё равно не листает (торговая практика). */
+export const LISTING_MAX_PHOTOS = 5;
+
+/** Разрешённые типы фото товара: только изображения — это витрина,
+ *  а не арбитраж (pdf остался доказательствам, ADR-036). */
+export const LISTING_PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+export type ListingPhotoMimeType = (typeof LISTING_PHOTO_MIME_TYPES)[number];
+
+/** Максимум фото в хранилище (presigned-путь): с запасом на камеры 4:3. */
+export const LISTING_PHOTO_S3_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Максимум fallback-фото (data:-URL в БД): 500 КБ ДО base64 —
+ *  тот же лимит, что у доказательств (ADR-036): БД не пухнет. */
+export const LISTING_PHOTO_FALLBACK_MAX_BYTES = 500 * 1024;
+
+/** Максимальная длина base64-хвоста в data:-URL для 500 КБ (с padding). */
+const LISTING_PHOTO_FALLBACK_MAX_BASE64_LENGTH = Math.ceil(
+  (LISTING_PHOTO_FALLBACK_MAX_BYTES / 3) * 4 + 4,
+);
+
+/**
+ * Запрос presigned URL: POST /listings/:id/photos/upload-url (только
+ * владелец лота). Клиент объявляет тип и размер заранее — лимиты
+ * проверяются до подписания ссылки.
+ */
+export const ListingPhotoUploadUrlSchema = z
+  .object({
+    mimeType: z.enum(LISTING_PHOTO_MIME_TYPES),
+    sizeBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(LISTING_PHOTO_S3_MAX_BYTES, 'Файл больше 10 МБ'),
+  })
+  .strict();
+
+export type ListingPhotoUploadUrlInput = z.infer<typeof ListingPhotoUploadUrlSchema>;
+
+/**
+ * Приложить фото: POST /listings/:id/photos (только владелец).
+ *
+ * Дискриминатор storage — как у доказательств (ADR-036):
+ *  - 's3'  — клиент загрузил файл по presigned URL, подтверждает
+ *            objectKey (сервис сверит с HEAD объекта);
+ *  - 'data' — fallback ≤ 500 КБ, когда хранилище не настроено.
+ */
+export const AttachListingPhotoSchema = z.discriminatedUnion('storage', [
+  z
+    .object({
+      storage: z.literal('s3'),
+      /** Ключ, выданный POST /listings/:id/photos/upload-url. */
+      objectKey: z
+        .string()
+        .regex(
+          /^listings\/[0-9a-f-]{36}\/[\w.-]+$/,
+          'objectKey выдан эндпоинтом upload-url',
+        ),
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(LISTING_PHOTO_MIME_TYPES),
+      sizeBytes: z.number().int().positive().max(LISTING_PHOTO_S3_MAX_BYTES),
+    })
+    .strict(),
+  z
+    .object({
+      storage: z.literal('data'),
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(LISTING_PHOTO_MIME_TYPES),
+      /** data:<mime>;base64,<payload>; лимит — до декодирования 500 КБ. */
+      dataUrl: z
+        .string()
+        .regex(
+          /^data:[\w.+-]+\/[\w.+-]+;base64,[A-Za-z0-9+/=]+$/,
+          'dataUrl вида data:image/jpeg;base64,…',
+        )
+        .max(
+          LISTING_PHOTO_FALLBACK_MAX_BASE64_LENGTH + 64,
+          'Файл больше 500 КБ — fallback только для маленьких фото, используйте хранилище',
+        ),
+    })
+    .strict(),
+]);
+
+export type AttachListingPhotoInput = z.infer<typeof AttachListingPhotoSchema>;
+
+/** Фото товара в DTO ответа: позиция + ссылка для показа. */
+export const ListingPhotoResponseSchema = z.object({
+  id: z.string().min(1),
+  /** Порядок в карусели 0..4; обложка — position 0. */
+  position: z.number().int().nonnegative(),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  /** Presigned GET (живёт часы) или data:-URL (fallback). */
+  url: z.string().min(1),
+});
+
+export type ListingPhotoResponse = z.infer<typeof ListingPhotoResponseSchema>;
+
 /** Создание брони: POST /bookings (только buyer). */
 export const CreateBookingSchema = z.object({
   listingId: z.string().uuid(),
@@ -314,6 +416,13 @@ export const ListingResponseSchema = z
     status: ListingStatusSchema,
     createdAt: IsoDateString,
     updatedAt: IsoDateString,
+    /** Обложка (первое фото, v0.7.0-D): presigned GET / data:-URL /
+     *  null — фото нет, карточка покажет иконку категории. Заполняется
+     *  в списках (лента/витрина) — карточке одного фото достаточно. */
+    coverUrl: z.string().nullable().optional(),
+    /** Все фото с ссылками — только в деталях (GET /listings/:id):
+     *  тащить пятерку ссылок в каждый элемент ленты незачем. */
+    photos: z.array(ListingPhotoResponseSchema).optional(),
   })
   .passthrough();
 
@@ -807,12 +916,25 @@ export const DisputeTypeSchema = z.enum(DISPUTE_TYPES);
 /** Итог решения арбитра (resolve): решение по существу или dismiss. */
 export const DisputeOutcomeSchema = z.enum(DISPUTE_OUTCOMES);
 
-/** Максимальный размер доказательства: 2 МБ ДО base64 (ADR-033).
- * Сам base64-хвост длиннее ~33% — лимит проверяем по декодированной длине. */
-export const DISPUTE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
+/** Максимальный размер fallback-доказательства (data:-URL в БД): 500 КБ
+ * ДО base64 — защита БД от распухания, S3-путь без такого лимита (ADR-036). */
+export const DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES = 500 * 1024;
 
-/** Максимальная длина base64-строки для 2 МБ (с запасом на padding). */
-const DISPUTE_EVIDENCE_MAX_BASE64_LENGTH = Math.ceil((DISPUTE_EVIDENCE_MAX_BYTES / 3) * 4) + 4;
+/** Максимальная длина base64-хвоста в data:-URL для 500 КБ (с запасом на padding). */
+const DISPUTE_EVIDENCE_FALLBACK_MAX_BASE64_LENGTH = Math.ceil(
+  (DISPUTE_EVIDENCE_FALLBACK_MAX_BYTES / 3) * 4 + 4,
+);
+
+/** Максимальный размер файла в S3-хранилище (presigned-путь). */
+export const DISPUTE_EVIDENCE_S3_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Разрешённые типы доказательств: фото и сканы накладных (ADR-036). */
+export const DISPUTE_EVIDENCE_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+] as const;
 
 /**
  * Открыть спор: POST /disputes.
@@ -843,26 +965,71 @@ export const DisputeMessageSchema = z
 export type DisputeMessageInput = z.infer<typeof DisputeMessageSchema>;
 
 /**
- * Доказательство: POST /disputes/:id/evidence.
+ * Доказательство: POST /disputes/:id/evidence (v0.7.0-B, ADR-036).
  *
- * Файл приходит base64-строкой (JSON), ≤ 2 МБ декодированного размера;
- * хранение в БД — MVP-решение, S3 — v0.7.0 (ADR-033).
+ * Два пути, явный дискриминатор storage:
+ *  - 's3'  — клиент уже загрузил файл по presigned URL; подтверждает
+ *            objectKey (выданный эндпоинтом upload-url), MIME и размер
+ *            (сервис сверит с HEAD объекта в хранилище);
+ *  - 'data' — fallback: data:-URL (data:image/jpeg;base64,…), ≤ 500 КБ
+ *            декодированного размера; для критических случаев, когда
+ *            хранилище недоступно.
  */
-export const DisputeEvidenceSchema = z
+export const DisputeEvidenceSchema = z.discriminatedUnion('storage', [
+  z
+    .object({
+      storage: z.literal('s3'),
+      /** Ключ, выданный POST /disputes/:id/evidence/upload-url. */
+      objectKey: z
+        .string()
+        .regex(/^disputes\/[0-9a-f-]{36}\/[\w.-]+$/, 'objectKey выдан эндпоинтом upload-url'),
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(DISPUTE_EVIDENCE_MIME_TYPES),
+      sizeBytes: z.number().int().positive().max(DISPUTE_EVIDENCE_S3_MAX_BYTES),
+    })
+    .strict(),
+  z
+    .object({
+      storage: z.literal('data'),
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(DISPUTE_EVIDENCE_MIME_TYPES),
+      /**
+       * data:<mime>;base64,<payload>. Формат и лимит — здесь; сверку MIME
+       * из dataUrl с полем mimeType делает сервис (полевая refine не видит
+       * соседей, а обёртка объекта ломает discriminatedUnion).
+       */
+      dataUrl: z
+        .string()
+        .regex(/^data:[\w.+-]+\/[\w.+-]+;base64,[A-Za-z0-9+/=]+$/, 'dataUrl вида data:image/jpeg;base64,…')
+        .max(
+          DISPUTE_EVIDENCE_FALLBACK_MAX_BASE64_LENGTH + 64,
+          'Файл больше 500 КБ — fallback только для маленьких файлов, используйте хранилище',
+        ),
+    })
+    .strict(),
+]);
+
+export type DisputeEvidenceInput = z.infer<typeof DisputeEvidenceSchema>;
+
+/**
+ * Запрос presigned URL: POST /disputes/:id/evidence/upload-url.
+ *
+ * Клиент объявляет тип и размер ЗАРАНЕЕ: сервис проверяет лимиты до
+ * выдачи ссылки (зачем подписывать ссылку на 100 МБ) и подбирает
+ * расширение object key.
+ */
+export const DisputeEvidenceUploadUrlSchema = z
   .object({
-    fileName: z.string().trim().min(1).max(255),
-    mimeType: z
-      .string()
-      .trim()
-      .regex(/^[\w.+-]+\/[\w.+-]+$/, 'mimeType вида image/jpeg'),
-    dataBase64: z
-      .string()
-      .min(8, 'Пустой файл')
-      .max(DISPUTE_EVIDENCE_MAX_BASE64_LENGTH, 'Файл больше 2 МБ'),
+    mimeType: z.enum(DISPUTE_EVIDENCE_MIME_TYPES),
+    sizeBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(DISPUTE_EVIDENCE_S3_MAX_BYTES, 'Файл больше 10 МБ'),
   })
   .strict();
 
-export type DisputeEvidenceInput = z.infer<typeof DisputeEvidenceSchema>;
+export type DisputeEvidenceUploadUrlInput = z.infer<typeof DisputeEvidenceUploadUrlSchema>;
 
 /**
  * Решение арбитра: POST /disputes/:id/resolve.
@@ -958,6 +1125,31 @@ export const DisputeEvidenceResponseSchema = z.object({
   createdAt: IsoDateString,
 });
 
+/** Ответ POST /disputes/:id/evidence/upload-url (v0.7.0-B, ADR-036). */
+export const DisputeEvidenceUploadUrlResponseSchema = z.object({
+  objectKey: z.string().min(1),
+  uploadUrl: z.string().url(),
+  /** Срок жизни ссылки, секунды. */
+  expiresIn: z.number().int().positive(),
+});
+
+/** Элемент GET /disputes/:id/evidence: метаданные + ссылка для просмотра. */
+export const DisputeEvidenceItemResponseSchema = z.object({
+  id: z.string().min(1),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  uploadedBy: DisputePartyResponseSchema,
+  createdAt: IsoDateString,
+  /** Presigned GET (живёт часы) или data:-URL (fallback). */
+  url: z.string().min(1),
+});
+
+/** Ответ GET /disputes/:id/evidence. */
+export const DisputeEvidenceListResponseSchema = z.object({
+  items: z.array(DisputeEvidenceItemResponseSchema),
+});
+
 /** Кейс арбитража в DTO (список). */
 export const DisputeResponseSchema = z.object({
   id: z.string().min(1),
@@ -1011,6 +1203,21 @@ export const OpenAppealSchema = z
 export type OpenAppealInput = z.infer<typeof OpenAppealSchema>;
 
 /**
+ * Сообщение в переписке апелляции: POST /appeals/:id/messages
+ * (v0.7.0-C, ADR-037). Форма — как DisputeMessageSchema: isInternal
+ * — только арбитру (проверка роли в сервисе).
+ */
+export const AppealMessageSchema = z
+  .object({
+    body: z.string().trim().min(1, 'Сообщение не может быть пустым').max(2000),
+    /** Служебная заметка — только арбитру (проверка роли в сервисе). */
+    isInternal: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export type AppealMessageInput = z.infer<typeof AppealMessageSchema>;
+
+/**
  * Решение по апелляции: POST /appeals/:id/resolve.
  *
  * unblock — блокировка снимается в той же транзакции, reject — остаётся.
@@ -1041,7 +1248,15 @@ export const AppealResponseSchema = z.object({
   notes: z.string().nullable(),
 });
 
-/** Кейс с историей часов пары (GET /appeals/:id). */
+/** Сообщение переписки апелляции в DTO (v0.7.0-C, ADR-037). */
+export const AppealMessageResponseSchema = z.object({
+  id: z.string().min(1),
+  author: DisputePartyResponseSchema,
+  body: z.string().min(1),
+  isInternal: z.boolean(),
+  createdAt: IsoDateString,
+});
+
 export const AppealDetailResponseSchema = AppealResponseSchema.extend({
   months: z.array(
     z.object({
@@ -1050,7 +1265,14 @@ export const AppealDetailResponseSchema = AppealResponseSchema.extend({
       monthCounted: z.boolean(),
     }),
   ),
+  /** Переписка кейса (ADR-037): служебные скрыты от пары на сервере. */
+  messages: z.array(AppealMessageResponseSchema),
 });
+
+/** Ответ GET /appeals/:id/messages (v0.7.0-C, ADR-037). */
+export const AppealMessagesListResponseSchema = z
+  .object({ items: z.array(AppealMessageResponseSchema) })
+  .passthrough();
 
 /** Ответ GET /appeals/mine и GET /appeals/queue. */
 export const AppealsListResponseSchema = z
