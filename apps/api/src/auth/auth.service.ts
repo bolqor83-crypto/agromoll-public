@@ -5,7 +5,7 @@
  * Флоу:
  *  1. requestCode(phone) — находит/создаёт пользователя, генерирует код,
  *     сохраняет в CodeStore (Redis, TTL 5 минут). В dev код фиксированный
- *     «0000» и логируется; в production интеграция с SMS-провайдером
+ *     «000000» и логируется; в production интеграция с SMS-провайдером
  *     появится позже (пока код не отправляется — MVP).
  *  2. verify(phone, code) — сверяет код, помечает phoneVerified,
  *     открывает «семью» сессии (familyId + jti в Redis и аудит-строку
@@ -108,14 +108,25 @@ export class AuthService {
   async requestCode(phone: string): Promise<{ expiresInSec: number }> {
     await this.findOrCreateUser(phone);
 
-    const code = this.isProduction ? this.generateCode() : DEV_CODE;
+    // v0.8.0-C: AUTH_DEMO_LOGIN=true — публичное демо (ADR-040):
+    // вход по фиксированным «000000» и в production, чтобы ссылку можно
+    // было показать без SMS-провайдера. Явный opt-in, по умолчанию OFF —
+    // боевой запуск просто не выставляет переменную.
+    const demoLogin = process.env.AUTH_DEMO_LOGIN === 'true';
+    if (demoLogin && this.isProduction) {
+      this.logger.warn(
+        'ДЕМО-РЕЖИМ ВХОДА (AUTH_DEMO_LOGIN=true): любой телефон входит по коду «000000». Отключить перед боевым запуском!',
+      );
+    }
+    const code = this.isProduction && !demoLogin ? this.generateCode() : DEV_CODE;
     await this.codes.save(phone, code);
 
     // Структурированный лог: телефон маскирован. В dev код печатаем
-    // (заглушка «0000» и так публична в UI), в prod — никогда.
+    // (заглушка «000000» и так публична в UI), в prod — никогда
+    // (кроме демо-режима — там код и так «000000»).
     this.logger.log(
       `SMS-код выдан: phone=${maskPhone(phone)} ttl=${CODE_TTL_SECONDS}s code=${
-        this.isProduction ? '<не-логируется>' : code
+        this.isProduction && !demoLogin ? '<не-логируется>' : code
       }`,
     );
 

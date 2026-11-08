@@ -310,7 +310,7 @@ export default function AuthScreen() {
 
       {__DEV__ && step === 'code' ? (
         <Text variant="caption" color="muted" align="center">
-          Dev-режим: код-заглушка 0000
+          Dev-режим: код-заглушка 000000
         </Text>
       ) : null}
 

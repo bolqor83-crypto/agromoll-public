@@ -1,27 +1,27 @@
-# DEPLOY.md — план деплоя публичного API
+# DEPLOY.md — деплой публичного API
 
-> Статус: v0.6.1 (ADR-022). Сейчас **web-версия на Vercel работает без
-> сервера** и показывает экран «Сервер не настроен» — это честное
-> состояние, пока API не опубликован. Документ описывает, как его
-> опубликовать.
+> Статус: v0.8.0 (ADR-040). Платформа выбрана: **Railway** (managed
+> Postgres + PostGIS, Redis, CLI-автоматизация). Точный runbook —
+> `docs/release/v0.8.0-B-railway-runbook.md`; деплой выполняется после
+> передачи `RAILWAY_TOKEN` (см. `docs/release/v0.8.0-A-env-check.md`).
 
-## Текущее состояние (вариант b — MVP)
+## Текущее состояние (v0.8.0)
 
 | Компонент | Где живёт | Статус |
 |---|---|---|
-| Web (Expo export) | Vercel, проект `agromoll-web`, https://agromoll-web.vercel.app | ✅ деплоится |
-| API (NestJS) | машина разработчика (`docker compose up` + `pnpm --filter @agromoll/api dev`) | 🔴 не публичный |
-| Postgres + PostGIS | docker-compose локально | 🔴 не публичный |
-| Redis | docker-compose локально | 🔴 не публичный |
+| Web (Expo export) | Vercel, проект `agromoll-web`, https://agromoll-web.vercel.app | ✅ автодеплой (ADR-032) |
+| API (NestJS) | Railway, проект `agromoll-api` (config-as-code `railway.json`) | 🔶 конфигурация готова, ждёт RAILWAY_TOKEN |
+| Postgres + PostGIS | Railway, плагин PostgreSQL | 🔶 вместе с API |
+| Redis | Railway, плагин Redis | 🔶 вместе с API |
 
-Почему так (быстро и безопасно, решение v0.6.1-0): публикация API —
-отдельная задача с секретами, доменами и миграциями; хотфикс прода
-не должен был на ней блокироваться. Минус очевиден: вне машины
-разработчика приложение показывает «Сервер не настроен».
+Выбор «Railway, а не Render/Vercel serverless» обоснован в ADR-040
+(кратко: долгоживущий NestJS-процесс с cron и Prisma-pool, PostGIS
+из миграции, Redis-плагин, CLI-first автоматизация).
 
 ## Что нужно, чтобы прод ожил (3 шага)
 
-1. Поднять API публично (варианты ниже).
+1. Поднять API на Railway — runbook `v0.8.0-B-railway-runbook.md`
+   (login → init → add postgres/redis → variables → up → domain).
 2. Задать адрес в Vercel: **Project `agromoll-web` → Settings →
    Environment Variables → `EXPO_PUBLIC_API_URL` = `https://<api-domain>`**
    (Environment: Production). Альтернатива — прописать значение прямо в
@@ -62,7 +62,7 @@ curl -s https://agromoll-web.vercel.app/ | grep -o 'src="[^"]*\.js"' # → пу�
 curl -s https://agromoll-web.vercel.app/<entry-чанк> | grep -c 'api-not-configured.invalid' # → 0
 ```
 
-## Вариант a-1: API в Docker на PaaS (рекомендуемый)
+## Вариант a-1: API в Docker на PaaS (выбрано в v0.8.0 — Railway, ADR-040)
 
 **Railway / Render / Fly.io** — `docker-compose.yml` репозитория уже
 описывает весь стек (postgres+postgis, redis), NestJS запускается тем же
@@ -122,11 +122,31 @@ Postgres, TLS-сертификаты — ручная работа. Имеет �
 - [ ] `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` — случайные ≥32 символов
       (старт API без них падает: `main.ts` валидирует, v0.3.1).
 - [ ] `DATABASE_URL` не содержит dev-пароля из репозитория.
-- [ ] CORS API: разрешить только домен web-версии (сейчас `enableCors`
-      в `main.ts` — проверить политику перед продом).
+- [ ] CORS API: сужен через `CORS_ORIGIN` (v0.8.0-B: без переменной —
+      `origin: true`; на Railway задан домен web-версии, ADR-040).
 - [ ] Rate limit на `/auth/request-code` уже есть — убедиться, что
-      секреты SMS-провайдера не dev-заглушки (пока код 0000 в dev).
+      секреты SMS-провайдера не dev-заглушки. Для демо — `AUTH_DEMO_LOGIN=true`
+      (вход «0000», предупреждение в логах); перед боевым запуском — убрать.
 - [ ] Бэкапы Postgres (pg_dump по cron) — долги и часы 289-ФЗ терять нельзя.
+
+## OTA-обновления нативных приложений (v0.8.0-E, ADR-042)
+
+Мёрж в `main` делает три вещи: Vercel-деплой web-версии (ADR-032),
+деплой API на Railway (runbook v0.8.0-B) и публикацию OTA-бандла в
+канал `production` (workflow `eas-update.yml`). Установленные .apk
+подхватывают обновление при следующем запуске — если `runtimeVersion`
+совпадает (policy `appVersion`: версия из app.json).
+
+| Изменение | Что нужно |
+|---|---|
+| JS/TS: экраны, логика, стили | только OTA (мёрж в main) |
+| Версия в app.json/package.json | OTA + новая сборка EAS (ADR-041) — новый канал runtimeVersion |
+| Новые expo-модули, permissions, нативные секции app.json | только пересборка EAS Build |
+| `EXPO_PUBLIC_API_URL` | OTA доставляет новое значение (вшивается в бандл на публикации) |
+
+Откат: `npx eas update:rollback --branch production` (ADR-042). Без
+`EXPO_TOKEN` в GitHub Secrets workflow падает с понятным сообщением —
+добавить вручную один раз.
 
 ## Связанное
 

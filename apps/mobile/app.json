@@ -2,12 +2,18 @@
   "expo": {
     "name": "АгроМолл",
     "slug": "agromoll",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "scheme": "agromoll",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/REPLACE_WITH_PROJECT_ID_AFTER_EAS_INIT"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",

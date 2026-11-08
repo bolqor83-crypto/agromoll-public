@@ -55,7 +55,7 @@ async function login(
   prismaMock.user.update.mockResolvedValue(makeUser({ phoneVerified: true }));
   // refresh после входа перечитывает пользователя — мок по умолчанию
   prismaMock.user.findUnique.mockResolvedValue(makeUser({ phoneVerified: true }));
-  return service.verify(phone, '0000');
+  return service.verify(phone, '000000');
 }
 
 describe('AuthService', () => {
@@ -104,7 +104,7 @@ describe('AuthService', () => {
   });
 
   describe('requestCode', () => {
-    it('создаёт/находит пользователя и сохраняет dev-код «0000»', async () => {
+    it('создаёт/находит пользователя и сохраняет dev-код «000000»', async () => {
       prisma.user.upsert.mockResolvedValue(makeUser());
 
       const result = await service.requestCode('+79611234567');
@@ -113,7 +113,7 @@ describe('AuthService', () => {
       expect(prisma.user.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ where: { phone: '+79611234567' } }),
       );
-      await expect(codes.get('+79611234567')).resolves.toBe('0000');
+      await expect(codes.get('+79611234567')).resolves.toBe('000000');
     });
 
     it('новому пользователю даёт имя «Участник +7***4567» и роль buyer', async () => {
@@ -133,14 +133,74 @@ describe('AuthService', () => {
         }),
       );
     });
+
+    describe('демо-режим входа (AUTH_DEMO_LOGIN, v0.8.0-C)', () => {
+      /** Сервис с заданным NODE_ENV на время теста; коды — в переданный store. */
+      const makeService = (nodeEnv: string, store: InMemoryCodeStore): AuthService => {
+        const prev = process.env.NODE_ENV;
+        process.env.NODE_ENV = nodeEnv;
+        try {
+          const jwt = new JwtService({ secret: ACCESS_SECRET });
+          return new AuthService(
+            prisma as unknown as PrismaService,
+            jwt,
+            store,
+            new InMemorySessionStore(),
+          );
+        } finally {
+          if (prev === undefined) {
+            delete process.env.NODE_ENV;
+          } else {
+            process.env.NODE_ENV = prev;
+          }
+        }
+      };
+
+      it('production + AUTH_DEMO_LOGIN=true — фиксированный «000000» (публичное демо)', async () => {
+        process.env.AUTH_DEMO_LOGIN = 'true';
+        try {
+          prisma.user.upsert.mockResolvedValue(makeUser());
+          const store = new InMemoryCodeStore();
+          const prodService = makeService('production', store);
+
+          await prodService.requestCode('+79000000010');
+
+          await expect(store.get('+79000000010')).resolves.toBe('000000');
+        } finally {
+          delete process.env.AUTH_DEMO_LOGIN;
+        }
+      });
+
+      it('production без AUTH_DEMO_LOGIN — случайный код, НЕ «0000» (боевой режим)', async () => {
+        prisma.user.upsert.mockResolvedValue(makeUser());
+        const store = new InMemoryCodeStore();
+        const prodService = makeService('production', store);
+
+        await prodService.requestCode('+79611234567');
+
+        const code = await store.get('+79611234567');
+        expect(code).toBeDefined();
+        expect(code).not.toBe('000000');
+      });
+
+      it('dev без AUTH_DEMO_LOGIN — по-прежнему «0000» (локальная разработка)', async () => {
+        prisma.user.upsert.mockResolvedValue(makeUser());
+        const store = new InMemoryCodeStore();
+        const devService = makeService('development', store);
+
+        await devService.requestCode('+79611234567');
+
+        await expect(store.get('+79611234567')).resolves.toBe('000000');
+      });
+    });
   });
 
   describe('verify', () => {
     it('возвращает токены и профиль, открывает сессию (Redis + аудит-строка)', async () => {
-      await codes.save('+79611234567', '0000');
+      await codes.save('+79611234567', '000000');
       prisma.user.update.mockResolvedValue(makeUser({ phoneVerified: true }));
 
-      const result = await service.verify('+79611234567', '0000', {
+      const result = await service.verify('+79611234567', '000000', {
         userAgent: 'Jest/1.0',
         ip: '127.0.0.1',
       });
@@ -189,17 +249,17 @@ describe('AuthService', () => {
     });
 
     it('истёкший/несуществующий код — 401', async () => {
-      await expect(service.verify('+79611234567', '0000')).rejects.toThrow(
+      await expect(service.verify('+79611234567', '000000')).rejects.toThrow(
         'Код не найден или истёк',
       );
     });
 
     it('session store недоступен — вход не выдаёт токены (fail-closed, 503)', async () => {
-      await codes.save('+79611234567', '0000');
+      await codes.save('+79611234567', '000000');
       prisma.user.update.mockResolvedValue(makeUser({ phoneVerified: true }));
       sessions.createSession = jest.fn().mockRejectedValue(new Error('redis down'));
 
-      await expect(service.verify('+79611234567', '0000')).rejects.toBeInstanceOf(
+      await expect(service.verify('+79611234567', '000000')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
     });

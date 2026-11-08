@@ -712,11 +712,17 @@ export const api = {
 
   /** Открытая смена водителя (для кнопки «Завершить»). */
   workHoursOpenSession(): Promise<WorkHoursSessionDto | null> {
+    // v0.8.0-F (баг web-стенда): Express-адаптер Nest сериализует null-
+    // ответ контроллера в ПУСТОЕ тело (res.send(null) → Content-Length: 0),
+    // axios парсит его как ''. «Нет открытой смены» — это null, а не
+    // ошибка формата. Актуально и для native (тот же axios).
     return apiRequest<WorkHoursSessionDto | null>({
       method: 'GET',
       url: '/work-hours/open-session',
     }).then((d) =>
-      d === null
+      // typeof-стража: пустое тело приходит как '' (string), хотя тип
+      // заявлен DTO | null — runtime-реальность шире типа.
+      d === null || (d as unknown) === '' || d === undefined
         ? null
         : validateResponse(WorkHoursSessionResponseSchema, d, 'work-hours/open-session'),
     );
