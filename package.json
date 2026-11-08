@@ -1,6 +1,6 @@
 {
   "name": "agromoll",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "description": "АгроМолл — оптово-розничный рынок Ростова-на-Дону. Каркас мобильного приложения, дизайн-система и API.",
   "packageManager": "pnpm@9.15.9",
