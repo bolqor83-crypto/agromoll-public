@@ -4,7 +4,13 @@
  * (GETDEL-подобный CAS) и покрыта e2e в CI против реального Redis —
  * здесь проверяем логику состояний и TTL.
  */
-import { InMemorySessionStore, ttlStringToSeconds } from './session-store';
+import {
+  InMemorySessionStore,
+  isClosableStore,
+  sessionStoreProvider,
+  ttlStringToSeconds,
+  type SessionStore,
+} from './session-store';
 import { DEFAULT_REFRESH_TTL_SECONDS } from './auth.constants';
 
 describe('InMemorySessionStore', () => {
@@ -118,5 +124,44 @@ describe('ttlStringToSeconds', () => {
     expect(ttlStringToSeconds(undefined, 42)).toBe(42);
     expect(ttlStringToSeconds('abc', 42)).toBe(42);
     expect(ttlStringToSeconds('', 42)).toBe(42);
+  });
+});
+
+describe('sessionStoreProvider: production без Redis (v0.8.1-B, ADR-040)', () => {
+  const factory = (): SessionStore =>
+    (sessionStoreProvider as { useFactory: () => SessionStore }).useFactory();
+
+  afterEach(() => {
+    delete process.env.NODE_ENV;
+    delete process.env.SESSION_ALLOW_IN_MEMORY;
+    delete process.env.REDIS_URL;
+  });
+
+  it('production без REDIS_URL и без флага — fail-closed (ADR-008)', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.SESSION_ALLOW_IN_MEMORY;
+    expect(factory).toThrow('обязателен REDIS_URL');
+  });
+
+  it('production + SESSION_ALLOW_IN_MEMORY=true — in-memory (демо, ADR-040)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.SESSION_ALLOW_IN_MEMORY = 'true';
+    expect(factory()).toBeInstanceOf(InMemorySessionStore);
+  });
+
+  it('флаг не влияет на заданный REDIS_URL — только Redis', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.SESSION_ALLOW_IN_MEMORY = 'true';
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    // RedisSessionStore создаётся без блокировки (lazyConnect: false —
+    // соединение в фоне); проверяем тип и сразу закрываем, чтобы фоновые
+    // реконнекты не держали процесс jest (close → quit, при недоступном
+    // сервере — disconnect).
+    const store = factory();
+    try {
+      expect(store).not.toBeInstanceOf(InMemorySessionStore);
+    } finally {
+      if (isClosableStore(store)) await store.close();
+    }
   });
 });

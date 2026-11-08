@@ -1,0 +1,57 @@
+# render.yaml — публичный API АгроМолл на Render (v0.8.1-B, ADR-040).
+#
+# Спецификация web-сервиса для Render Blueprint. Живой сервис создан через
+# POST https://api.render.com/v1/services с теми же параметрами.
+# БД — Neon (Postgres 16 + PostGIS, Frankfurt): Render free Postgres
+# удаляется через 30 дней, поэтому БД вынесена на Neon (см. ADR-040).
+# Redis не используется: демо-режим сессий в памяти — явный opt-in
+# SESSION_ALLOW_IN_MEMORY=true (компромисс задокументирован в ADR-040).
+services:
+  - type: web
+    name: agromoll-api
+    runtime: node
+    plan: free
+    region: frankfurt # рядом с Neon aws-eu-central-1 (Frankfurt)
+    branch: main
+    buildCommand: corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@agromoll/api
+    # Вложенность dist/src — из `nest build` (см. apps/api/package.json `start`)
+    startCommand: node apps/api/dist/src/main.js
+    autoDeploy: true
+    healthcheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '22'
+      # Pooled-строка Neon (...-pooler...neon.tech/...?sslmode=require&pgbouncer=true&connection_limit=5).
+      # Секрет: задаётся через Render API/дашборд, в репо не попадает.
+      - key: DATABASE_URL
+        sync: false
+      # Демо-режим входа (v0.8.0-C): любой телефон входит по коду «000000».
+      # Для боевого запуска — удалить.
+      - key: AUTH_DEMO_LOGIN
+        value: 'true'
+      # Демо без Redis (v0.8.1-B, ADR-040): рестарт/спин-даун сбрасывает
+      # refresh-сессии (перелогин демо-кодом). Боевому запуску — Redis.
+      - key: SESSION_ALLOW_IN_MEMORY
+        value: 'true'
+      - key: JWT_ACCESS_SECRET
+        generateValue: true # случайный секрет генерирует Render
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 30d
+      - key: BOOKING_TTL_MINUTES
+        value: '30'
+      - key: DELIVERY_TTL_MINUTES
+        value: '60'
+      - key: WORK_HOURS_MONTHLY_LIMIT
+        value: '60'
+      - key: WORK_MONTHS_SERIES
+        value: '6'
+      - key: BOOKING_AUTO_CONFIRM_HOURS
+        value: '24'
+      - key: CORS_ORIGIN
+        value: https://agromoll-web.vercel.app

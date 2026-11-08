@@ -348,6 +348,12 @@ export function isClosableStore(
  * Фабрика хранилища: Redis при REDIS_URL; иначе in-memory для разработки.
  * В production без REDIS_URL — ошибка старта (fail-closed): отдавать
  * неотзываемые refresh-токены нельзя (ADR-008).
+ *
+ * v0.8.1-B (ADR-040): явный opt-in SESSION_ALLOW_IN_MEMORY=true — демо-прод
+ * на Render free без Redis. Компромисс задокументирован в ADR-040: рестарт/
+ * спин-даун процесса сбрасывает refresh-сессии (пользователь перелогинивается
+ * демо-кодом); access-токены (15 мин) не затронуты. Боевой запуск — Redis
+ * обязателен (флаг игнорируется при заданном REDIS_URL).
  */
 export const sessionStoreProvider = {
   provide: SESSION_STORE,
@@ -357,16 +363,26 @@ export const sessionStoreProvider = {
     if (url) {
       return new RedisSessionStore(url, ttl);
     }
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && process.env.SESSION_ALLOW_IN_MEMORY !== 'true') {
       throw new Error(
-        'В production обязателен REDIS_URL: сессии без Redis не отзываются (ADR-008)',
+        'В production обязателен REDIS_URL: сессии без Redis не отзываются (ADR-008). ' +
+          'Для демо без Redis задайте SESSION_ALLOW_IN_MEMORY=true (ADR-040, v0.8.1-B).',
       );
     }
-    Logger.warn(
-      'REDIS_URL не задан — сессии refresh-токенов хранятся в памяти процесса. ' +
-        'Только для разработки и e2e; для продакшена обязателен Redis (см. ADR-008).',
-      'AuthModule',
-    );
+    if (process.env.NODE_ENV === 'production') {
+      Logger.warn(
+        'SESSION_ALLOW_IN_MEMORY=true — сессии refresh-токенов в памяти процесса. ' +
+          'Демо-режим (ADR-040, v0.8.1-B): рестарт/спин-даун сбрасывает сессии, ' +
+          'пользователи перелогинятся кодом. Для боевого запуска — Redis (ADR-008).',
+        'AuthModule',
+      );
+    } else {
+      Logger.warn(
+        'REDIS_URL не задан — сессии refresh-токенов хранятся в памяти процесса. ' +
+          'Только для разработки и e2e; для продакшена обязателен Redis (см. ADR-008).',
+        'AuthModule',
+      );
+    }
     return new InMemorySessionStore(ttl);
   },
 };
