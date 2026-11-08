@@ -13,7 +13,7 @@ services:
     plan: free
     region: frankfurt # рядом с Neon aws-eu-central-1 (Frankfurt)
     branch: main
-    buildCommand: corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@agromoll/api
+    buildCommand: npx pnpm@9.15.9 install --frozen-lockfile && npx pnpm@9.15.9 turbo run build --filter=@agromoll/api
     # Вложенность dist/src — из `nest build` (см. apps/api/package.json `start`)
     startCommand: node apps/api/dist/src/main.js
     autoDeploy: true
