@@ -1,17 +1,52 @@
 # АгроМолл
 
-[![Version](https://img.shields.io/badge/version-0.7.0-2D6A4F)](package.json)
+[![Version](https://img.shields.io/badge/version-0.8.0-2D6A4F)](package.json)
 [![Deploy](https://img.shields.io/badge/deploy-agromoll--web.vercel.app-2D6A4F)](https://agromoll-web.vercel.app)
 [![CI](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml)
 
 Мобильное приложение для оптово-розничного рынка «Агро Молл» (Ростов-на-Дону).
-**Текущий этап — v0.7.0 «Polish & Scale»**: S3-хранилище файлов,
-переписка в апелляциях, реальные фото товаров, платные тайлы карты по
-ключу. Прошлые этапы — бронирование (v0.2.0), аутентификация (v0.3.x),
-долги и приёмка (v0.4.0), рейтинг, геозоны и доставка (v0.5.0), push и
-арбитраж (v0.6.0), мобильный UX (v0.6.1), дизайн-система (v0.6.2) —
-полностью сохранены.
-Web-версия деплоится на Vercel: **https://agromoll-web.vercel.app**
+**Текущий этап — v0.8.0 «Public Launch»**: приложение доступно по
+публичной ссылке — демо-данные, демо-вход, публичный API (Railway),
+нативные сборки через EAS и OTA-обновления. Прошлые этапы —
+бронирование (v0.2.0), аутентификация (v0.3.x), долги и приёмка
+(v0.4.0), рейтинг, геозоны и доставка (v0.5.0), push и арбитраж
+(v0.6.0), мобильный UX (v0.6.1), дизайн-система (v0.6.2), полировка и
+масштаб (v0.7.0) — полностью сохранены.
+Web-версия: **https://agromoll-web.vercel.app** (публичные ссылки и
+статусы — [docs/PUBLIC-LINKS.md](docs/PUBLIC-LINKS.md), демо-аккаунты —
+[docs/DEMO.md](docs/DEMO.md))
+
+## Что нового в v0.8.0
+
+Семь подэтапов — A/B/C/D/E/F/G: проверка среды, публичный API на
+Railway, демо-данные, EAS Build, OTA, локальный E2E-стенд, публичные
+ссылки. Философия этапа — **не код на машине, а работающий продукт по
+ссылке**: любой человек открывает сайт, входит по демо-коду «000000» и
+проходит живой рынок целиком.
+
+- **A — env-check**: токены и среда (доклад
+  `docs/release/v0.8.0-A-env-check.md`), версия 0.8.0 во всех пакетах
+- **B — публичный API на Railway** (ADR-040): `railway.json` — Nixpacks,
+  миграции в `startCommand`, healthcheck `/health`; runbook с точными
+  командами; деплой — сразу после передачи `RAILWAY_TOKEN`
+  (стоп-правило №1)
+- **C — демо-данные на живом рынке**: `seed.dataset.ts` — 15 продавцов,
+  5 покупателей, 2 водителя, арбитр; 40 лотов с фото, брони, долги,
+  споры, блокировка 289-ФЗ с апелляцией, доставки; демо-вход
+  `AUTH_DEMO_LOGIN` с кодом «000000»; сценарии показа — `docs/DEMO.md`
+- **D — EAS Build** (ADR-041): профили `preview` (.apk, internal) и
+  `production` (.aab); сборка — после передачи `EXPO_TOKEN`; iOS —
+  после Apple Developer ($99/год, осознанно отложено)
+- **E — OTA через expo-updates** (ADR-042): `runtimeVersion` policy
+  `appVersion`, workflow `eas-update.yml` публикует JS-бандл при каждом
+  пуше в `main`; откат — `eas update:rollback`
+- **F — локальный E2E-стенд**: Postgres 17 + PostGIS + Redis из `.deb`
+  без root/docker; Playwright headless — 11 флоу (все роли, споры,
+  289-ФЗ, тёмная тема), 36 скриншотов + видео. **5 найденных и
+  исправленных багов**, включая падавший бы на Railway `start`-скрипт
+  и невозможный вход через UI (4-значный код против 6-значной маски)
+- **G — публичные ссылки**: `docs/PUBLIC-LINKS.md` — статусы всех
+  компонентов и чек-лист дня запуска
 
 ## Что нового в v0.7.0
 
@@ -937,9 +972,13 @@ Promote to Production**. Откат моментальный — CDN перек�
 curl -sI https://agromoll-web.vercel.app | head -1   # → HTTP/2 200
 ```
 
-## Что дальше (v0.8.0 — черновик)
+## Что дальше (v0.9.0 — черновик)
 
-- EAS Build + expo-updates (OTA-обновления нативных сборок)
-- Публичный API-сервер (план — docs/DEPLOY.md; S3 и тайлы уже готовы
-  к прод-конфигурации: ADR-036/038/039)
+- SMS-провайдер: боевые коды вместо демо-режима, отключение
+  `AUTH_DEMO_LOGIN` (механизм ADR-007/040 уже готов)
+- Apple Developer ($99/год) → iOS-сборка и TestFlight (профиль в
+  `eas.json` готов, ADR-041)
+- Публикация .aab в Google Play, internal track (submit-профиль готов)
 - Файлы в переписке апелляций (механизм ADR-036/038 уже переиспользуется)
+- Прод-S3 для фото и доказательств (AWS/R2/Yandex — код одинаков,
+  ADR-036; на демо работает data:-URL fallback)
