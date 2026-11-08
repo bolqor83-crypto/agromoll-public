@@ -233,6 +233,28 @@ autoDeploy), дождаться live и проверить `/health`.
 или ручное удаление в UI. Условие удаления зеркала — live-деплой из
 основного репо + зелёный `/health`.
 
+### 6. Эксплуатационные заметки (08–09.11.2026)
+
+- **Инцидент Railway QBCLHG1V всё ещё активен** (проверка 08.11
+  ~20:15 UTC: `platformStatus.isStable=false`, статус IDENTIFIED,
+  «External network blocks affecting access to Railway») — запасной
+  вариант недоступен, прод живёт на Render+Neon.
+- **Крон-задача 514504** (ежедневная проверка Railway и автодеплой при
+  снятии инцидента, эпоха v0.8.0-B) **деактивирована как устаревшая**:
+  она деплоила бы текущую `main` (сейчас v0.7.0 — без v0.8.x) и
+  переключала бы `EXPO_PUBLIC_API_URL` с Render на Railway, что
+  противоречит настоящему ADR. Статус Railway проверяется вручную
+  (`railway api '{ platformStatus { isStable } }'` из runbook §9)
+  при рассмотрении отката.
+- **Перезагрузка среды агента 08.11 20:13 UTC** затёрла локальные
+  артефакты (шаблон среды откатился к состоянию ~v0.8.0-B): потеряны
+  скрипты `scripts/render_*.py` (восстановлены) и секреты в
+  `agromoll/.env` — `RENDER_API_KEY`, `NEON_API_KEY`,
+  `NEON_PROJECT_ID`, `DATABASE_URL_DIRECT`/`_POOLED` (перевыпускаются
+  в дашбордах Render/Neon). Облачные ресурсы не затронуты: сервис
+  `srv-dbobfevf3r2c73amlng0` жив (mirror, live), проект Neon
+  `silent-hill-19081344` и схема/сид на месте.
+
 ## Последствия
 
 - API получает постоянный публичный HTTPS-домен на Render с авто-TLS.
