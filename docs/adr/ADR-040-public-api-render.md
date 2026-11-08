@@ -206,6 +206,33 @@ GitHub-webhook на зеркало Render создать не может (зер
 Manual Deploy). После подключения GitHub App и переключения сервиса на
 основной репозиторий webhook появится и автодеплой заработает.
 
+### 5. GitHub App на стороне GitHub ≠ доступ для workspace Render (09.11.2026)
+
+После добавления `agromoll` в Repository Access установленного на
+GitHub-аккаунте `bolqor83-crypto` GitHub App «Render» (GitHub → Settings →
+Installations → Render → Configure) PATCH `/v1/services/{id}` и POST
+`/v1/services` с `repo: github.com/bolqor83-crypto/agromoll` продолжали
+отдавать 400 «repository URL is invalid or unfetchable» — 30+ попыток
+за 25 минут (включая диагностическое создание пробного сервиса;
+GitHub-сторона проверена и в порядке: репо приватное, PAT с admin).
+Прод не пострадал: сервис остался на зеркале (live, `/health` 200).
+
+Вывод: доступ Render к приватному репо определяется не фактом установки
+App на GitHub, а связкой «установка App ↔ аккаунт Render» (dashboard →
+Account Settings → Connections). Если установка linked на другой
+Render-аккаунт (или коннект привязан к другому GitHub-профилю), workspace
+`bolqor's workspace` (tea-dbo9mo6c6qcc73d1mne0) репо не видит. Нужно
+завершить коннект GitHub из дашборда Render под аккаунтом-владельцем
+сервиса (bolqor83@gmail.com) и выбрать `agromoll` при установке App.
+После этого — повторить `render_switch_final.py` (PATCH repo/branch +
+autoDeploy), дождаться live и проверить `/health`.
+
+Дополнительно: у PAT `GITHUB_TOKEN_BOLQOR` нет scope `delete_repo`
+(выданы admin:org, repo, workflow) — удаление зеркала
+`agromoll-public` через API невозможно, требуется перевыпуск токена
+или ручное удаление в UI. Условие удаления зеркала — live-деплой из
+основного репо + зелёный `/health`.
+
 ## Последствия
 
 - API получает постоянный публичный HTTPS-домен на Render с авто-TLS.
