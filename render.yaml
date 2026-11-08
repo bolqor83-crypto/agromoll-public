@@ -13,9 +13,11 @@ services:
     runtime: node
     plan: free
     region: frankfurt # рядом с Neon aws-eu-central-1 (Frankfurt)
-    # Публичное зеркало основного репо: Render без установленного
-    # GitHub App не клонит приватные репозитории (v0.8.1-B, ADR-040).
-    # После подключения GitHub App к Render — вернуть основной репозиторий.
+    # Публичное зеркало — ПОСТОЯННЫЙ источник деплоя (решение 09.11.2026,
+    # v0.8.1-D закрыт: переключение на приватный репо отменено, ADR-040 п. 7).
+    # Деплой — ручной триггер: webhook на зеркало невозможен, autoDeploy
+    # сам не срабатывает (ADR-040 п. 4); зеркало синхронизируется пушем
+    # из основного репо.
     repo: https://github.com/bolqor83-crypto/agromoll-public
     branch: feature/v0.8.1-render-api
     # ВАЖНО (dep-dbobet2j…kcgu, v0.8.1-B): Render задаёт NODE_ENV=production
