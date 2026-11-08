@@ -1,6 +1,6 @@
 # ADR-040: Публичный API — Render + Neon (вместо Railway)
 
-- Статус: **Принято** (v0.8.0 — Railway; **заменено в v0.8.1** на Render + Neon)
+- Статус: **Принято, реализовано** (деплой 2026-11-09, `https://agromoll-api.onrender.com`, deploy `dep-dboblltg` — live)
 - Дата: 2026-11-07 (Railway) / 2026-11-09 (перенос на Render)
 - Этап: v0.8.0 «Public Launch» подэтап B → v0.8.1 «Public API on Render»
 - Связанные: ADR-001 (стек), ADR-008 (сессии/Redis), ADR-014 (PostGIS),
@@ -139,6 +139,58 @@ data:-URL fallback, демо-лоты — внешние URL картинок (v
   меняется (только `plan: starter`).
 - Neon free: ~0.5 ГБ хранилища, compute-часы восполняются ежемесячно;
   при исчерпании — Scale plan.
+
+## Найденное при деплое (v0.8.1-B, деплой 09.11.2026)
+
+### 1. Приватный репозиторий — только через GitHub App
+
+`POST /v1/services` с `repo: <приватный репозиторий>` → 400 «passed in
+repository URL is invalid or unfetchable» (токен в URL не поддерживается,
+формат жёстко `github.com/{ns}/{repo}`). Без установленного на аккаунт
+GitHub App Render клонирует только публичные репозитории. Решение —
+**публичное зеркало** `bolqor83-crypto/agromoll-public` (main + ветки):
+перед пушем проведён аудит секретов всей git-истории (скрипт сканирует
+рев-лист объектов по паттернам napi_/rnd_/rlwy_/ghp_/AKIA/…/строки
+подключения; найдены только плейсхолдеры `agromoll:agromoll@localhost`
+из CI/testcontainers). Зеркало синхронизируется пушем из основного репо;
+после подключения GitHub App сервис переключается на основной репозиторий
+(PATCH `repo`/`branch`).
+
+### 2. NODE_ENV=production на этапе билда ломает pnpm-install
+
+Render задаёт `NODE_ENV=production` **во время билда** → pnpm 9 молча
+пропускает devDependencies («devDependencies: skipped because NODE_ENV is
+set to production», exit 0, ~2 сек): нет turbo/nest/prisma-CLI →
+`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL «Command turbo/nest not found»`.
+Диагноз занял 6 итераций деплоя (логи через `GET /v1/logs?type=build`).
+Дополнительно `NPM_CONFIG_CACHE`/`NPM_CONFIG_STORE_DIR=/opt/render/.cache`
+ломают кэш npx (pnpm читает NPM_CONFIG_*).
+
+Рабочая конфигурация (воспроизведена локально перед патчем):
+
+```yaml
+buildCommand: rm -rf node_modules && env -u NPM_CONFIG_CACHE -u NPM_CONFIG_STORE_DIR \
+  -u NPM_CONFIG_LOGLEVEL npx pnpm@9.15.9 install --frozen-lockfile --prod=false \
+  && npx pnpm@9.15.9 -w exec turbo run build --filter=@agromoll/api
+startCommand: node node_modules/prisma/build/index.js migrate deploy \
+  --schema apps/api/prisma/schema.prisma && node apps/api/dist/src/main.js
+```
+
+Почему так: `--prod=false` ставит devDependencies (turbo/nest/prisma);
+`pnpm -w exec turbo` — бинарь turbo лежит в корневом `node_modules/.bin`
+(node-linker=hoisted из .npmrc — плоская установка ради Expo/Metro), а
+рекурсивный `pnpm turbo` его не находит; prisma-CLI на старте вызывается
+прямым путём — рантайм снова в NODE_ENV=production, и pnpm-обёртка могла
+бы срезать devDependencies. `rm -rf node_modules` — страховка от
+частично-связанных деревьев с прошлых билдов.
+
+### 3. Миграции перенесены на старт контейнера
+
+Изначально — «миграции из окружения агента» (см. ниже); при живом
+автодеплое удобнее `migrate deploy` в startCommand: он идемпотентен,
+деплой нового кода со свежей миграцией применяет её сам, free-контейнер
+не билдится отдельно под БД. Первичное применение схемы + сид —
+по-прежнему вручную (direct-строка без pooler), см. ниже.
 
 ## Последствия
 

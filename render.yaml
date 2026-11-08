@@ -1,7 +1,8 @@
 # render.yaml — публичный API АгроМолл на Render (v0.8.1-B, ADR-040).
 #
 # Спецификация web-сервиса для Render Blueprint. Живой сервис создан через
-# POST https://api.render.com/v1/services с теми же параметрами.
+# POST https://api.render.com/v1/services с теми же параметрами
+# (srv-dbobfevf3r2c73amlng0, https://agromoll-api.onrender.com).
 # БД — Neon (Postgres 16 + PostGIS, Frankfurt): Render free Postgres
 # удаляется через 30 дней, поэтому БД вынесена на Neon (см. ADR-040).
 # Redis не используется: демо-режим сессий в памяти — явный opt-in
@@ -12,17 +13,30 @@ services:
     runtime: node
     plan: free
     region: frankfurt # рядом с Neon aws-eu-central-1 (Frankfurt)
-    branch: main
-    buildCommand: npx pnpm@9.15.9 install --frozen-lockfile && npx pnpm@9.15.9 turbo run build --filter=@agromoll/api
-    # Вложенность dist/src — из `nest build` (см. apps/api/package.json `start`)
-    startCommand: node apps/api/dist/src/main.js
+    # Публичное зеркало основного репо: Render без установленного
+    # GitHub App не клонит приватные репозитории (v0.8.1-B, ADR-040).
+    # После подключения GitHub App к Render — вернуть основной репозиторий.
+    repo: https://github.com/bolqor83-crypto/agromoll-public
+    branch: feature/v0.8.1-render-api
+    # ВАЖНО (dep-dbobet2j…kcgu, v0.8.1-B): Render задаёт NODE_ENV=production
+    # на этапе билда — pnpm 9 в этом режиме молча пропускает devDependencies
+    # («devDependencies: skipped because NODE_ENV is set to production»):
+    # нет turbo/nest/prisma-CLI → ERR_PNPM_RECURSIVE_EXEC «Command not found».
+    # Лечение: --prod=false + env -u для NPM_CONFIG_* (их кэш-пути ломают
+    # npx). rm -rf node_modules — страховка от кэша прошлых билдов.
+    buildCommand: rm -rf node_modules && env -u NPM_CONFIG_CACHE -u NPM_CONFIG_STORE_DIR -u NPM_CONFIG_LOGLEVEL npx pnpm@9.15.9 install --frozen-lockfile --prod=false && npx pnpm@9.15.9 -w exec turbo run build --filter=@agromoll/api
+    # Миграции на старте (не в билде): БД Neon уже засеяна (v0.8.1-B),
+    # migrate deploy идемпотентен — новые миграции подхватываются при
+    # деплоях. prisma-CLI вызывается напрямую (pnpm-обёртка зависит от
+    # NODE_ENV рантайма). Вложенность dist/src — из `nest build`.
+    startCommand: node node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/src/main.js
     autoDeploy: true
     healthcheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
-        value: '22'
+        value: '22.14.0'
       # Pooled-строка Neon (...-pooler...neon.tech/...?sslmode=require&pgbouncer=true&connection_limit=5).
       # Секрет: задаётся через Render API/дашборд, в репо не попадает.
       - key: DATABASE_URL

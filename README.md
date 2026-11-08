@@ -1,20 +1,45 @@
 # АгроМолл
 
-[![Version](https://img.shields.io/badge/version-0.8.0-2D6A4F)](package.json)
+[![Version](https://img.shields.io/badge/version-0.8.1-2D6A4F)](package.json)
 [![Deploy](https://img.shields.io/badge/deploy-agromoll--web.vercel.app-2D6A4F)](https://agromoll-web.vercel.app)
+[![API](https://img.shields.io/badge/API-agromoll--api.onrender.com-2D6A4F)](https://agromoll-api.onrender.com/health)
 [![CI](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bolqor83-crypto/agromoll/actions/workflows/ci.yml)
 
 Мобильное приложение для оптово-розничного рынка «Агро Молл» (Ростов-на-Дону).
-**Текущий этап — v0.8.0 «Public Launch»**: приложение доступно по
-публичной ссылке — демо-данные, демо-вход, публичный API (Railway),
-нативные сборки через EAS и OTA-обновления. Прошлые этапы —
-бронирование (v0.2.0), аутентификация (v0.3.x), долги и приёмка
-(v0.4.0), рейтинг, геозоны и доставка (v0.5.0), push и арбитраж
-(v0.6.0), мобильный UX (v0.6.1), дизайн-система (v0.6.2), полировка и
-масштаб (v0.7.0) — полностью сохранены.
-Web-версия: **https://agromoll-web.vercel.app** (публичные ссылки и
-статусы — [docs/PUBLIC-LINKS.md](docs/PUBLIC-LINKS.md), демо-аккаунты —
+**Текущий этап — v0.8.1 «Public API on Render»**: живой прод — web на
+Vercel + API на Render + Postgres/PostGIS на Neon, вход по демо-коду
+«000000», 45 лотов живого рынка в ленте. Прошлые этапы — бронирование
+(v0.2.0), аутентификация (v0.3.x), долги и приёмка (v0.4.0), рейтинг,
+геозоны и доставка (v0.5.0), push и арбитраж (v0.6.0), мобильный UX
+(v0.6.1), дизайн-система (v0.6.2), полировка и масштаб (v0.7.0),
+Public Launch (v0.8.0) — полностью сохранены.
+Web-версия: **https://agromoll-web.vercel.app**, API:
+**https://agromoll-api.onrender.com** (публичные ссылки и статусы —
+[docs/PUBLIC-LINKS.md](docs/PUBLIC-LINKS.md), демо-аккаунты —
 [docs/DEMO.md](docs/DEMO.md))
+
+## Что нового в v0.8.1
+
+Один фокус — **живой публичный API вместо заблокированного Railway**
+(платформенный инцидент QBCLHG1V, деплои на паузе без ETA с 05.11.2026).
+Подэтапы A/B/C/D:
+
+- **A — Neon**: проект `agromoll-api` через API (Frankfurt, PG16,
+  **PostGIS 3.3** на free tier), миграции 17/17, демо-сид — 45 лотов,
+  27 пользователей; строки direct/pooled (миграции — по direct, рантайм —
+  через pooler)
+- **B — Render** ([ADR-040](docs/adr/ADR-040-public-api-render.md)):
+  web-сервис `agromoll-api` (free, Frankfurt), автодеплой из ветки.
+  Найденное при деплое: (1) приватный репозиторий без GitHub App —
+  «unfetchable», решение — публичное зеркало после аудита секретов всей
+  git-истории; (2) `NODE_ENV=production` на билде заставляет pnpm молча
+  пропускать devDependencies — лечится `--prod=false` в buildCommand;
+  (3) миграции идемпотентным `migrate deploy` на старте контейнера
+- **C — связка с Vercel**: `EXPO_PUBLIC_API_URL` → прод-редеплой, адрес
+  вшит в бандл (ADR-022); вход «000000» и лента проверены на проде в
+  headless-браузере (скриншоты `docs/screenshots/v0.8.1-prod/`)
+- **D — документация**: PUBLIC-LINKS 🟢 по всем компонентам, release notes
+  `docs/release/v0.8.1-release.md`
 
 ## Что нового в v0.8.0
 
