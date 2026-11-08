@@ -9,10 +9,10 @@
 | Компонент | URL | Статус | Что нужно |
 |---|---|---|---|
 | Web-приложение | https://agromoll-web.vercel.app | 🟢 работает, автодеплой из `main` (ADR-032) | — |
-| API | `https://agromoll-api-production-XXXX.up.railway.app` (пример) | 🔴 не опубликован | `RAILWAY_TOKEN` → [runbook B](release/v0.8.0-B-railway-runbook.md) |
+| API | — | 🟡 `RAILWAY_TOKEN` получен, деплой на паузе платформой Railway | инцидент [QBCLHG1V](https://status.railway.com/incident/QBCLHG1V): `isStable=false`, `projectCreate` → «Deploys have been paused temporarily»; продолжение — [runbook B, секция 9](release/v0.8.0-B-railway-runbook.md) |
 | Android .apk | ссылка установки EAS (internal distribution) | 🔴 не собран | `EXPO_TOKEN` → [runbook D](release/v0.8.0-D-eas-runbook.md) |
 | OTA-канал | EAS Update, ветка `production` | 🔴 не инициализирован | `EXPO_TOKEN` → `eas init` (runbook D, шаг 1) |
-| Демо-вход | SMS-код «000000» | 🟡 готов в коде (`AUTH_DEMO_LOGIN`, ADR-040) | Активируется на проде вместе с API |
+| Демо-вход | SMS-код «000000» | 🟡 готов в коде, проверен на локальном E2E-стенде (36 скриншотов, `docs/screenshots/v0.8.0-local/`) | Активируется на проде вместе с API |
 
 ## Web — работает уже сейчас
 
@@ -25,7 +25,11 @@
 - После публикации API: вход по любому демо-телефону из
   [DEMO.md](DEMO.md), код «000000» (шесть нулей).
 
-## API — после передачи RAILWAY_TOKEN
+## API — токен получен, ждём снятия паузы платформой
+
+`RAILWAY_TOKEN` (workspace) передан владельцем 08.11.2026 и проверен:
+валиден, но платформа держит деплои на паузе из-за инцидента QBCLHG1V
+(подробнее — [runbook B, секция 9](release/v0.8.0-B-railway-runbook.md)).
 
 Точная последовательность команд: [v0.8.0-B-railway-runbook.md](release/v0.8.0-B-railway-runbook.md)
 (~15 минут: `railway login/init/add → variables → up → domain`).
