@@ -25,11 +25,13 @@ services:
     # Лечение: --prod=false + env -u для NPM_CONFIG_* (их кэш-пути ломают
     # npx). rm -rf node_modules — страховка от кэша прошлых билдов.
     buildCommand: rm -rf node_modules && env -u NPM_CONFIG_CACHE -u NPM_CONFIG_STORE_DIR -u NPM_CONFIG_LOGLEVEL npx pnpm@9.15.9 install --frozen-lockfile --prod=false && npx pnpm@9.15.9 -w exec turbo run build --filter=@agromoll/api
-    # Миграции на старте (не в билде): БД Neon уже засеяна (v0.8.1-B),
-    # migrate deploy идемпотентен — новые миграции подхватываются при
-    # деплоях. prisma-CLI вызывается напрямую (pnpm-обёртка зависит от
-    # NODE_ENV рантайма). Вложенность dist/src — из `nest build`.
-    startCommand: node node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/src/main.js
+    # Миграции — НЕ в контейнере (dep-dbobs8aj: advisory lock через
+    # pooled-строку → P1002; dep-dbobthaj: секреты не видны в buildCommand
+    # → P1012). Схема/сид применяются из окружения агента по direct-строке
+    # (без pooler): `DATABASE_URL_DIRECT=… pnpm --filter=@agromoll/api
+    # exec prisma migrate deploy` — см. ADR-040 и v0.8.1-release.md.
+    # Вложенность dist/src — из `nest build` (см. apps/api/package.json `start`).
+    startCommand: node apps/api/dist/src/main.js
     autoDeploy: true
     healthcheckPath: /health
     envVars:
