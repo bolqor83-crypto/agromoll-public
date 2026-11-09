@@ -252,8 +252,15 @@ autoDeploy), дождаться live и проверить `/health`.~~ Шаг �
   артефакты (шаблон среды откатился к состоянию ~v0.8.0-B): потеряны
   скрипты `scripts/render_*.py` (восстановлены) и секреты в
   `agromoll/.env` — `RENDER_API_KEY`, `NEON_API_KEY`,
-  `NEON_PROJECT_ID`, `DATABASE_URL_DIRECT`/`_POOLED` (перевыпускаются
-  в дашбордах Render/Neon). Облачные ресурсы не затронуты: сервис
+  `NEON_PROJECT_ID`, `DATABASE_URL_DIRECT`/`_POOLED`. **Восстановлено
+  09.11.2026**: ключи Render/Neon переданы владельцем в чат (ключ
+  Render — из целевого workspace `tea-dbo9mo6c6qcc73d1mne0`, сервис
+  виден; Neon-ключ personal — запросы требуют `org_id` из этого ADR),
+  `NEON_PROJECT_ID`/`NEON_ORG_ID` — из этого ADR, `DATABASE_URL_POOLED`
+  — чтением env сервиса через Render API
+  (`GET /v1/services/{id}/env-vars`), `DATABASE_URL_DIRECT` —
+  деривация: pooler-хост и параметры `pgbouncer`/`connection_limit`
+  убраны. Облачные ресурсы не затронуты: сервис
   `srv-dbobfevf3r2c73amlng0` жив (mirror, live), проект Neon
   `silent-hill-19081344` и схема/сид на месте.
 
